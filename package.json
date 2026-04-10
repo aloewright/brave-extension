@@ -1,0 +1,61 @@
+{
+  "name": "ai-dev-sidebar",
+  "displayName": "AI Dev Sidebar",
+  "version": "0.1.0",
+  "description": "Sidebar AI chat connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
+  "author": "aloe",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "install-host": "node scripts/install-native-host.mjs"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.5",
+    "@plasmohq/storage": "^1.15.0",
+    "@tanstack/react-virtual": "^3.13.23",
+    "plasmo": "0.90.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@plasmohq/prettier-plugin-sort-imports": "4.0.1",
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prettier": "3.2.5",
+    "tailwindcss": "^3.4.17",
+    "typescript": "5.7.3"
+  },
+  "manifest": {
+    "permissions": [
+      "storage",
+      "unlimitedStorage",
+      "tabs",
+      "activeTab",
+      "sidePanel",
+      "nativeMessaging",
+      "debugger",
+      "scripting",
+      "contextMenus",
+      "tabCapture",
+      "offscreen"
+    ],
+    "host_permissions": [
+      "<all_urls>"
+    ],
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    },
+    "commands": {
+      "toggle-sidebar": {
+        "suggested_key": {
+          "default": "Alt+Shift+A"
+        },
+        "description": "Toggle AI Dev Sidebar"
+      }
+    }
+  }
+}

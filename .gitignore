@@ -1,0 +1,5 @@
+node_modules
+build
+.plasmo
+tsconfig.tsbuildinfo
+.DS_Store

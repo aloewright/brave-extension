@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme: tweakcn "extension ui"
+ * https://tweakcn.com/themes/cmnqpszke000204l849uk8oan
+ *
+ * Tokens are in space-separated RGB so Tailwind's `/<alpha>` opacity modifiers work.
+ * Default is dark; add class="light" on <html> to switch.
+ */
+:root {
+  /* Dark mode (default) */
+  --background: 59 59 63;
+  --foreground: 241 241 241;
+  --card: 74 74 78;
+  --card-foreground: 241 241 241;
+  --popover: 59 59 63;
+  --popover-foreground: 241 241 241;
+  --primary: 225 227 230;
+  --primary-foreground: 59 59 63;
+  --secondary: 80 80 85;
+  --secondary-foreground: 241 241 241;
+  --muted: 74 74 78;
+  --muted-foreground: 176 176 181;
+  --accent: 90 90 96;
+  --accent-foreground: 241 241 241;
+  --destructive: 158 94 94;
+  --destructive-foreground: 252 234 234;
+  --border: 80 80 85;
+  --input: 80 80 85;
+  --ring: 176 176 181;
+  --sidebar: 49 49 53;
+  --sidebar-foreground: 241 241 241;
+
+  /* Status colors — kept as raw because they aren't part of the theme */
+  --success: 74 222 128;
+  --warning: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
+
+  --radius: 0.5rem;
+  --shadow-color: 0 0 0;
+  --shadow-opacity: 0.3;
+}
+
+.light {
+  --background: 247 247 248;
+  --foreground: 59 59 63;
+  --card: 255 255 255;
+  --card-foreground: 59 59 63;
+  --popover: 255 255 255;
+  --popover-foreground: 59 59 63;
+  --primary: 59 59 63;
+  --primary-foreground: 247 247 248;
+  --secondary: 225 227 230;
+  --secondary-foreground: 59 59 63;
+  --muted: 241 242 244;
+  --muted-foreground: 110 110 115;
+  --accent: 236 238 240;
+  --accent-foreground: 59 59 63;
+  --destructive: 244 167 167;
+  --destructive-foreground: 74 21 21;
+  --border: 226 226 229;
+  --input: 226 226 229;
+  --ring: 59 59 63;
+  --sidebar: 241 242 244;
+  --sidebar-foreground: 59 59 63;
+
+  --shadow-opacity: 0.05;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: rgb(var(--background));
+  color: rgb(var(--foreground));
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(var(--sidebar));
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent));
+}
+
+/* Terminal output styling */
+.terminal-output pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.terminal-output .ansi-red { color: #f87171; }
+.terminal-output .ansi-green { color: #4ade80; }
+.terminal-output .ansi-yellow { color: #fbbf24; }
+.terminal-output .ansi-blue { color: #60a5fa; }
+.terminal-output .ansi-magenta { color: #c084fc; }
+.terminal-output .ansi-cyan { color: #22d3ee; }
+.terminal-output .ansi-bold { font-weight: 700; }
+.terminal-output .ansi-dim { opacity: 0.6; }

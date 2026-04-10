@@ -1,0 +1,523 @@
+import { addHighlight } from "./review"
+
+const HOST_NAME = "com.aidev.sidebar"
+let nativePort: chrome.runtime.Port | null = null
+const pendingCallbacks = new Map<string, (msg: any) => void>()
+
+function connectNativeHost() {
+  if (nativePort) return nativePort
+  try {
+    nativePort = chrome.runtime.connectNative(HOST_NAME)
+
+    nativePort.onMessage.addListener((msg: any) => {
+      // Forward to all connected sidebar ports
+      for (const [, port] of sidebarPorts) {
+        port.postMessage({ type: "native-response", payload: msg })
+      }
+    })
+
+    nativePort.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError?.message || "disconnected"
+      console.warn("Native host disconnected:", err)
+      nativePort = null
+      // Notify sidebars
+      for (const [, port] of sidebarPorts) {
+        port.postMessage({ type: "native-disconnected", error: err })
+      }
+    })
+
+    return nativePort
+  } catch (err) {
+    console.error("Failed to connect native host:", err)
+    return null
+  }
+}
+
+function sendToNative(msg: any) {
+  const port = connectNativeHost()
+  if (port) {
+    port.postMessage(msg)
+  } else {
+    // Notify sidebars about connection failure
+    for (const [, p] of sidebarPorts) {
+      p.postMessage({
+        type: "native-response",
+        payload: {
+          type: "error",
+          data: "Native host not connected. Run: npm run install-host"
+        }
+      })
+    }
+  }
+}
+
+// ─── Tab recording state ──────────────────────────────────────────────
+// We keep the MediaRecorder in an offscreen document because service
+// workers can't run MediaRecorder. Background orchestrates lifecycle and
+// exposes the red-dot badge indicator while recording is active.
+
+const OFFSCREEN_URL = "tabs/offscreen.html"
+const RECORDING_SETTINGS_KEY = "ai-dev-settings"
+
+interface RecordingState {
+  active: boolean
+  tabId: number | null
+  startedAt: number | null
+  lastUpload: { key?: string; url?: string; size: number; at: number } | null
+  lastError: string | null
+}
+
+const recording: RecordingState = {
+  active: false,
+  tabId: null,
+  startedAt: null,
+  lastUpload: null,
+  lastError: null
+}
+
+// Queue a pending start message until the offscreen document signals ready
+let pendingStart: {
+  streamId: string
+  uploadUrl: string
+  serviceToken?: string
+} | null = null
+
+async function hasOffscreen(): Promise<boolean> {
+  // @ts-ignore — available on MV3 Chrome
+  const existing = await chrome.runtime.getContexts?.({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)]
+  })
+  return Array.isArray(existing) && existing.length > 0
+}
+
+async function ensureOffscreen() {
+  if (await hasOffscreen()) return
+  // @ts-ignore — chrome.offscreen is available with "offscreen" permission
+  await chrome.offscreen.createDocument({
+    url: OFFSCREEN_URL,
+    reasons: ["USER_MEDIA"],
+    justification: "Record the active tab to save as a video in media storage"
+  })
+}
+
+async function closeOffscreen() {
+  if (!(await hasOffscreen())) return
+  try {
+    // @ts-ignore
+    await chrome.offscreen.closeDocument()
+  } catch {
+    // ignore
+  }
+}
+
+function setRecordingBadge(on: boolean) {
+  if (on) {
+    chrome.action.setBadgeText({ text: "●" })
+    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
+    chrome.action.setTitle({ title: "Recording tab — click to stop" })
+  } else {
+    chrome.action.setBadgeText({ text: "" })
+    chrome.action.setTitle({ title: "AI Dev Sidebar" })
+  }
+}
+
+async function getRecordingUploadConfig(): Promise<{ uploadUrl: string; serviceToken?: string }> {
+  const result = await chrome.storage.local.get(RECORDING_SETTINGS_KEY)
+  const settings = result[RECORDING_SETTINGS_KEY] as
+    | { cloudosNotesUrl?: string; cloudosServiceToken?: string }
+    | undefined
+  // Derive the media upload URL from the existing notes URL the user already
+  // configured: https://notes.pdx.software/api/notes → .../api/media/upload
+  const notesUrl = settings?.cloudosNotesUrl || "https://notes.pdx.software/api/notes"
+  const uploadUrl = notesUrl.replace(/\/api\/notes\/?$/, "/api/media/upload")
+  return { uploadUrl, serviceToken: settings?.cloudosServiceToken || undefined }
+}
+
+function broadcastRecordingState() {
+  const payload = { type: "recording-state", state: { ...recording } }
+  for (const [, port] of sidebarPorts) {
+    try {
+      port.postMessage(payload)
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function startTabRecording(targetTabId?: number): Promise<{ ok: boolean; error?: string }> {
+  if (recording.active) return { ok: false, error: "Already recording" }
+  try {
+    let tabId = targetTabId
+    if (!tabId) {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) return { ok: false, error: "No active tab" }
+      tabId = tab.id
+    }
+
+    // Mint a media stream id for the target tab. Consumer is the offscreen
+    // document, which doesn't have a tab id — leaving consumerTabId unset
+    // lets any document in this extension consume it.
+    const streamId = await new Promise<string>((resolve, reject) => {
+      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId! }, (id) => {
+        if (chrome.runtime.lastError || !id) {
+          reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
+        } else {
+          resolve(id)
+        }
+      })
+    })
+
+    const { uploadUrl, serviceToken } = await getRecordingUploadConfig()
+    pendingStart = { streamId, uploadUrl, serviceToken }
+    await ensureOffscreen()
+    // The offscreen page will send OFFSCREEN_READY when mounted; at that
+    // point we flush the pending start. It also might mount instantly if
+    // the document was already open — send the start message directly.
+    chrome.runtime.sendMessage({
+      type: "OFFSCREEN_START",
+      streamId,
+      uploadUrl,
+      serviceToken
+    }).catch(() => {
+      // no listener yet — handler below on OFFSCREEN_READY will retry
+    })
+
+    recording.active = true
+    recording.tabId = tabId
+    recording.startedAt = Date.now()
+    recording.lastError = null
+    setRecordingBadge(true)
+    broadcastRecordingState()
+    return { ok: true }
+  } catch (err) {
+    recording.lastError = (err as Error).message
+    setRecordingBadge(false)
+    return { ok: false, error: recording.lastError }
+  }
+}
+
+async function stopTabRecording(): Promise<{ ok: boolean }> {
+  if (!recording.active) return { ok: false }
+  chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" }).catch(() => {})
+  // Actual cleanup happens on OFFSCREEN_UPLOADED / OFFSCREEN_ERROR
+  return { ok: true }
+}
+
+// Track sidebar connections
+const sidebarPorts = new Map<string, chrome.runtime.Port>()
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "ai-dev-sidebar") {
+    const id = crypto.randomUUID()
+    sidebarPorts.set(id, port)
+
+    port.onMessage.addListener((msg: any) => {
+      if (msg.type === "native-send") {
+        sendToNative(msg.payload)
+      }
+    })
+
+    port.onDisconnect.addListener(() => {
+      sidebarPorts.delete(id)
+    })
+  }
+})
+
+// Handle messages from content scripts and popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "NATIVE_SEND") {
+    sendToNative(message.payload)
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "NATIVE_STATUS") {
+    sendResponse({ connected: !!nativePort })
+  }
+
+  if (message.type === "INSPECT_TAB") {
+    inspectTab(message.tabId).then((result) => sendResponse(result))
+    return true
+  }
+
+  if (message.type === "SCRAPE_TAB") {
+    scrapeTab(message.tabId).then((result) => sendResponse(result))
+    return true
+  }
+
+  if (message.type === "GET_CONSOLE_ERRORS") {
+    sendResponse({ errors: consoleErrors.get(message.tabId) || [] })
+  }
+
+  if (message.type === "PAGE_ERRORS") {
+    // Content script reports console errors
+    const existing = consoleErrors.get(sender.tab?.id || 0) || []
+    consoleErrors.set(sender.tab?.id || 0, [...existing, ...message.errors].slice(-100))
+    sendResponse({ ok: true })
+  }
+
+  // ─── Recording control ──────────────────────────────────────────────
+
+  if (message.type === "START_RECORDING") {
+    startTabRecording(message.tabId).then((result) => sendResponse(result))
+    return true
+  }
+
+  if (message.type === "STOP_RECORDING") {
+    stopTabRecording().then((result) => sendResponse(result))
+    return true
+  }
+
+  if (message.type === "GET_RECORDING_STATE") {
+    sendResponse({ state: { ...recording } })
+  }
+
+  // ─── Offscreen document lifecycle events ────────────────────────────
+
+  if (message.type === "OFFSCREEN_READY") {
+    // Flush a queued start if background raced ahead of the document mount
+    if (pendingStart) {
+      chrome.runtime.sendMessage({ type: "OFFSCREEN_START", ...pendingStart }).catch(() => {})
+      pendingStart = null
+    }
+  }
+
+  if (message.type === "OFFSCREEN_STARTED") {
+    broadcastRecordingState()
+  }
+
+  if (message.type === "OFFSCREEN_UPLOADED") {
+    recording.active = false
+    recording.tabId = null
+    recording.startedAt = null
+    recording.lastUpload = {
+      key: message.key,
+      url: message.url,
+      size: message.size,
+      at: Date.now()
+    }
+    recording.lastError = null
+    setRecordingBadge(false)
+    broadcastRecordingState()
+    closeOffscreen()
+  }
+
+  if (message.type === "OFFSCREEN_ERROR") {
+    recording.active = false
+    recording.tabId = null
+    recording.startedAt = null
+    recording.lastError = message.error || "Recording failed"
+    setRecordingBadge(false)
+    broadcastRecordingState()
+    closeOffscreen()
+  }
+})
+
+// Console error tracking per tab
+const consoleErrors = new Map<number, any[]>()
+
+// Inspect active tab — gather CSS issues, meta, errors
+async function inspectTab(tabId: number) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const meta: Record<string, string> = {}
+        document.querySelectorAll("meta").forEach((m) => {
+          const name = m.getAttribute("name") || m.getAttribute("property") || ""
+          const content = m.getAttribute("content") || ""
+          if (name && content) meta[name] = content
+        })
+
+        // Check for common CSS issues
+        const cssIssues: any[] = []
+        const sheets = document.styleSheets
+        for (let i = 0; i < sheets.length; i++) {
+          try {
+            const rules = sheets[i].cssRules
+            for (let j = 0; j < rules.length; j++) {
+              const rule = rules[j] as CSSStyleRule
+              if (rule.selectorText) {
+                // Check for deprecated properties
+                const style = rule.style
+                if (style.getPropertyValue("-webkit-appearance")) {
+                  cssIssues.push({
+                    selector: rule.selectorText,
+                    property: "-webkit-appearance",
+                    value: style.getPropertyValue("-webkit-appearance"),
+                    issue: "Use 'appearance' instead of vendor prefix"
+                  })
+                }
+              }
+            }
+          } catch { /* cross-origin sheets */ }
+        }
+
+        // Get computed accessibility issues
+        const images = Array.from(document.querySelectorAll("img")).filter((img) => !img.alt)
+        const noAlt = images.map((img) => ({
+          selector: `img[src="${img.src.slice(0, 60)}"]`,
+          property: "alt",
+          value: "(missing)",
+          issue: "Image missing alt text"
+        }))
+
+        return {
+          url: location.href,
+          title: document.title,
+          html: document.documentElement.outerHTML.slice(0, 50000),
+          css: [...cssIssues, ...noAlt],
+          meta,
+          timestamp: Date.now()
+        }
+      }
+    })
+
+    return results[0]?.result || null
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}
+
+// Scrape page content
+async function scrapeTab(tabId: number) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const meta: Record<string, string> = {}
+        document.querySelectorAll("meta").forEach((m) => {
+          const name = m.getAttribute("name") || m.getAttribute("property") || ""
+          const content = m.getAttribute("content") || ""
+          if (name && content) meta[name] = content
+        })
+
+        const links = Array.from(document.querySelectorAll("a[href]")).map((a) => ({
+          href: (a as HTMLAnchorElement).href,
+          text: a.textContent?.trim().slice(0, 100) || ""
+        })).filter((l) => l.href.startsWith("http")).slice(0, 200)
+
+        const images = Array.from(document.querySelectorAll("img[src]")).map((img) => ({
+          src: (img as HTMLImageElement).src,
+          alt: (img as HTMLImageElement).alt || ""
+        })).slice(0, 100)
+
+        // Get clean text content
+        const clone = document.body.cloneNode(true) as HTMLElement
+        clone.querySelectorAll("script, style, nav, footer, header").forEach((el) => el.remove())
+        const text = clone.textContent?.replace(/\s+/g, " ").trim().slice(0, 30000) || ""
+
+        return {
+          url: location.href,
+          title: document.title,
+          text,
+          html: document.documentElement.outerHTML.slice(0, 100000),
+          links,
+          images,
+          meta,
+          timestamp: Date.now()
+        }
+      }
+    })
+
+    return results[0]?.result || null
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}
+
+// Side panel behavior — open on action click
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.windowId) {
+    chrome.sidePanel.open({ windowId: tab.windowId })
+  }
+})
+
+// Enable side panel on all sites
+chrome.sidePanel.setOptions({
+  enabled: true
+})
+
+// Context menu for scraping
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: "scrape-page",
+    title: "Scrape page to AI Dev Sidebar",
+    contexts: ["page"]
+  })
+  chrome.contextMenus.create({
+    id: "inspect-page",
+    title: "Inspect page with AI Dev",
+    contexts: ["page"]
+  })
+  chrome.contextMenus.create({
+    id: "send-selection",
+    title: "Send selection to AI Dev",
+    contexts: ["selection"]
+  })
+  chrome.contextMenus.create({
+    id: "save-highlight",
+    title: "Save highlight for review",
+    contexts: ["selection"]
+  })
+})
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id) return
+
+  if (info.menuItemId === "scrape-page") {
+    const result = await scrapeTab(tab.id)
+    for (const [, port] of sidebarPorts) {
+      port.postMessage({ type: "scrape-result", payload: result })
+    }
+  }
+
+  if (info.menuItemId === "inspect-page") {
+    const result = await inspectTab(tab.id)
+    for (const [, port] of sidebarPorts) {
+      port.postMessage({ type: "inspect-result", payload: result })
+    }
+  }
+
+  if (info.menuItemId === "send-selection") {
+    for (const [, port] of sidebarPorts) {
+      port.postMessage({
+        type: "selection",
+        payload: { text: info.selectionText, url: tab.url }
+      })
+    }
+  }
+
+  if (info.menuItemId === "save-highlight" && info.selectionText) {
+    try {
+      await addHighlight({
+        id: crypto.randomUUID(),
+        text: info.selectionText,
+        sourceUrl: tab.url,
+        sourceTitle: tab.title,
+        createdAt: Date.now()
+      })
+      // A subtle badge blip to confirm capture. The ReviewPanel auto-refreshes
+      // via chrome.storage.onChanged, so no port message is needed.
+      chrome.action.setBadgeText({ text: "+1" })
+      chrome.action.setBadgeBackgroundColor({ color: "#4ade80" })
+      setTimeout(() => {
+        if (!recording.active) chrome.action.setBadgeText({ text: "" })
+      }, 1200)
+    } catch (err) {
+      console.warn("save-highlight failed:", err)
+    }
+  }
+})
+
+// Keyboard shortcut
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === "toggle-sidebar") {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.windowId) {
+      chrome.sidePanel.open({ windowId: tab.windowId })
+    }
+  }
+})
+
+export {}
