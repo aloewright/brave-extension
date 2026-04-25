@@ -10,11 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
       # --ignore-scripts skips Plasmo's post-install hooks; the storage
       # and types tests don't need the extension to be built.
-      - run: npm install --ignore-scripts
-      - run: npm test
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm test
