@@ -8,7 +8,9 @@
     "dev": "plasmo dev",
     "build": "plasmo build",
     "package": "plasmo package",
-    "install-host": "node scripts/install-native-host.mjs"
+    "install-host": "node scripts/install-native-host.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5",
@@ -23,11 +25,14 @@
     "@types/chrome": "^0.0.287",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.20",
+    "happy-dom": "^15.11.7",
     "postcss": "^8.4.49",
     "prettier": "3.2.5",
     "tailwindcss": "^3.4.17",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vitest": "^2.1.9"
   },
   "manifest": {
     "permissions": [
