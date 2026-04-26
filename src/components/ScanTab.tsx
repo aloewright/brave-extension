@@ -125,7 +125,7 @@ export function ScanTab({ settings, onToast }: Props) {
       <button
         onClick={runScan}
         disabled={busy}
-        className="w-full text-xs py-2 px-3 rounded bg-chart-1 text-bg font-medium hover:bg-chart-1/90 disabled:opacity-50 transition-colors">
+        className="w-full text-xs py-2 px-3 rounded bg-chart-1 text-white font-medium border border-white/40 shadow-sm transition-all duration-150 hover:bg-chart-1/90 hover:border-white/70 hover:shadow-md hover:-translate-y-px active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm">
         {busy ? "Working…" : scan ? "Rescan this page" : "Scan this page"}
       </button>
 
