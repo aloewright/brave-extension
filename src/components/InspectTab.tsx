@@ -79,13 +79,13 @@ export function InspectTab({ settings, onToast }: Props) {
         {!active ? (
           <button
             onClick={start}
-            className="flex-1 text-xs py-2 px-3 rounded bg-chart-1 text-bg font-medium hover:bg-chart-1/90 transition-colors">
+            className="flex-1 text-xs py-2 px-3 rounded bg-chart-1 text-white font-medium border border-white/40 shadow-sm transition-all duration-150 hover:bg-chart-1/90 hover:border-white/70 hover:shadow-md hover:-translate-y-px active:translate-y-0 active:scale-[0.98]">
             Start inspecting
           </button>
         ) : (
           <button
             onClick={stop}
-            className="flex-1 text-xs py-2 px-3 rounded bg-destructive/30 text-destructive hover:bg-destructive/40 transition-colors">
+            className="flex-1 text-xs py-2 px-3 rounded bg-destructive/30 text-white font-medium border border-white/40 shadow-sm transition-all duration-150 hover:bg-destructive/40 hover:border-white/70 hover:shadow-md hover:-translate-y-px active:translate-y-0 active:scale-[0.98]">
             Stop
           </button>
         )}
