@@ -116,9 +116,13 @@ function setRecordingBadge(on: boolean) {
     chrome.action.setBadgeText({ text: "●" })
     chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
     chrome.action.setTitle({ title: "Recording tab — click to stop" })
+    // Show the popup during recording so the toolbar click reveals a Stop
+    // button. In idle, no popup → click opens the sidebar directly.
+    chrome.action.setPopup({ popup: "popup.html" })
   } else {
     chrome.action.setBadgeText({ text: "" })
     chrome.action.setTitle({ title: "AI Dev Sidebar" })
+    chrome.action.setPopup({ popup: "" })
   }
 }
 
@@ -438,8 +442,20 @@ chrome.sidePanel.setOptions({
   enabled: true
 })
 
+// Detach the default popup so a toolbar click goes straight to the
+// onClicked listener above (which opens the sidebar). The popup is
+// re-attached only while a recording is active — see setRecordingBadge.
+// Plasmo wires `default_popup: "popup.html"` automatically because
+// src/popup.tsx exists; this clears it at runtime. setPopup is
+// persistent, so we only need this on install + browser start.
+chrome.action.setPopup({ popup: "" })
+chrome.runtime.onStartup.addListener(() => {
+  chrome.action.setPopup({ popup: "" })
+})
+
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.action.setPopup({ popup: "" })
   chrome.contextMenus.create({
     id: "scrape-page",
     title: "Scrape page to AI Dev Sidebar",
