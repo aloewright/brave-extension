@@ -13,16 +13,47 @@
  */
 
 import { spawn } from "child_process"
-import { readFileSync, existsSync } from "fs"
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs"
 import { homedir } from "os"
-import { join } from "path"
+import { join, dirname } from "path"
 
-/** Tracks whether each backend has an active session to continue */
-const hasSession = {
-  claude: false,
-  gemini: false,
-  codex: false,
-  copilot: false // always false — no session support
+/**
+ * `hasSession` tracks whether each backend has an active session to continue.
+ *
+ * Persisted to disk because the host process exits whenever the extension
+ * service worker is GC'd (MV3 timeout, ~30s idle). Without persistence, every
+ * SW restart starts a brand new CLI session — chat history visibly resets.
+ * The on-disk flag tells the next host instance "yes, --continue is safe."
+ */
+const SESSION_STATE_PATH = join(homedir(), ".ai-dev-sidebar", "session-state.json")
+const hasSession = loadSessionState()
+
+function loadSessionState() {
+  const defaults = { claude: false, gemini: false, codex: false, copilot: false }
+  if (!existsSync(SESSION_STATE_PATH)) return defaults
+  try {
+    const parsed = JSON.parse(readFileSync(SESSION_STATE_PATH, "utf-8"))
+    return { ...defaults, ...parsed, copilot: false }
+  } catch {
+    return defaults
+  }
+}
+
+function saveSessionState() {
+  try {
+    mkdirSync(dirname(SESSION_STATE_PATH), { recursive: true })
+    writeFileSync(SESSION_STATE_PATH, JSON.stringify(hasSession))
+  } catch (err) {
+    // Don't crash the host on a write failure — chat will work, just may
+    // start a new CLI session next host restart.
+    sendMessage({ type: "stderr", data: `[host] failed to persist session state: ${err.message}` })
+  }
+}
+
+function setSessionFlag(backend, value) {
+  if (hasSession[backend] === value) return
+  hasSession[backend] = value
+  saveSessionState()
 }
 
 /** Active child processes (by pid) for kill support */
@@ -266,10 +297,14 @@ function resolveBackendCommand(backend, prompt) {
       return { cmd: "gemini", args }
     }
     case "codex": {
+      // --skip-git-repo-check: codex refuses to run outside a trusted git
+      // directory; the extension launches it from arbitrary cwds (including
+      // ~), so we always pass the flag.
+      const base = ["exec", "--skip-git-repo-check"]
       if (hasSession.codex) {
-        return { cmd: "codex", args: ["exec", "resume", "--last", prompt] }
+        return { cmd: "codex", args: [...base, "resume", "--last", prompt] }
       }
-      return { cmd: "codex", args: ["exec", prompt] }
+      return { cmd: "codex", args: [...base, prompt] }
     }
     case "copilot":
       return { cmd: "gh", args: ["copilot", "suggest", "-t", "shell", prompt] }
@@ -306,9 +341,11 @@ function runCommand(backend, prompt, cwd) {
 
   proc.on("close", (code) => {
     activeProcesses.delete(pid)
-    // On successful exit with output, mark session as live for this backend
+    // On successful exit with output, mark session as live for this backend.
+    // Persisted to disk so the next host process (after SW restart) keeps
+    // using --continue / --resume / resume --last.
     if (code === 0 && hadOutput && backend !== "copilot") {
-      hasSession[backend] = true
+      setSessionFlag(backend, true)
     }
     sendMessage({ type: "exit", data: "", pid, code, backend })
   })
@@ -369,7 +406,7 @@ async function main() {
       case "reset-backend": {
         // Clear the session flag — next exec will start fresh
         const backend = msg.backend || "claude"
-        hasSession[backend] = false
+        setSessionFlag(backend, false)
         sendMessage({ type: "session-reset", backend, data: "" })
         break
       }

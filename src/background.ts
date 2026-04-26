@@ -1,7 +1,9 @@
 import { addHighlight } from "./review"
 
 const HOST_NAME = "com.aidev.sidebar"
+const HEARTBEAT_ALARM = "native-heartbeat"
 let nativePort: chrome.runtime.Port | null = null
+let lastDisconnectAt = 0
 const pendingCallbacks = new Map<string, (msg: any) => void>()
 
 function connectNativeHost() {
@@ -10,7 +12,9 @@ function connectNativeHost() {
     nativePort = chrome.runtime.connectNative(HOST_NAME)
 
     nativePort.onMessage.addListener((msg: any) => {
-      // Forward to all connected sidebar ports
+      // Drop pongs — they're keepalive noise the sidebar doesn't need.
+      if (msg?.type === "pong") return
+      // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-response", payload: msg })
       }
@@ -18,9 +22,21 @@ function connectNativeHost() {
 
     nativePort.onDisconnect.addListener(() => {
       const err = chrome.runtime.lastError?.message || "disconnected"
+      const now = Date.now()
+      const sinceLast = now - lastDisconnectAt
+      lastDisconnectAt = now
       console.warn("Native host disconnected:", err)
       nativePort = null
-      // Notify sidebars
+
+      // Silent auto-reconnect for transient drops (typical: SW recycled,
+      // host process EOF'd, then we wake on the next message). The host
+      // re-loads persisted hasSession so the CLI conversation continues.
+      // Only surface the failure to the sidebar if reconnects are flapping
+      // (multiple disconnects within 5s = real problem, not a recycle).
+      if (sidebarPorts.size === 0) return
+      const reconnected = connectNativeHost()
+      if (reconnected && sinceLast > 5000) return
+
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-disconnected", error: err })
       }
@@ -32,6 +48,26 @@ function connectNativeHost() {
     return null
   }
 }
+
+// Heartbeat — keep the SW alive and the native port from going idle.
+// chrome.alarms wakes the SW even after it's been GC'd, at which point we
+// re-establish the native connection (the host re-loads hasSession from
+// disk, so chat context is preserved across SW restarts).
+chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== HEARTBEAT_ALARM) return
+  // No active sidebar → no reason to keep the host alive. Let the SW idle
+  // out and the host EOF naturally.
+  if (sidebarPorts.size === 0) return
+  const port = nativePort ?? connectNativeHost()
+  if (!port) return
+  try {
+    port.postMessage({ type: "ping" })
+  } catch {
+    // postMessage on a torn-down port throws — let the next disconnect
+    // handler reconnect it.
+  }
+})
 
 function sendToNative(msg: any) {
   const port = connectNativeHost()
