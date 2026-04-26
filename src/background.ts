@@ -275,11 +275,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ connected: !!nativePort })
   }
 
-  if (message.type === "INSPECT_TAB") {
-    inspectTab(message.tabId).then((result) => sendResponse(result))
-    return true
-  }
-
   if (message.type === "SCRAPE_TAB") {
     scrapeTab(message.tabId).then((result) => sendResponse(result))
     return true
@@ -355,69 +350,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Console error tracking per tab
 const consoleErrors = new Map<number, any[]>()
-
-// Inspect active tab — gather CSS issues, meta, errors
-async function inspectTab(tabId: number) {
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const meta: Record<string, string> = {}
-        document.querySelectorAll("meta").forEach((m) => {
-          const name = m.getAttribute("name") || m.getAttribute("property") || ""
-          const content = m.getAttribute("content") || ""
-          if (name && content) meta[name] = content
-        })
-
-        // Check for common CSS issues
-        const cssIssues: any[] = []
-        const sheets = document.styleSheets
-        for (let i = 0; i < sheets.length; i++) {
-          try {
-            const rules = sheets[i].cssRules
-            for (let j = 0; j < rules.length; j++) {
-              const rule = rules[j] as CSSStyleRule
-              if (rule.selectorText) {
-                // Check for deprecated properties
-                const style = rule.style
-                if (style.getPropertyValue("-webkit-appearance")) {
-                  cssIssues.push({
-                    selector: rule.selectorText,
-                    property: "-webkit-appearance",
-                    value: style.getPropertyValue("-webkit-appearance"),
-                    issue: "Use 'appearance' instead of vendor prefix"
-                  })
-                }
-              }
-            }
-          } catch { /* cross-origin sheets */ }
-        }
-
-        // Get computed accessibility issues
-        const images = Array.from(document.querySelectorAll("img")).filter((img) => !img.alt)
-        const noAlt = images.map((img) => ({
-          selector: `img[src="${img.src.slice(0, 60)}"]`,
-          property: "alt",
-          value: "(missing)",
-          issue: "Image missing alt text"
-        }))
-
-        return {
-          url: location.href,
-          title: document.title,
-          html: document.documentElement.outerHTML.slice(0, 50000),
-          css: [...cssIssues, ...noAlt],
-          meta,
-          timestamp: Date.now()
-        }
-      }
-    })
-
-    return results[0]?.result || null
-  } catch (err) {
-    return { error: (err as Error).message }
-  }
-}
 
 // Scrape page content
 async function scrapeTab(tabId: number) {
@@ -498,11 +430,6 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["page"]
   })
   chrome.contextMenus.create({
-    id: "inspect-page",
-    title: "Inspect page with AI Dev",
-    contexts: ["page"]
-  })
-  chrome.contextMenus.create({
     id: "send-selection",
     title: "Send selection to AI Dev",
     contexts: ["selection"]
@@ -521,13 +448,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const result = await scrapeTab(tab.id)
     for (const [, port] of sidebarPorts) {
       port.postMessage({ type: "scrape-result", payload: result })
-    }
-  }
-
-  if (info.menuItemId === "inspect-page") {
-    const result = await inspectTab(tab.id)
-    for (const [, port] of sidebarPorts) {
-      port.postMessage({ type: "inspect-result", payload: result })
     }
   }
 

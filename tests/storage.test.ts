@@ -7,10 +7,14 @@ import {
   addMessage,
   setMessages,
   clearMessages,
-  addInspection,
-  getInspections
+  getInspectorSettings,
+  setInspectorSettings,
+  getCachedScan,
+  setCachedScan,
+  clearScanCache,
+  scanCacheKey
 } from "../src/storage"
-import type { ChatMessage, PageInspection } from "../src/types"
+import type { ChatMessage, ScanResult } from "../src/types"
 
 const SETTINGS_KEY = "ai-dev-settings"
 const LEGACY_MESSAGES_KEY = "ai-dev-messages"
@@ -152,22 +156,53 @@ describe("messages — per-backend sharding", () => {
   })
 })
 
-describe("inspections", () => {
-  it("addInspection keeps only the most-recent 50", async () => {
-    const make = (i: number): PageInspection => ({
-      url: `https://example.com/${i}`,
-      title: `t${i}`,
-      timestamp: i
-    })
+describe("inspector settings", () => {
+  it("returns defaults when nothing is stored", async () => {
+    const s = await getInspectorSettings()
+    expect(s.colorFormat).toBe("hex")
+    expect(s.contrastTarget).toBe("AA")
+    expect(s.exportDefaults.tokenFormat).toBe("tailwind")
+  })
 
-    for (let i = 1; i <= 60; i++) {
-      await addInspection(make(i))
-    }
+  it("merges partial updates", async () => {
+    await setInspectorSettings({ colorFormat: "oklch" })
+    const s = await getInspectorSettings()
+    expect(s.colorFormat).toBe("oklch")
+    expect(s.contrastTarget).toBe("AA")
+  })
+})
 
-    const stored = await getInspections()
-    expect(stored).toHaveLength(50)
-    // Newest first
-    expect(stored[0].timestamp).toBe(60)
-    expect(stored[49].timestamp).toBe(11)
+describe("scan cache", () => {
+  const result = (url: string): ScanResult => ({
+    url,
+    title: "t",
+    scannedAt: new Date().toISOString(),
+    colors: [],
+    fonts: [],
+    spacing: [],
+    assets: []
+  })
+
+  it("strips fragment from cache key", () => {
+    expect(scanCacheKey("https://x.com/a#hash")).toBe("https://x.com/a")
+    expect(scanCacheKey("https://x.com/a?q=1")).toBe("https://x.com/a?q=1")
+  })
+
+  it("round-trips a scan and ignores fragments", async () => {
+    await setCachedScan(result("https://x.com/a"))
+    const got = await getCachedScan("https://x.com/a#section")
+    expect(got?.result.url).toBe("https://x.com/a")
+  })
+
+  it("returns null for missing URL", async () => {
+    expect(await getCachedScan("https://nope.com")).toBeNull()
+  })
+
+  it("clears all entries", async () => {
+    await setCachedScan(result("https://x.com/a"))
+    await setCachedScan(result("https://y.com/b"))
+    await clearScanCache()
+    expect(await getCachedScan("https://x.com/a")).toBeNull()
+    expect(await getCachedScan("https://y.com/b")).toBeNull()
   })
 })
