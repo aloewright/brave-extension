@@ -59,7 +59,8 @@ function clearOverlay() {
   if (overlay) overlay.style.display = "none"
 }
 
-function teardown() {
+function teardown(notify = true) {
+  if (!active) return
   active = false
   frozen = false
   lastTarget = null
@@ -71,6 +72,13 @@ function teardown() {
   if (overlay) overlay.remove()
   const style = document.getElementById(STYLE_ID)
   if (style) style.remove()
+  if (notify) {
+    try {
+      chrome.runtime.sendMessage({ type: "inspector:stopped" } satisfies InspectorMessage)
+    } catch {
+      /* panel may be closed */
+    }
+  }
 }
 
 function startup() {
@@ -208,7 +216,7 @@ chrome.runtime.onMessage.addListener((message: InspectorMessage, _sender, sendRe
     return
   }
   if (message.type === "inspector:stop") {
-    teardown()
+    teardown(false)
     sendResponse({ ok: true })
     return
   }

@@ -186,6 +186,7 @@ export const DEFAULT_INSPECTOR_SETTINGS: InspectorSettings = {
 export type InspectorMessage =
   | { type: "inspector:start" }
   | { type: "inspector:stop" }
+  | { type: "inspector:stopped" }
   | { type: "inspector:hover"; payload: ElementSnapshot }
   | { type: "inspector:pick"; payload: ElementSnapshot }
   | { type: "scan:run" }
