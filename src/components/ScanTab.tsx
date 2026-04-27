@@ -83,27 +83,50 @@ export function ScanTab({ settings, onToast }: Props) {
     if (scan.assets.length === 0) return onToast("No assets")
     const tab = await getActiveTab()
     if (!tab?.id) return onToast("No active tab")
+    const tabId = tab.id
     setBusy(true)
 
+    // Inline SVGs go straight in — no network needed.
     const entries: { name: string; data: Uint8Array }[] = []
-    let skipped = 0
-
+    const remoteAssets: ScannedAsset[] = []
     for (const asset of scan.assets) {
       if (asset.inlineSvg) {
         entries.push(textEntry(`svg/inline-${entries.length + 1}.svg`, asset.inlineSvg))
-        continue
+      } else {
+        remoteAssets.push(asset)
       }
-      const resp = await sendToTab<{ ok: boolean; dataUrl: string | null }>(tab.id, {
-        type: "asset:fetch",
-        url: asset.url
-      } satisfies InspectorMessage)
-      if (!resp?.dataUrl) {
-        skipped += 1
-        continue
-      }
-      const name = filenameFor(asset)
-      entries.push({ name, data: dataUrlToBytes(resp.dataUrl) })
     }
+
+    // Parallel-fetch with a bounded worker pool. Each fetch in the content
+    // script is wrapped in a per-asset timeout, so a hung CDN can't stall
+    // the whole zip.
+    const CONCURRENCY = 6
+    const fetched: { name: string; data: Uint8Array }[] = []
+    let skipped = 0
+    let cursor = 0
+
+    async function worker() {
+      while (cursor < remoteAssets.length) {
+        const asset = remoteAssets[cursor++]
+        const resp = await sendToTab<{ ok: boolean; dataUrl: string | null }>(tabId, {
+          type: "asset:fetch",
+          url: asset.url
+        } satisfies InspectorMessage)
+        if (!resp?.dataUrl) {
+          skipped += 1
+          continue
+        }
+        fetched.push({ name: filenameFor(asset), data: dataUrlToBytes(resp.dataUrl) })
+      }
+    }
+
+    const workers = Array.from(
+      { length: Math.min(CONCURRENCY, remoteAssets.length) },
+      () => worker()
+    )
+    await Promise.all(workers)
+
+    entries.push(...fetched)
 
     if (entries.length === 0) {
       setBusy(false)
@@ -111,7 +134,7 @@ export function ScanTab({ settings, onToast }: Props) {
     }
 
     const zip = buildZip(entries)
-    const blob = new Blob([zip], { type: "application/zip" })
+    const blob = new Blob([zip as BlobPart], { type: "application/zip" })
     const url = URL.createObjectURL(blob)
     const filename = `inspector-${hostname(scan.url)}-${Date.now()}.zip`
     await chrome.downloads.download({ url, filename })

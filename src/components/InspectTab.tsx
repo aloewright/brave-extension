@@ -15,12 +15,15 @@ interface Props {
   onToast: (msg: string) => void
 }
 
+const KEEPALIVE_PORT = "alexometer-inspector-keepalive"
+
 export function InspectTab({ settings, onToast }: Props) {
   const [active, setActive] = useState(false)
   const [hover, setHover] = useState<ElementSnapshot | null>(null)
   const [picked, setPicked] = useState<ElementSnapshot | null>(null)
   const [colorFormat, setColorFormat] = useState(settings.colorFormat)
   const tabIdRef = useRef<number | null>(null)
+  const keepaliveRef = useRef<chrome.runtime.Port | null>(null)
 
   useEffect(() => {
     setColorFormat(settings.colorFormat)
@@ -39,7 +42,19 @@ export function InspectTab({ settings, onToast }: Props) {
       }
     }
     chrome.runtime.onMessage.addListener(listener)
-    return () => chrome.runtime.onMessage.removeListener(listener)
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener)
+      // Cleanup on tab-switch / panel-close — content script tears down on
+      // port disconnect.
+      if (keepaliveRef.current) {
+        try {
+          keepaliveRef.current.disconnect()
+        } catch {
+          /* already gone */
+        }
+        keepaliveRef.current = null
+      }
+    }
   }, [])
 
   const start = async () => {
@@ -54,12 +69,27 @@ export function InspectTab({ settings, onToast }: Props) {
           onToast("Reload the page and try again")
           return
         }
+        // Open a keepalive port so the content script auto-tears-down when
+        // this panel closes (the port disconnects automatically).
+        try {
+          keepaliveRef.current = chrome.tabs.connect(tab.id!, { name: KEEPALIVE_PORT })
+        } catch {
+          /* port couldn't open — content script will still respond to inspector:stop */
+        }
         setActive(true)
       }
     )
   }
 
   const stop = async () => {
+    if (keepaliveRef.current) {
+      try {
+        keepaliveRef.current.disconnect()
+      } catch {
+        /* already gone */
+      }
+      keepaliveRef.current = null
+    }
     if (tabIdRef.current) {
       chrome.tabs.sendMessage(tabIdRef.current, {
         type: "inspector:stop"

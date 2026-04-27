@@ -10,11 +10,27 @@ export const config: PlasmoCSConfig = {
 
 const OVERLAY_ID = "alexometer-inspect-overlay"
 const STYLE_ID = "alexometer-inspect-style"
+const KEEPALIVE_PORT = "alexometer-inspector-keepalive"
 
 let active = false
 let frozen = false
 let lastTarget: Element | null = null
 let raf = 0
+let keepalivePort: chrome.runtime.Port | null = null
+
+// Best-effort send. The runtime throws "Receiving end does not exist" the
+// instant the side panel closes; we never want that to bubble into a click
+// or mousemove handler and break the underlying page.
+function safeSend(msg: InspectorMessage) {
+  try {
+    chrome.runtime.sendMessage(msg, () => {
+      // Touch lastError so Chrome doesn't log it.
+      void chrome.runtime.lastError
+    })
+  } catch {
+    /* receiving end gone */
+  }
+}
 
 function ensureStyle() {
   if (document.getElementById(STYLE_ID)) return
@@ -64,6 +80,10 @@ function teardown(notify = true) {
   active = false
   frozen = false
   lastTarget = null
+  if (raf) {
+    cancelAnimationFrame(raf)
+    raf = 0
+  }
   document.body.removeAttribute("data-alexometer-active")
   document.removeEventListener("mousemove", onMouseMove, true)
   document.removeEventListener("click", onClick, true)
@@ -72,13 +92,7 @@ function teardown(notify = true) {
   if (overlay) overlay.remove()
   const style = document.getElementById(STYLE_ID)
   if (style) style.remove()
-  if (notify) {
-    try {
-      chrome.runtime.sendMessage({ type: "inspector:stopped" } satisfies InspectorMessage)
-    } catch {
-      /* panel may be closed */
-    }
-  }
+  if (notify) safeSend({ type: "inspector:stopped" })
 }
 
 function startup() {
@@ -102,10 +116,12 @@ function onMouseMove(e: MouseEvent) {
   lastTarget = candidate
   if (raf) cancelAnimationFrame(raf)
   raf = requestAnimationFrame(() => {
-    if (!lastTarget) return
-    paint(lastTarget)
-    const snap = buildSnapshot(lastTarget)
-    chrome.runtime.sendMessage({ type: "inspector:hover", payload: snap } satisfies InspectorMessage)
+    // Capture as const — teardown() may null lastTarget between rAF schedule
+    // and fire.
+    const target = lastTarget
+    if (!target) return
+    paint(target)
+    safeSend({ type: "inspector:hover", payload: buildSnapshot(target) })
   })
 }
 
@@ -114,11 +130,11 @@ function onClick(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   e.stopImmediatePropagation()
-  if (!lastTarget) return
+  const target = lastTarget
+  if (!target) return
   frozen = true
-  paint(lastTarget)
-  const snap = buildSnapshot(lastTarget)
-  chrome.runtime.sendMessage({ type: "inspector:pick", payload: snap } satisfies InspectorMessage)
+  paint(target)
+  safeSend({ type: "inspector:pick", payload: buildSnapshot(target) })
 }
 
 function onKey(e: KeyboardEvent) {
@@ -220,4 +236,26 @@ chrome.runtime.onMessage.addListener((message: InspectorMessage, _sender, sendRe
     sendResponse({ ok: true })
     return
   }
+})
+
+// The side panel opens a long-lived port via chrome.tabs.connect when it
+// starts inspecting. When the panel closes (or the InspectTab unmounts),
+// the port disconnects automatically — that's our signal to tear the
+// inspector down so we don't leave click-capture handlers attached to the
+// page after the user navigates away from the panel.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== KEEPALIVE_PORT) return
+  // Replace any prior keepalive (e.g. user re-clicked Start without Stop).
+  if (keepalivePort) {
+    try {
+      keepalivePort.disconnect()
+    } catch {
+      /* already gone */
+    }
+  }
+  keepalivePort = port
+  port.onDisconnect.addListener(() => {
+    if (keepalivePort === port) keepalivePort = null
+    teardown(false)
+  })
 })
