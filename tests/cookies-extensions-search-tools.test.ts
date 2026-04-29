@@ -54,21 +54,8 @@ describe("MCP tools registry (ALO-247 surface)", () => {
   })
 })
 
-describe("cookies tools (consent gate)", () => {
-  it("returns error when consent gate is false", async () => {
-    const { COOKIES_TOOL_HANDLERS } = await import("../src/background/cookies-tools")
-    for (const name of ["cookies_get", "cookies_set", "cookies_remove", "cookies_clear"]) {
-      const r = await COOKIES_TOOL_HANDLERS[name]({ url: "https://e", name: "x", value: "v" })
-      expect(r.isError).toBe(true)
-      expect(r.content[0].text).toMatch(/consent/i)
-    }
-    expect((chrome as any).cookies.getAll).not.toHaveBeenCalled()
-    expect((chrome as any).cookies.set).not.toHaveBeenCalled()
-    expect((chrome as any).cookies.remove).not.toHaveBeenCalled()
-  })
-
-  it("calls chrome.cookies.* when gate is true", async () => {
-    await chrome.storage.local.set({ "settings.cookies.allowAll": true })
+describe("cookies tools (post-M7: consent owned upstream)", () => {
+  it("calls chrome.cookies.* directly (gating moved to consent FSM)", async () => {
     const { COOKIES_TOOL_HANDLERS } = await import("../src/background/cookies-tools")
 
     const got = await COOKIES_TOOL_HANDLERS.cookies_get({ domain: "example.com" })
@@ -93,7 +80,6 @@ describe("cookies tools (consent gate)", () => {
   })
 
   it("cookies_clear iterates getAll results and removes each", async () => {
-    await chrome.storage.local.set({ "settings.cookies.allowAll": true })
     ;(chrome as any).cookies.getAll = vi.fn(async () => [
       { name: "a", domain: "example.com", path: "/", secure: false },
       { name: "b", domain: ".example.com", path: "/x", secure: true }

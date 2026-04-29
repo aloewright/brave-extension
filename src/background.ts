@@ -19,6 +19,11 @@ import {
   notifyRecorderFinalized
 } from "./background/recorder"
 import { RECORDER_TOOL_HANDLERS } from "./background/recorder-tools"
+import {
+  requestConsent,
+  handleConsentResponse,
+  type ConsentResponseMessage
+} from "./background/consent"
 import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
@@ -154,6 +159,12 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "consent:response") {
+    handleConsentResponse(message as ConsentResponseMessage)
+    sendResponse({ ok: true })
+    return
+  }
+
   if (message.type === "NATIVE_SEND") {
     sendToNative(message.payload)
     sendResponse({ ok: true })
@@ -581,6 +592,21 @@ async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
   try {
     if (!handler) {
       port.postMessage({ type: "mcp.tool.result", id: msg.id, error: `unknown tool ${msg.name}` })
+      return
+    }
+    // M7 (ALO-250): every tool dispatch flows through the consent FSM.
+    // Read tools auto-allow; gated tools resolve from Settings flags;
+    // write/cookies tools prompt the sidepanel and time out after 60s.
+    const decision = await requestConsent({ toolName: msg.name, args: msg.args })
+    if (decision === "deny") {
+      port.postMessage({
+        type: "mcp.tool.result",
+        id: msg.id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "user denied tool call" }]
+        }
+      })
       return
     }
     const result = await handler(msg.args || {})

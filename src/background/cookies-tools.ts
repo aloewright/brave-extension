@@ -1,10 +1,13 @@
 /**
  * Cookies MCP tool handlers (ALO-247, M5).
  *
- * All four cookies_* tools are gated behind a single consent boolean at
- * chrome.storage.local["settings.cookies.allowAll"]. M7 (ALO-250) replaces
- * this with a per-call consent prompt (the gate becomes the "remember my
- * choice" preference) — TODO below marks the swap site.
+ * Consent: from M7 (ALO-250) onwards, gating is owned by the consent FSM
+ * in src/background/consent.ts. Cookies are classified `always-prompt`,
+ * so every call goes through the sidepanel banner unless the user has
+ * enabled the permanent allow-all override at
+ * chrome.storage.local["settings.cookies.allowAll"], which the FSM reads
+ * directly. The handlers here just execute the chrome.cookies API call
+ * once consent is granted.
  */
 
 type ToolResult = {
@@ -28,18 +31,7 @@ function err(text: string): ToolResult {
   return { isError: true, content: [{ type: "text", text }] }
 }
 
-async function consentOk(): Promise<boolean> {
-  // TODO(ALO-250): replace with a per-call prompt; this gate becomes the
-  // "always allow" preference rather than a blanket allowlist.
-  const r = await chrome.storage.local.get(COOKIES_GATE_KEY)
-  return !!r?.[COOKIES_GATE_KEY]
-}
-
-const CONSENT_DENIED_MSG =
-  "cookies tool requires consent (will prompt in M7)"
-
 async function cookies_get(args: any): Promise<ToolResult> {
-  if (!(await consentOk())) return err(CONSENT_DENIED_MSG)
   try {
     const filter: chrome.cookies.GetAllDetails = {}
     if (typeof args?.url === "string" && args.url) filter.url = args.url
@@ -53,7 +45,6 @@ async function cookies_get(args: any): Promise<ToolResult> {
 }
 
 async function cookies_set(args: any): Promise<ToolResult> {
-  if (!(await consentOk())) return err(CONSENT_DENIED_MSG)
   const url = String(args?.url ?? "")
   const name = String(args?.name ?? "")
   const value = String(args?.value ?? "")
@@ -81,7 +72,6 @@ async function cookies_set(args: any): Promise<ToolResult> {
 }
 
 async function cookies_remove(args: any): Promise<ToolResult> {
-  if (!(await consentOk())) return err(CONSENT_DENIED_MSG)
   const url = String(args?.url ?? "")
   const name = String(args?.name ?? "")
   if (!url) return err("url required")
@@ -95,7 +85,6 @@ async function cookies_remove(args: any): Promise<ToolResult> {
 }
 
 async function cookies_clear(args: any): Promise<ToolResult> {
-  if (!(await consentOk())) return err(CONSENT_DENIED_MSG)
   try {
     const filter: chrome.cookies.GetAllDetails = {}
     if (typeof args?.domain === "string" && args.domain) filter.domain = args.domain

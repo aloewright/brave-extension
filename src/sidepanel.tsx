@@ -9,6 +9,7 @@ import { LibrarySection } from "./sections/library/LibrarySection"
 import { CookiesSection } from "./sections/cookies/CookiesSection"
 import { RecorderSection } from "./sections/recorder/RecorderSection"
 import { SettingsSection } from "./sections/settings/SettingsSection"
+import { ConsentBanner } from "./components/ConsentBanner"
 
 const ACTIVE_KEY = "ui.activeSection"
 
@@ -28,17 +29,20 @@ function SidePanel() {
   }
 
   return (
-    <div className="w-full h-screen bg-bg text-fg font-sans flex">
-      <SidebarRail active={active} onChange={change} />
-      <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
-        {active === "terminal" && <TerminalSection />}
-        {active === "inspector" && <InspectorSection />}
-        {active === "extensions" && <ExtensionsSection />}
-        {active === "library" && <LibrarySection />}
-        {active === "cookies" && <CookiesSection />}
-        {active === "recorder" && <RecorderSection />}
-        {active === "settings" && <SettingsSection />}
-      </main>
+    <div className="w-full h-screen bg-bg text-fg font-sans flex flex-col">
+      <ConsentBanner />
+      <div className="flex-1 min-h-0 flex">
+        <SidebarRail active={active} onChange={change} />
+        <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
+          {active === "terminal" && <TerminalSection />}
+          {active === "inspector" && <InspectorSection />}
+          {active === "extensions" && <ExtensionsSection />}
+          {active === "library" && <LibrarySection />}
+          {active === "cookies" && <CookiesSection />}
+          {active === "recorder" && <RecorderSection />}
+          {active === "settings" && <SettingsSection />}
+        </main>
+      </div>
     </div>
   )
 }
