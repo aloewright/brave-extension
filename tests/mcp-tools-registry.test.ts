@@ -39,7 +39,17 @@ const EXPECTED_TOOLS = [
   "links_add",
   "links_remove",
   "captures_list",
-  "captures_get"
+  "captures_get",
+  "cookies_get",
+  "cookies_set",
+  "cookies_remove",
+  "cookies_clear",
+  "extensions_list",
+  "extensions_set_enabled",
+  "extensions_uninstall",
+  "profiles_apply",
+  "groups_apply",
+  "brave_search"
 ]
 
 describe("MCP tools registry", () => {

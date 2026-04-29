@@ -36,6 +36,34 @@ function makeBookmarksMock() {
   }
 }
 
+function makeManagementMock() {
+  const listeners: Record<string, BmListener[]> = {
+    onInstalled: [],
+    onUninstalled: [],
+    onEnabled: [],
+    onDisabled: []
+  }
+  const mk = (k: keyof typeof listeners) => ({
+    addListener: (fn: BmListener) => listeners[k].push(fn),
+    removeListener: (fn: BmListener) => {
+      const i = listeners[k].indexOf(fn)
+      if (i >= 0) listeners[k].splice(i, 1)
+    }
+  })
+  return {
+    api: {
+      getAll: vi.fn(async () => [
+        { id: "a", name: "A", enabled: true, type: "extension", version: "1", description: "" }
+      ]),
+      onInstalled: mk("onInstalled"),
+      onUninstalled: mk("onUninstalled"),
+      onEnabled: mk("onEnabled"),
+      onDisabled: mk("onDisabled")
+    },
+    fire: (k: keyof typeof listeners) => listeners[k].forEach((fn) => fn())
+  }
+}
+
 function makeStorageOnChanged() {
   const ls: any[] = []
   return {
@@ -52,14 +80,17 @@ function makeStorageOnChanged() {
 
 let bm: ReturnType<typeof makeBookmarksMock>
 let onCh: ReturnType<typeof makeStorageOnChanged>
+let mgmt: ReturnType<typeof makeManagementMock>
 
 beforeEach(() => {
   vi.useFakeTimers()
   bm = makeBookmarksMock()
   onCh = makeStorageOnChanged()
+  mgmt = makeManagementMock()
   ;(globalThis as any).chrome = {
     ...(globalThis as any).chrome,
     bookmarks: bm.api,
+    management: mgmt.api,
     storage: {
       ...(globalThis as any).chrome.storage,
       onChanged: onCh.api
@@ -73,7 +104,7 @@ afterEach(() => {
 })
 
 describe("resource publishers", () => {
-  it("publishes all 3 resources on startup with correct URIs", async () => {
+  it("publishes all 4 resources on startup with correct URIs", async () => {
     const { startResourcePublishers } = await import(
       "../src/background/resource-publishers"
     )
@@ -90,9 +121,37 @@ describe("resource publishers", () => {
     const uris = upserts.map((u) => u.uri).sort()
     expect(uris).toEqual([
       "ai-dev://bookmarks",
+      "ai-dev://extensions",
       "ai-dev://library/captures",
       "ai-dev://library/links"
     ])
+  })
+
+  it("republishes ai-dev://extensions on management lifecycle events", async () => {
+    const { startResourcePublishers } = await import(
+      "../src/background/resource-publishers"
+    )
+    const upserts: string[] = []
+    startResourcePublishers({
+      upsert: (uri) => upserts.push(uri),
+      debounceMs: 10
+    })
+    await vi.advanceTimersByTimeAsync(20)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    const initial = upserts.filter((u) => u === "ai-dev://extensions").length
+    expect(initial).toBe(1)
+
+    // Burst of 4 events should debounce into a single republish.
+    mgmt.fire("onInstalled")
+    mgmt.fire("onEnabled")
+    mgmt.fire("onDisabled")
+    mgmt.fire("onUninstalled")
+    await vi.advanceTimersByTimeAsync(20)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    const after = upserts.filter((u) => u === "ai-dev://extensions").length
+    expect(after).toBe(initial + 1)
   })
 
   it("debounces a burst of bookmark events into a single republish", async () => {

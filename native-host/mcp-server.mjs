@@ -26,6 +26,7 @@ import { homedir } from "os"
 import { join, dirname } from "path"
 import { DOM_TOOL_DEFS, buildReferenceTools } from "./tool-defs/dom-tools.mjs"
 import { LIBRARY_TOOL_DEFS } from "./tool-defs/library-tools.mjs"
+import { CHROME_TOOL_DEFS } from "./tool-defs/chrome-tools.mjs"
 
 const CONFIG_DIR = join(homedir(), ".config", "ai-dev-sidebar")
 const TOKEN_PATH = join(CONFIG_DIR, "mcp-token")
@@ -404,6 +405,17 @@ export class MCPServer {
 
     // Bookmarks + library tools (M5, ALO-246). All bridged.
     for (const def of LIBRARY_TOOL_DEFS) {
+      const name = def.name
+      this.tools.set(name, {
+        name,
+        description: def.description,
+        inputSchema: def.inputSchema,
+        handler: async (args) => this._bridge(name, args)
+      })
+    }
+
+    // Cookies + extensions + Brave Search tools (M5, ALO-247). All bridged.
+    for (const def of CHROME_TOOL_DEFS) {
       const name = def.name
       this.tools.set(name, {
         name,

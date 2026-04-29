@@ -3,6 +3,9 @@ import { cropScreenshotDataUrl } from "./lib/screenshot"
 import { addHighlight } from "./review"
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools"
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools"
+import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools"
+import { EXTENSIONS_TOOL_HANDLERS } from "./background/extensions-tools"
+import { SEARCH_TOOL_HANDLERS } from "./background/search-tools"
 import { startResourcePublishers } from "./background/resource-publishers"
 import type { PickerCapture, PickerMessage, Reference } from "./types"
 
@@ -674,7 +677,10 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     }
   },
   ...DOM_TOOL_HANDLERS,
-  ...LIBRARY_TOOL_HANDLERS
+  ...LIBRARY_TOOL_HANDLERS,
+  ...COOKIES_TOOL_HANDLERS,
+  ...EXTENSIONS_TOOL_HANDLERS,
+  ...SEARCH_TOOL_HANDLERS
 }
 
 // Wire up MCP resource publishers. Each push sends `mcp.resource.upsert`

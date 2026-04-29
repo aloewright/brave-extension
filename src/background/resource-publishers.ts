@@ -16,6 +16,7 @@ import { LX_LINKS_KEY, LX_CAPTURES_KEY } from "./library-tools"
 const BOOKMARKS_URI = "ai-dev://bookmarks"
 const LINKS_URI = "ai-dev://library/links"
 const CAPTURES_URI = "ai-dev://library/captures"
+const EXTENSIONS_URI = "ai-dev://extensions"
 const BOOKMARK_PAYLOAD_CAP = 64 * 1024
 const DEBOUNCE_MS = 250
 
@@ -94,6 +95,28 @@ async function publishLinks(upsert: ResourceUpsert): Promise<void> {
   }
 }
 
+async function publishExtensions(upsert: ResourceUpsert): Promise<void> {
+  try {
+    const all = (await chrome.management?.getAll?.()) ?? []
+    const shaped = all.map((e: chrome.management.ExtensionInfo) => ({
+      id: e.id,
+      name: e.name,
+      enabled: e.enabled,
+      type: e.type,
+      version: e.version,
+      description: e.description ?? ""
+    }))
+    upsert(EXTENSIONS_URI, {
+      name: "Installed extensions",
+      description: "All installed Chrome extensions (id, name, enabled, type, version).",
+      mimeType: "application/json",
+      payload: shaped
+    })
+  } catch (err) {
+    console.warn("publishExtensions failed:", err)
+  }
+}
+
 async function publishCaptures(upsert: ResourceUpsert): Promise<void> {
   try {
     const r = await chrome.storage.local.get(LX_CAPTURES_KEY)
@@ -132,12 +155,14 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
   const schedulePubBookmarks = debounce(() => void publishBookmarks(upsert), ms)
   const schedulePubLinks = debounce(() => void publishLinks(upsert), ms)
   const schedulePubCaptures = debounce(() => void publishCaptures(upsert), ms)
+  const schedulePubExtensions = debounce(() => void publishExtensions(upsert), ms)
 
   // Initial push fires immediately so resources are populated for clients
   // that connect right after boot. Subsequent updates remain debounced.
   void publishBookmarks(upsert)
   void publishLinks(upsert)
   void publishCaptures(upsert)
+  void publishExtensions(upsert)
 
   // Bookmark tree changes.
   const bm = chrome.bookmarks
@@ -158,11 +183,25 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
   }
   chrome.storage?.onChanged?.addListener(onStorage)
 
+  // chrome.management lifecycle — re-publish ai-dev://extensions whenever
+  // the extension list changes. Debounced to coalesce bulk install/disable
+  // bursts (e.g. profiles_apply flipping a dozen at once).
+  const mgmt = (chrome as any).management
+  const onMgmt = () => schedulePubExtensions()
+  mgmt?.onInstalled?.addListener?.(onMgmt)
+  mgmt?.onUninstalled?.addListener?.(onMgmt)
+  mgmt?.onEnabled?.addListener?.(onMgmt)
+  mgmt?.onDisabled?.addListener?.(onMgmt)
+
   return () => {
     bm?.onCreated?.removeListener(onBookmark)
     bm?.onRemoved?.removeListener(onBookmark)
     bm?.onChanged?.removeListener(onBookmark)
     bm?.onMoved?.removeListener(onBookmark)
     chrome.storage?.onChanged?.removeListener(onStorage)
+    mgmt?.onInstalled?.removeListener?.(onMgmt)
+    mgmt?.onUninstalled?.removeListener?.(onMgmt)
+    mgmt?.onEnabled?.removeListener?.(onMgmt)
+    mgmt?.onDisabled?.removeListener?.(onMgmt)
   }
 }
