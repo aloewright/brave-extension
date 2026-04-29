@@ -21,6 +21,14 @@ function SidePanel() {
       const stored = res[ACTIVE_KEY] as SectionId | undefined
       if (stored) setActive(stored)
     })
+    // React to programmatic navigation (e.g. QuickActionsBar → Library/Recorder).
+    const onChanged = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area !== "local" || !changes[ACTIVE_KEY]) return
+      const next = changes[ACTIVE_KEY].newValue as SectionId | undefined
+      if (next) setActive(next)
+    }
+    chrome.storage.onChanged.addListener(onChanged)
+    return () => chrome.storage.onChanged.removeListener(onChanged)
   }, [])
 
   const change = (id: SectionId) => {

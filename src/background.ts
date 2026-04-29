@@ -278,7 +278,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     notifyRecorderFinalized(null)
     broadcastRecordingState()
   }
+
+  // ─── Quick-actions bar (lifted from lean-extensions) ────────────────
+
+  if (message.type === "RESOLVE_IP") {
+    resolveHostname(message.hostname).then((ip) => sendResponse({ ip }))
+    return true
+  }
+
+  if (message.type === "SAVE_LINK") {
+    saveLinkToLibrary(message.url, message.title).then(() => sendResponse({ ok: true }))
+    return true
+  }
+
+  if (message.type === "GET_FEEDS") {
+    // Forwarded to the page's content script if any has registered for feeds.
+    // We don't yet ship a feed-detector content script in this repo, so fall
+    // back to "no feeds" so the UI doesn't hang. Wire a real detector later.
+    sendResponse({ feeds: [] })
+    return false
+  }
+
+  if (message.type === "TECH_DETECTED") {
+    cachedTech.set(message.hostname, { techs: message.techs, ts: Date.now() })
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "GET_TECH") {
+    // Best-effort: if a tech-detector content script ran on the active tab and
+    // posted TECH_DETECTED, return the cached result. Otherwise empty.
+    const hostname = message.hostname || (sender.tab?.url ? new URL(sender.tab.url).hostname : "")
+    const entry = cachedTech.get(hostname)
+    sendResponse({ techs: entry?.techs || [] })
+  }
 })
+
+// Tiny in-memory caches + helpers for the quick-actions bar.
+const cachedTech = new Map<string, { techs: any[]; ts: number }>()
+
+async function resolveHostname(hostname: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`)
+    const data = await res.json()
+    const answer = (data.Answer || []).find((a: any) => a.type === 1)
+    return answer?.data || null
+  } catch {
+    return null
+  }
+}
+
+async function saveLinkToLibrary(url: string, title: string): Promise<void> {
+  const key = "lx_collectedLinks"
+  const cur = await chrome.storage.local.get(key)
+  const links: any[] = Array.isArray(cur[key]) ? cur[key] : []
+  const tags: string[] = []
+  const u = (url || "").toLowerCase()
+  if (u.includes("youtube.com") || u.includes("youtu.be")) tags.push("youtube")
+  if (u.includes("github.com")) tags.push("github")
+  if (u.includes("arxiv.org")) tags.push("research")
+  if (u.includes("stackoverflow.com")) tags.push("stackoverflow")
+  links.unshift({
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `link_${Date.now()}`,
+    url,
+    title,
+    tags,
+    date: new Date().toISOString()
+  })
+  await chrome.storage.local.set({ [key]: links })
+}
 
 // Console error tracking per tab
 const consoleErrors = new Map<number, any[]>()
