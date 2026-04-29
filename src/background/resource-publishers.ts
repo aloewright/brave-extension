@@ -12,12 +12,15 @@
  */
 
 import { LX_LINKS_KEY, LX_CAPTURES_KEY } from "./library-tools"
+import { RECORDER_STORAGE_KEY } from "../types"
 
 const BOOKMARKS_URI = "ai-dev://bookmarks"
 const LINKS_URI = "ai-dev://library/links"
 const CAPTURES_URI = "ai-dev://library/captures"
 const EXTENSIONS_URI = "ai-dev://extensions"
+const RECORDINGS_URI = "ai-dev://recordings"
 const BOOKMARK_PAYLOAD_CAP = 64 * 1024
+const RECORDINGS_PAYLOAD_CAP = 64 * 1024
 const DEBOUNCE_MS = 250
 
 export type ResourceUpsert = (
@@ -117,6 +120,29 @@ async function publishExtensions(upsert: ResourceUpsert): Promise<void> {
   }
 }
 
+async function publishRecordings(upsert: ResourceUpsert): Promise<void> {
+  try {
+    const r = await chrome.storage.local.get(RECORDER_STORAGE_KEY)
+    const list = Array.isArray(r?.[RECORDER_STORAGE_KEY])
+      ? (r[RECORDER_STORAGE_KEY] as unknown[])
+      : []
+    let payload: unknown = list
+    let description = "Recorded clips metadata (most recent first)."
+    if (JSON.stringify(list).length > RECORDINGS_PAYLOAD_CAP) {
+      payload = { recordings: list.slice(0, 50), truncated: true }
+      description = "Recorded clips metadata trimmed to 50 most recent (>64KB)."
+    }
+    upsert(RECORDINGS_URI, {
+      name: "Recordings",
+      description,
+      mimeType: "application/json",
+      payload
+    })
+  } catch (err) {
+    console.warn("publishRecordings failed:", err)
+  }
+}
+
 async function publishCaptures(upsert: ResourceUpsert): Promise<void> {
   try {
     const r = await chrome.storage.local.get(LX_CAPTURES_KEY)
@@ -156,6 +182,7 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
   const schedulePubLinks = debounce(() => void publishLinks(upsert), ms)
   const schedulePubCaptures = debounce(() => void publishCaptures(upsert), ms)
   const schedulePubExtensions = debounce(() => void publishExtensions(upsert), ms)
+  const schedulePubRecordings = debounce(() => void publishRecordings(upsert), ms)
 
   // Initial push fires immediately so resources are populated for clients
   // that connect right after boot. Subsequent updates remain debounced.
@@ -163,6 +190,7 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
   void publishLinks(upsert)
   void publishCaptures(upsert)
   void publishExtensions(upsert)
+  void publishRecordings(upsert)
 
   // Bookmark tree changes.
   const bm = chrome.bookmarks
@@ -180,6 +208,7 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
     if (area !== "local") return
     if (LX_LINKS_KEY in changes) schedulePubLinks()
     if (LX_CAPTURES_KEY in changes) schedulePubCaptures()
+    if (RECORDER_STORAGE_KEY in changes) schedulePubRecordings()
   }
   chrome.storage?.onChanged?.addListener(onStorage)
 

@@ -104,7 +104,7 @@ afterEach(() => {
 })
 
 describe("resource publishers", () => {
-  it("publishes all 4 resources on startup with correct URIs", async () => {
+  it("publishes all resources on startup with correct URIs", async () => {
     const { startResourcePublishers } = await import(
       "../src/background/resource-publishers"
     )
@@ -123,7 +123,8 @@ describe("resource publishers", () => {
       "ai-dev://bookmarks",
       "ai-dev://extensions",
       "ai-dev://library/captures",
-      "ai-dev://library/links"
+      "ai-dev://library/links",
+      "ai-dev://recordings"
     ])
   })
 

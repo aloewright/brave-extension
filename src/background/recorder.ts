@@ -36,6 +36,54 @@ let pendingStart:
   | { source: RecorderSource; streamId?: string; id: string }
   | null = null
 
+// Awaitable hooks driven by offscreen RECORDER_STARTED / RECORDER_STOPPED
+// messages, so MCP `recorder_start` / `recorder_stop` can resolve only when
+// recording actually begins / a final RecordingMetadata is persisted.
+type StartWaiter = (id: string) => void
+type StopWaiter = (meta: RecordingMetadata | null) => void
+let startWaiters: StartWaiter[] = []
+let stopWaiters: StopWaiter[] = []
+
+export function registerStartWaiter(w: StartWaiter): () => void {
+  startWaiters.push(w)
+  return () => {
+    const i = startWaiters.indexOf(w)
+    if (i >= 0) startWaiters.splice(i, 1)
+  }
+}
+
+export function registerStopWaiter(w: StopWaiter): () => void {
+  stopWaiters.push(w)
+  return () => {
+    const i = stopWaiters.indexOf(w)
+    if (i >= 0) stopWaiters.splice(i, 1)
+  }
+}
+
+export function notifyRecorderStarted(id: string) {
+  const ws = startWaiters
+  startWaiters = []
+  for (const w of ws) {
+    try {
+      w(id)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function notifyRecorderFinalized(meta: RecordingMetadata | null) {
+  const ws = stopWaiters
+  stopWaiters = []
+  for (const w of ws) {
+    try {
+      w(meta)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 async function hasOffscreen(): Promise<boolean> {
   // @ts-ignore — chrome.runtime.getContexts is MV3 only and may be missing
   // from older @types/chrome
@@ -268,10 +316,12 @@ export async function handleRecorderStopped(
       sizeBytes: meta.sizeBytes,
       at: Date.now()
     }
+    notifyRecorderFinalized(meta)
     return meta
   } catch (err) {
     resetState()
     recorderState.lastError = (err as Error).message
+    notifyRecorderFinalized(null)
     return null
   }
 }

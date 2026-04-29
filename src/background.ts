@@ -14,8 +14,11 @@ import {
   handleRecorderStopped,
   handleRecorderError,
   handleRecorderReady,
-  handleMirrorMessage
+  handleMirrorMessage,
+  notifyRecorderStarted,
+  notifyRecorderFinalized
 } from "./background/recorder"
+import { RECORDER_TOOL_HANDLERS } from "./background/recorder-tools"
 import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
@@ -204,6 +207,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "RECORDER_STARTED") {
+    notifyRecorderStarted(message.id)
     broadcastRecordingState()
   }
 
@@ -260,6 +264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "RECORDER_ERROR") {
     handleRecorderError(message.error || "Recording failed")
+    notifyRecorderFinalized(null)
     broadcastRecordingState()
   }
 })
@@ -541,7 +546,8 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   ...LIBRARY_TOOL_HANDLERS,
   ...COOKIES_TOOL_HANDLERS,
   ...EXTENSIONS_TOOL_HANDLERS,
-  ...SEARCH_TOOL_HANDLERS
+  ...SEARCH_TOOL_HANDLERS,
+  ...RECORDER_TOOL_HANDLERS
 }
 
 // Wire up MCP resource publishers. Each push sends `mcp.resource.upsert`

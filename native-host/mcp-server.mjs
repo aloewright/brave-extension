@@ -27,6 +27,10 @@ import { join, dirname } from "path"
 import { DOM_TOOL_DEFS, buildReferenceTools } from "./tool-defs/dom-tools.mjs"
 import { LIBRARY_TOOL_DEFS } from "./tool-defs/library-tools.mjs"
 import { CHROME_TOOL_DEFS } from "./tool-defs/chrome-tools.mjs"
+import {
+  RECORDER_BRIDGED_TOOL_DEFS,
+  buildRecorderHostTools
+} from "./tool-defs/recorder-tools.mjs"
 
 const CONFIG_DIR = join(homedir(), ".config", "ai-dev-sidebar")
 const TOKEN_PATH = join(CONFIG_DIR, "mcp-token")
@@ -423,6 +427,21 @@ export class MCPServer {
         inputSchema: def.inputSchema,
         handler: async (args) => this._bridge(name, args)
       })
+    }
+
+    // Recorder tools (M6, ALO-249). Start/stop bridge to the SW; list/get
+    // are host-side and read from the ai-dev://recordings resource.
+    for (const def of RECORDER_BRIDGED_TOOL_DEFS) {
+      const name = def.name
+      this.tools.set(name, {
+        name,
+        description: def.description,
+        inputSchema: def.inputSchema,
+        handler: async (args) => this._bridge(name, args)
+      })
+    }
+    for (const def of buildRecorderHostTools(this)) {
+      this.tools.set(def.name, def)
     }
   }
 
