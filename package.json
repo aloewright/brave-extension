@@ -48,7 +48,12 @@
       "contextMenus",
       "tabCapture",
       "offscreen",
-      "alarms"
+      "alarms",
+      "management",
+      "bookmarks",
+      "cookies",
+      "downloads",
+      "tabGroups"
     ],
     "host_permissions": [
       "<all_urls>"
