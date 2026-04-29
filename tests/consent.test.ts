@@ -199,6 +199,87 @@ describe("consent FSM", () => {
     expect(await p).toBe("deny")
   })
 
+  it("captures_list and captures_get auto-allow as read-class", async () => {
+    const b = makeBroadcast()
+    expect(
+      await requestConsent(
+        { toolName: "captures_list" },
+        { broadcast: b.fn, readFlag: async () => false }
+      )
+    ).toBe("allow")
+    expect(
+      await requestConsent(
+        { toolName: "captures_get", args: { id: "x" } },
+        { broadcast: b.fn, readFlag: async () => false }
+      )
+    ).toBe("allow")
+    expect(b.sent).toHaveLength(0)
+  })
+
+  it("coalesces concurrent write prompts for the same tool", async () => {
+    const b = makeBroadcast()
+    let n = 0
+    const newRequestId = () => `coal-${++n}`
+    const p1 = requestConsent(
+      { toolName: "bookmarks_create", args: { url: "https://a" } },
+      { broadcast: b.fn, readFlag: async () => false, newRequestId }
+    )
+    const p2 = requestConsent(
+      { toolName: "bookmarks_create", args: { url: "https://b" } },
+      { broadcast: b.fn, readFlag: async () => false, newRequestId }
+    )
+    // Only ONE prompt should have been emitted.
+    expect(b.sent).toHaveLength(1)
+    expect(b.sent[0].requestId).toBe("coal-1")
+
+    handleConsentResponse({
+      type: "consent:response",
+      requestId: "coal-1",
+      decision: "allow",
+      remember: false
+    })
+    const [d1, d2] = await Promise.all([p1, p2])
+    expect(d1).toBe("allow")
+    expect(d2).toBe("allow")
+  })
+
+  it("does NOT coalesce concurrent always-prompt cookies calls", async () => {
+    const b = makeBroadcast()
+    let n = 0
+    const newRequestId = () => `ck-${++n}`
+    const p1 = requestConsent(
+      { toolName: "cookies_get", args: { name: "a" } },
+      { broadcast: b.fn, readFlag: async () => false, newRequestId }
+    )
+    const p2 = requestConsent(
+      { toolName: "cookies_get", args: { name: "b" } },
+      { broadcast: b.fn, readFlag: async () => false, newRequestId }
+    )
+    // Yield so the readFlag promises resolve and broadcasts fire.
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(b.sent).toHaveLength(2)
+    expect(b.sent[0].requestId).toBe("ck-1")
+    expect(b.sent[1].requestId).toBe("ck-2")
+
+    handleConsentResponse({
+      type: "consent:response",
+      requestId: "ck-1",
+      decision: "allow",
+      remember: false
+    })
+    handleConsentResponse({
+      type: "consent:response",
+      requestId: "ck-2",
+      decision: "deny",
+      remember: false
+    })
+    expect(await p1).toBe("allow")
+    expect(await p2).toBe("deny")
+  })
+
   it("unknown tool defaults to write-class (prompts)", async () => {
     const b = makeBroadcast()
     requestConsent(

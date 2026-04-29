@@ -12,6 +12,15 @@
  *
  * Unknown tools default to "write" for safety. Update this map alongside
  * any new tool registration.
+ *
+ * Tool count: 39 total
+ *   read          : 19  (DOM reads, references, library reads incl.
+ *                        captures_list/get, chrome reads, recorder reads,
+ *                        tabs_list, brave_search, echo)
+ *   write         : 14  (DOM mutations, clear_references, library writes,
+ *                        chrome mutations, recorder controls)
+ *   gated         : 2   (eval_js, extensions_uninstall)
+ *   always-prompt : 4   (cookies_*)
  */
 
 export type ToolClass = "read" | "write" | "gated" | "always-prompt"

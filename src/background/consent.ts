@@ -49,6 +49,7 @@ interface PendingEntry {
   timer: ReturnType<typeof setTimeout>
   toolName: string
   toolClass: "write" | "always-prompt"
+  promise: Promise<ConsentDecision>
 }
 
 // Module-level state — implicitly cleared on SW restart.
@@ -140,6 +141,15 @@ export async function requestConsent(
 
   // "write" — session-cache aware.
   if (sessionAllowCache.has(req.toolName)) return "allow"
+  // Coalesce concurrent prompts for the same write-class tool: a second
+  // caller piggy-backs on the in-flight promise rather than spawning a
+  // duplicate prompt. always-prompt tools (cookies) intentionally do NOT
+  // coalesce — every call must surface its own prompt.
+  for (const entry of pending.values()) {
+    if (entry.toolName === req.toolName && entry.toolClass === "write") {
+      return entry.promise
+    }
+  }
   return promptUser("write", req, broadcast, timeoutMs, newRequestId)
 }
 
@@ -152,26 +162,32 @@ function promptUser(
 ): Promise<ConsentDecision> {
   const requestId = newRequestId()
 
-  return new Promise<ConsentDecision>((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(requestId)
-      resolve("deny")
-    }, timeoutMs)
-    pending.set(requestId, {
-      resolve,
-      timer,
-      toolName: req.toolName,
-      toolClass: cls
-    })
-
-    broadcast({
-      type: "consent:request",
-      requestId,
-      toolName: req.toolName,
-      args: req.args ?? {},
-      toolClass: cls
-    })
+  let resolveOuter!: (d: ConsentDecision) => void
+  const promise = new Promise<ConsentDecision>((resolve) => {
+    resolveOuter = resolve
   })
+
+  const timer = setTimeout(() => {
+    pending.delete(requestId)
+    resolveOuter("deny")
+  }, timeoutMs)
+  pending.set(requestId, {
+    resolve: resolveOuter,
+    timer,
+    toolName: req.toolName,
+    toolClass: cls,
+    promise
+  })
+
+  broadcast({
+    type: "consent:request",
+    requestId,
+    toolName: req.toolName,
+    args: req.args ?? {},
+    toolClass: cls
+  })
+
+  return promise
 }
 
 /**
@@ -201,8 +217,9 @@ export const __test = {
   hasCached: (name: string) => sessionAllowCache.has(name),
   pendingSize: () => pending.size,
   reset: () => {
-    sessionAllowCache.clear()
-    for (const { timer } of pending.values()) clearTimeout(timer)
-    pending.clear()
+    // Mirror clearConsentCache: deny pending entries before clearing so
+    // any awaited callers in tests see a deterministic resolution rather
+    // than hanging on a dropped promise.
+    clearConsentCache()
   }
 }
