@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { CLIBackend, NativeHostResponse } from "../types"
+import type { CLIBackend, MCPStatus, NativeHostResponse } from "../types"
 
 interface UseNativeHostOptions {
   onStdout?: (data: string, pid: number, backend?: CLIBackend) => void
@@ -10,6 +10,8 @@ interface UseNativeHostOptions {
   onSessionEnded?: (backend: CLIBackend, code: number) => void
   onSessionReset?: (backend: CLIBackend) => void
   onMcpList?: (servers: any[]) => void
+  onMcpStatus?: (status: MCPStatus) => void
+  onMcpRpcResult?: (msg: { type: string; ok: boolean; error?: string; rotatedAt?: string; enabled?: boolean }) => void
   onPtyData?: (sessionId: string, data: string) => void
   onPtyExit?: (sessionId: string, exitCode: number, signal?: number) => void
   onPtySpawned?: (sessionId: string, pid: number) => void
@@ -69,6 +71,20 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
           optsRef.current.onPtySpawned?.((payload as any).sessionId, (payload as any).pid ?? 0)
         } else if (t === "pty.error") {
           optsRef.current.onPtyError?.((payload as any).sessionId, (payload as any).error)
+        }
+
+        // MCP status / RPC events
+        const ptype = (payload as any).type as string
+        if (ptype === "mcp.status") {
+          const { type: _t, ...status } = payload as any
+          optsRef.current.onMcpStatus?.(status as MCPStatus)
+        } else if (
+          ptype === "mcp.rotate-token" ||
+          ptype === "mcp.register" ||
+          ptype === "mcp.unregister" ||
+          ptype === "mcp.terminal-path.set"
+        ) {
+          optsRef.current.onMcpRpcResult?.(payload as any)
         }
 
         // mcp responses come back with type "mcp" — payload.data is JSON
@@ -193,6 +209,15 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     [send]
   )
 
+  const mcpStatus = useCallback(() => send({ type: "mcp.status" }), [send])
+  const mcpRotateToken = useCallback(() => send({ type: "mcp.rotate-token" }), [send])
+  const mcpRegister = useCallback(() => send({ type: "mcp.register" }), [send])
+  const mcpUnregister = useCallback(() => send({ type: "mcp.unregister" }), [send])
+  const mcpSetTerminalPath = useCallback(
+    (enabled: boolean) => send({ type: "mcp.terminal-path.set", enabled }),
+    [send]
+  )
+
   return {
     connected,
     send,
@@ -207,6 +232,11 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     ptyResize,
     ptyKill,
     mcpResourceUpsert,
-    mcpResourceRemove
+    mcpResourceRemove,
+    mcpStatus,
+    mcpRotateToken,
+    mcpRegister,
+    mcpUnregister,
+    mcpSetTerminalPath
   }
 }

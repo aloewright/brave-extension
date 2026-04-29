@@ -21,9 +21,15 @@
 
 import { createServer } from "http"
 import { randomBytes } from "crypto"
-import { writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "fs"
-import { homedir } from "os"
-import { join, dirname } from "path"
+import {
+  registerClaudeJson as installerRegister,
+  unregisterClaudeJson as installerUnregister,
+  isRegistered as installerIsRegistered,
+  writeTokenAndEnv,
+  generateToken,
+  hasTerminalPath,
+  setTerminalPath as installerSetTerminalPath
+} from "./installer.mjs"
 import { DOM_TOOL_DEFS, buildReferenceTools } from "./tool-defs/dom-tools.mjs"
 import { LIBRARY_TOOL_DEFS } from "./tool-defs/library-tools.mjs"
 import { CHROME_TOOL_DEFS } from "./tool-defs/chrome-tools.mjs"
@@ -32,10 +38,6 @@ import {
   buildRecorderHostTools
 } from "./tool-defs/recorder-tools.mjs"
 
-const CONFIG_DIR = join(homedir(), ".config", "ai-dev-sidebar")
-const TOKEN_PATH = join(CONFIG_DIR, "mcp-token")
-const ENV_PATH = join(CONFIG_DIR, "env")
-const CLAUDE_JSON = join(homedir(), ".claude.json")
 const PORT_RANGE = [8473, 8474, 8475, 8476, 8477, 8478, 8479, 8480, 8481, 8482, 8483]
 
 function nowIso() {
@@ -84,15 +86,7 @@ export class MCPServer {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
   async start() {
-    this.token = randomBytes(32).toString("hex")
-    mkdirSync(CONFIG_DIR, { recursive: true })
-    writeFileSync(TOKEN_PATH, this.token, { mode: 0o600 })
-    try {
-      chmodSync(TOKEN_PATH, 0o600)
-    } catch {
-      /* best effort */
-    }
-
+    this.token = generateToken()
     this.httpServer = createServer((req, res) => this._onRequest(req, res))
 
     for (const p of PORT_RANGE) {
@@ -119,14 +113,54 @@ export class MCPServer {
       throw new Error("MCP server: no free port in 8473..8483")
     }
 
-    writeFileSync(
-      ENV_PATH,
-      `AI_DEV_MCP_URL=http://127.0.0.1:${this.port}\nAI_DEV_MCP_TOKEN=${this.token}\n`,
-      { mode: 0o600 }
-    )
-
+    writeTokenAndEnv(this.token, this.port)
     this._registerWithClaudeJson()
     this.log(`[mcp] listening on http://127.0.0.1:${this.port} (token rotated ${nowIso()})`)
+  }
+
+  // ── Public APIs for host RPCs ─────────────────────────────────────────
+  getStatus() {
+    const reg = installerIsRegistered()
+    const tp = hasTerminalPath()
+    return {
+      port: this.port,
+      sessions: this.sseClients.size,
+      registered: reg,
+      claudeJsonStatus: reg ? "registered" : "missing",
+      terminalPathStatus: tp.hasRcBlock && tp.hasWrapper
+        ? "enabled"
+        : tp.hasRcBlock || tp.hasWrapper
+        ? "partial"
+        : "disabled",
+      hasRcBlock: tp.hasRcBlock,
+      hasWrapper: tp.hasWrapper,
+      tokenSet: !!this.token,
+      tools: this.tools.size,
+      resources: this.resources.size
+    }
+  }
+
+  rotateToken() {
+    this.token = generateToken()
+    writeTokenAndEnv(this.token, this.port)
+    // ~/.claude.json doesn't change — it uses the ${AI_DEV_MCP_TOKEN}
+    // placeholder which expands at connect time from the launching shell's
+    // env. Newly-spawned PTY shells inherit via ptyEnv(). Already-running
+    // external `claude` sessions keep the OLD token until they reconnect.
+    this.log(`[mcp] token rotated ${nowIso()}`)
+    return { token: this.token, rotatedAt: nowIso() }
+  }
+
+  registerClaudeJson() {
+    return installerRegister(this.port)
+  }
+
+  unregisterClaudeJson() {
+    return installerUnregister()
+  }
+
+  setTerminalPath(enabled) {
+    return installerSetTerminalPath(!!enabled)
   }
 
   stop() {
@@ -151,36 +185,14 @@ export class MCPServer {
 
   // ── Claude config registration ─────────────────────────────────────────
   _registerWithClaudeJson() {
-    let cfg = {}
-    if (existsSync(CLAUDE_JSON)) {
-      try {
-        cfg = JSON.parse(readFileSync(CLAUDE_JSON, "utf-8"))
-      } catch (err) {
-        this.log(`[mcp] WARN: cannot parse ${CLAUDE_JSON}: ${err.message}`)
-        return
-      }
-    }
-    cfg.mcpServers = cfg.mcpServers || {}
-    // NOTE: the `${AI_DEV_MCP_TOKEN}` literal here is intentional — Claude
-    // Code expands env-var references in `headers` at MCP-connection time
-    // using the env it was launched with. Our PTY shells inherit
-    // AI_DEV_MCP_TOKEN via mcpServer.ptyEnv(), so terminals spawned from the
-    // sidepanel get expansion for free. External terminals only get the
-    // expansion if the user runs `claude` from a shell that has the var
-    // exported — that's what the M7 wrapper script (spec §7.1) covers.
-    // Do NOT replace this with a baked-in token: that would write the secret
-    // to disk in plaintext.
-    cfg.mcpServers["ai-dev-sidebar"] = {
-      type: "sse",
-      url: `http://127.0.0.1:${this.port}/sse`,
-      headers: { Authorization: "Bearer ${AI_DEV_MCP_TOKEN}" }
-    }
+    // Delegates to native-host/installer.mjs, which uses the marker-pure
+    // mergeMcpEntry() helper to preserve siblings. The `${AI_DEV_MCP_TOKEN}`
+    // placeholder is intentional — Claude expands env refs at connect time.
     try {
-      mkdirSync(dirname(CLAUDE_JSON), { recursive: true })
-      writeFileSync(CLAUDE_JSON, JSON.stringify(cfg, null, 2))
-      this.log(`[mcp] registered ai-dev-sidebar in ${CLAUDE_JSON}`)
+      installerRegister(this.port)
+      this.log(`[mcp] registered ai-dev-sidebar in ~/.claude.json`)
     } catch (err) {
-      this.log(`[mcp] WARN: cannot write ${CLAUDE_JSON}: ${err.message}`)
+      this.log(`[mcp] WARN: cannot write ~/.claude.json: ${err.message}`)
     }
   }
 

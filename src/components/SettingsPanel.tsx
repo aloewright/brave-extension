@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import type { Settings, CLIBackend, MCPServer } from "../types"
+import type { Settings, CLIBackend, MCPServer, MCPStatus } from "../types"
 import { BACKEND_INFO } from "../types"
 
 export function SettingsPanel({
@@ -8,7 +8,8 @@ export function SettingsPanel({
   onClose,
   nativeHost,
   mcpServers,
-  cloudosSync
+  cloudosSync,
+  mcp
 }: {
   settings: Settings
   onUpdate: (partial: Partial<Settings>) => void
@@ -20,6 +21,14 @@ export function SettingsPanel({
   }
   mcpServers: MCPServer[]
   cloudosSync: { lastSyncAt: number | null; lastError: string | null; pending: boolean; flush: () => void }
+  mcp?: {
+    status: MCPStatus | null
+    refresh: () => void
+    rotateToken: () => void
+    resetRegistration: () => void
+    setTerminalPath: (enabled: boolean) => void
+    toast: string | null
+  }
 }) {
   const [newServer, setNewServer] = useState({ name: "", command: "", args: "" })
   const [showAddMCP, setShowAddMCP] = useState(false)
@@ -202,6 +211,106 @@ export function SettingsPanel({
           )}
         </div>
 
+        {/* MCP Server (this extension's own server) */}
+        {mcp && (
+          <div>
+            <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
+              ai-dev-sidebar MCP server
+            </label>
+            <div className="bg-card/20 rounded p-2 space-y-2">
+              <StatusRow
+                label="Server"
+                ok={!!mcp.status?.port}
+                detail={
+                  mcp.status?.port
+                    ? `127.0.0.1:${mcp.status.port} · ${mcp.status.sessions} session${mcp.status.sessions === 1 ? "" : "s"} · ${mcp.status.tools} tools`
+                    : "not running"
+                }
+              />
+              <StatusRow
+                label="Registered in ~/.claude.json"
+                ok={!!mcp.status?.registered}
+                detail={mcp.status?.claudeJsonStatus || "unknown"}
+              />
+              <StatusRow
+                label="Available in any terminal"
+                ok={mcp.status?.terminalPathStatus === "enabled"}
+                warn={mcp.status?.terminalPathStatus === "partial"}
+                detail={mcp.status?.terminalPathStatus || "unknown"}
+              />
+
+              <Toggle
+                label="Available in any terminal"
+                description="Adds ~/.config/ai-dev-sidebar to PATH via ~/.zshrc / ~/.bashrc and drops a `claude` wrapper that loads the MCP token."
+                checked={mcp.status?.terminalPathStatus === "enabled"}
+                onChange={(v) => mcp.setTerminalPath(v)}
+              />
+
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  onClick={mcp.rotateToken}
+                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30"
+                >
+                  Rotate token
+                </button>
+                <button
+                  onClick={mcp.resetRegistration}
+                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60"
+                >
+                  Reset registration
+                </button>
+                <button
+                  onClick={mcp.refresh}
+                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50"
+                  title="Refresh status"
+                >
+                  ↻
+                </button>
+              </div>
+              {mcp.toast && (
+                <div className="text-[10px] text-success/90 pt-1">{mcp.toast}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tool gates + integrations */}
+        <div>
+          <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
+            Tool gates
+          </label>
+          <div className="bg-card/20 rounded p-2 space-y-2">
+            <Toggle
+              label="Allow eval_js tool"
+              description="Lets MCP clients run arbitrary JS in the active tab. Default OFF."
+              checked={settings.allowEvalJs}
+              onChange={(v) => onUpdate({ allowEvalJs: v })}
+            />
+            <Toggle
+              label="Allow extensions_uninstall"
+              description="Lets MCP clients uninstall other extensions via chrome.management. Default OFF."
+              checked={settings.allowExtensionUninstall}
+              onChange={(v) => onUpdate({ allowExtensionUninstall: v })}
+            />
+            <Toggle
+              label="Cookies always-allow override"
+              description="Skip per-call consent for cookie tools. Default OFF."
+              checked={settings.cookiesAllowAll}
+              onChange={(v) => onUpdate({ cookiesAllowAll: v })}
+            />
+            <div className="pt-1">
+              <label className="text-[10px] text-fg/50 mb-1 block">Brave Search API key</label>
+              <input
+                type="password"
+                value={settings.braveSearchApiKey}
+                onChange={(e) => onUpdate({ braveSearchApiKey: e.target.value })}
+                className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                placeholder="brave_search_…"
+              />
+            </div>
+          </div>
+        </div>
+
         {/* CloudOS Sync */}
         <div className="space-y-2">
           <label className="text-[11px] text-fg/50 uppercase tracking-wider block">CloudOS Sync</label>
@@ -294,6 +403,27 @@ export function SettingsPanel({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function StatusRow({
+  label,
+  ok,
+  warn,
+  detail
+}: {
+  label: string
+  ok: boolean
+  warn?: boolean
+  detail: string
+}) {
+  const color = ok ? "bg-success" : warn ? "bg-warning" : "bg-fg/30"
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${color}`} />
+      <div className="text-[11px] text-fg/70 flex-1 truncate">{label}</div>
+      <div className="text-[9px] text-fg/40 font-mono truncate max-w-[55%]">{detail}</div>
     </div>
   )
 }

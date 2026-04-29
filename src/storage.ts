@@ -178,6 +178,10 @@ function defaultSettings(): Settings {
     cloudosSyncEnabled: false,
     cloudosNotesUrl: "https://notes.pdx.software/api/notes",
     cloudosServiceToken: "",
-    cloudosPruneAfterSync: false
+    cloudosPruneAfterSync: false,
+    allowEvalJs: false,
+    allowExtensionUninstall: false,
+    cookiesAllowAll: false,
+    braveSearchApiKey: ""
   }
 }

@@ -525,13 +525,57 @@ async function main() {
       }
 
       case "mcp.status": {
-        sendMessage({
-          type: "mcp.status",
-          port: mcp.port,
-          tokenSet: !!mcp.token,
-          resources: mcp.resources.size,
-          tools: mcp.tools.size
-        })
+        sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        break
+      }
+
+      case "mcp.rotate-token": {
+        try {
+          const r = mcp.rotateToken()
+          sendMessage({ type: "mcp.rotate-token", ok: true, rotatedAt: r.rotatedAt })
+          // Broadcast updated status so the panel can refresh.
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.rotate-token", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.register": {
+        try {
+          mcp.registerClaudeJson()
+          sendMessage({ type: "mcp.register", ok: true })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.register", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.unregister": {
+        try {
+          mcp.unregisterClaudeJson()
+          sendMessage({ type: "mcp.unregister", ok: true })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.unregister", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.terminal-path.set": {
+        try {
+          const results = mcp.setTerminalPath(!!msg.enabled)
+          sendMessage({
+            type: "mcp.terminal-path.set",
+            ok: true,
+            enabled: !!msg.enabled,
+            results
+          })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.terminal-path.set", ok: false, error: err.message })
+        }
         break
       }
 

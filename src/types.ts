@@ -88,6 +88,25 @@ export interface Settings {
   cloudosNotesUrl: string
   cloudosServiceToken: string
   cloudosPruneAfterSync: boolean
+  // MCP / install gates (M7, ALO-251)
+  allowEvalJs: boolean
+  allowExtensionUninstall: boolean
+  cookiesAllowAll: boolean
+  braveSearchApiKey: string
+}
+
+/** Status reported by the native host's mcp.status RPC. */
+export interface MCPStatus {
+  port: number | null
+  sessions: number
+  registered: boolean
+  claudeJsonStatus: "registered" | "missing"
+  terminalPathStatus: "enabled" | "partial" | "disabled"
+  hasRcBlock: boolean
+  hasWrapper: boolean
+  tokenSet: boolean
+  tools: number
+  resources: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -101,7 +120,11 @@ export const DEFAULT_SETTINGS: Settings = {
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
   cloudosServiceToken: "",
-  cloudosPruneAfterSync: false
+  cloudosPruneAfterSync: false,
+  allowEvalJs: false,
+  allowExtensionUninstall: false,
+  cookiesAllowAll: false,
+  braveSearchApiKey: ""
 }
 
 // ─── Design inspector types (folded in from Alexometer) ───────────────
