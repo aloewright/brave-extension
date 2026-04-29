@@ -200,6 +200,27 @@ export interface CachedScan {
   cachedAt: string
 }
 
+// ── Recorder (M6, ALO-248) ──────────────────────────────────────────────
+
+export type RecorderSource = "tab" | "screen" | "camera"
+
+export interface RecordingMetadata {
+  id: string
+  source: RecorderSource
+  durationMs: number
+  sizeBytes: number
+  mimeType: "video/mp4"
+  /** OS-side filename, e.g. "recording-2026-04-29T12-34-56.mp4". */
+  filename: string
+  /** ISO timestamp at stop. */
+  createdAt: string
+  /** Tab URL captured at start, only for source==="tab". */
+  originUrl?: string
+}
+
+export const RECORDER_STORAGE_KEY = "recorder.recordings"
+export const RECORDER_MIME = "video/mp4;codecs=h264"
+
 // ── Element picker (Reference capture) ──────────────────────────────────
 // Separate from the Inspector. The picker captures a single element from
 // the active tab and returns a Reference payload the Terminal section

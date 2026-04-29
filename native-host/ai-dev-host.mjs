@@ -18,6 +18,7 @@ import { homedir } from "os"
 import { join, dirname } from "path"
 import { PTYManager } from "./pty-manager.mjs"
 import { MCPServer } from "./mcp-server.mjs"
+import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
 
@@ -548,6 +549,35 @@ async function main() {
 
       case "mcp.resource.remove": {
         if (msg.uri) mcp.removeResource(msg.uri)
+        break
+      }
+
+      case "recorder.mirror.start": {
+        try {
+          const res = mirrorStart(msg.id)
+          sendMessage({ type: "recorder.mirror.ack", phase: "start", id: msg.id, ...res })
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "start", id: msg.id, error: err.message })
+        }
+        break
+      }
+
+      case "recorder.mirror.chunk": {
+        try {
+          mirrorChunk(msg.id, msg.base64)
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "chunk", id: msg.id, error: err.message })
+        }
+        break
+      }
+
+      case "recorder.mirror.finish": {
+        try {
+          const res = await mirrorFinish(msg.id)
+          sendMessage({ type: "recorder.mirror.ack", phase: "finish", id: msg.id, ...res })
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "finish", id: msg.id, error: err.message })
+        }
         break
       }
 

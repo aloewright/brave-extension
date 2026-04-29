@@ -7,7 +7,15 @@ import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools"
 import { EXTENSIONS_TOOL_HANDLERS } from "./background/extensions-tools"
 import { SEARCH_TOOL_HANDLERS } from "./background/search-tools"
 import { startResourcePublishers } from "./background/resource-publishers"
-import type { PickerCapture, PickerMessage, Reference } from "./types"
+import {
+  recorderState,
+  startRecording as startRecorderM6,
+  stopRecording as stopRecorderM6,
+  handleRecorderStopped,
+  handleRecorderError,
+  handleRecorderReady
+} from "./background/recorder"
+import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
 const HEARTBEAT_ALARM = "native-heartbeat"
@@ -105,95 +113,12 @@ function sendToNative(msg: any) {
   }
 }
 
-// ─── Tab recording state ──────────────────────────────────────────────
-// We keep the MediaRecorder in an offscreen document because service
-// workers can't run MediaRecorder. Background orchestrates lifecycle and
-// exposes the red-dot badge indicator while recording is active.
-
-const OFFSCREEN_URL = "tabs/offscreen.html"
-const RECORDING_SETTINGS_KEY = "ai-dev-settings"
-
-interface RecordingState {
-  active: boolean
-  tabId: number | null
-  startedAt: number | null
-  lastUpload: { key?: string; url?: string; size: number; at: number } | null
-  lastError: string | null
-}
-
-const recording: RecordingState = {
-  active: false,
-  tabId: null,
-  startedAt: null,
-  lastUpload: null,
-  lastError: null
-}
-
-// Queue a pending start message until the offscreen document signals ready
-let pendingStart: {
-  streamId: string
-  uploadUrl: string
-  serviceToken?: string
-} | null = null
-
-async function hasOffscreen(): Promise<boolean> {
-  // @ts-ignore — available on MV3 Chrome
-  const existing = await chrome.runtime.getContexts?.({
-    contextTypes: ["OFFSCREEN_DOCUMENT"],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)]
-  })
-  return Array.isArray(existing) && existing.length > 0
-}
-
-async function ensureOffscreen() {
-  if (await hasOffscreen()) return
-  // @ts-ignore — chrome.offscreen is available with "offscreen" permission
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ["USER_MEDIA"],
-    justification: "Record the active tab to save as a video in media storage"
-  })
-}
-
-async function closeOffscreen() {
-  if (!(await hasOffscreen())) return
-  try {
-    // @ts-ignore
-    await chrome.offscreen.closeDocument()
-  } catch {
-    // ignore
-  }
-}
-
-function setRecordingBadge(on: boolean) {
-  if (on) {
-    chrome.action.setBadgeText({ text: "●" })
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
-    chrome.action.setTitle({ title: "Recording tab — click to stop" })
-    // Show the popup during recording so the toolbar click reveals a Stop
-    // button. In idle, no popup → click opens the sidebar directly.
-    chrome.action.setPopup({ popup: "popup.html" })
-  } else {
-    chrome.action.setBadgeText({ text: "" })
-    chrome.action.setTitle({ title: "AI Dev Sidebar" })
-    chrome.action.setPopup({ popup: "" })
-  }
-}
-
-async function getRecordingUploadConfig(): Promise<{ uploadUrl: string; serviceToken?: string }> {
-  const result = await chrome.storage.local.get(RECORDING_SETTINGS_KEY)
-  const settings = result[RECORDING_SETTINGS_KEY] as
-    | { cloudosNotesUrl?: string; cloudosServiceToken?: string }
-    | undefined
-  // Derive the media upload URL from the existing notes URL the user already
-  // configured: https://notes.pdx.software/api/notes → .../api/media/upload
-  const notesUrl = settings?.cloudosNotesUrl || "https://notes.pdx.software/api/notes"
-  const uploadUrl = notesUrl.replace(/\/api\/notes\/?$/, "/api/media/upload")
-  return { uploadUrl, serviceToken: settings?.cloudosServiceToken || undefined }
-}
+// ─── Recorder state broadcasting ──────────────────────────────────────
+// Recorder lifecycle lives in src/background/recorder.ts. We just wire
+// runtime messages and broadcast state to connected sidebars.
 
 function broadcastRecordingState() {
-  const payload = { type: "recording-state", state: { ...recording } }
+  const payload = { type: "recording-state", state: { ...recorderState } }
   for (const [, port] of sidebarPorts) {
     try {
       port.postMessage(payload)
@@ -201,65 +126,6 @@ function broadcastRecordingState() {
       // ignore
     }
   }
-}
-
-async function startTabRecording(targetTabId?: number): Promise<{ ok: boolean; error?: string }> {
-  if (recording.active) return { ok: false, error: "Already recording" }
-  try {
-    let tabId = targetTabId
-    if (!tabId) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) return { ok: false, error: "No active tab" }
-      tabId = tab.id
-    }
-
-    // Mint a media stream id for the target tab. Consumer is the offscreen
-    // document, which doesn't have a tab id — leaving consumerTabId unset
-    // lets any document in this extension consume it.
-    const streamId = await new Promise<string>((resolve, reject) => {
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId! }, (id) => {
-        if (chrome.runtime.lastError || !id) {
-          reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
-        } else {
-          resolve(id)
-        }
-      })
-    })
-
-    const { uploadUrl, serviceToken } = await getRecordingUploadConfig()
-    pendingStart = { streamId, uploadUrl, serviceToken }
-    await ensureOffscreen()
-    // The offscreen page will send OFFSCREEN_READY when mounted; at that
-    // point we flush the pending start. It also might mount instantly if
-    // the document was already open — send the start message directly.
-    chrome.runtime.sendMessage({
-      type: "OFFSCREEN_START",
-      streamId,
-      uploadUrl,
-      serviceToken
-    }).catch(() => {
-      // no listener yet — handler below on OFFSCREEN_READY will retry
-    })
-
-    recording.active = true
-    recording.tabId = tabId
-    recording.startedAt = Date.now()
-    recording.lastError = null
-    setRecordingBadge(true)
-    broadcastRecordingState()
-    return { ok: true }
-  } catch (err) {
-    recording.lastError = (err as Error).message
-    setRecordingBadge(false)
-    return { ok: false, error: recording.lastError }
-  }
-}
-
-async function stopTabRecording(): Promise<{ ok: boolean }> {
-  if (!recording.active) return { ok: false }
-  chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" }).catch(() => {})
-  // Actual cleanup happens on OFFSCREEN_UPLOADED / OFFSCREEN_ERROR
-  return { ok: true }
 }
 
 // Track sidebar connections
@@ -309,50 +175,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true })
   }
 
-  // ─── Recording control ──────────────────────────────────────────────
+  // ─── Recorder control (M6, ALO-248) ─────────────────────────────────
 
   if (message.type === "START_RECORDING") {
-    startTabRecording(message.tabId).then((result) => sendResponse(result))
+    const source = (message.source || "tab") as RecorderSource
+    startRecorderM6({ source, tabId: message.tabId })
+      .then((result) => {
+        broadcastRecordingState()
+        sendResponse(result)
+      })
     return true
   }
 
   if (message.type === "STOP_RECORDING") {
-    stopTabRecording().then((result) => sendResponse(result))
+    stopRecorderM6().then((result) => sendResponse(result))
     return true
   }
 
   if (message.type === "GET_RECORDING_STATE") {
-    sendResponse({ state: { ...recording } })
+    sendResponse({ state: { ...recorderState } })
   }
 
-  // ─── Offscreen document lifecycle events ────────────────────────────
-
-  if (message.type === "OFFSCREEN_READY") {
-    // Flush a queued start if background raced ahead of the document mount
-    if (pendingStart) {
-      chrome.runtime.sendMessage({ type: "OFFSCREEN_START", ...pendingStart }).catch(() => {})
-      pendingStart = null
-    }
+  if (message.type === "RECORDER_READY") {
+    handleRecorderReady((m) => {
+      chrome.runtime.sendMessage(m).catch(() => {})
+    })
   }
 
-  if (message.type === "OFFSCREEN_STARTED") {
+  if (message.type === "RECORDER_STARTED") {
     broadcastRecordingState()
   }
 
-  if (message.type === "OFFSCREEN_UPLOADED") {
-    recording.active = false
-    recording.tabId = null
-    recording.startedAt = null
-    recording.lastUpload = {
-      key: message.key,
-      url: message.url,
-      size: message.size,
-      at: Date.now()
-    }
-    recording.lastError = null
-    setRecordingBadge(false)
-    broadcastRecordingState()
-    closeOffscreen()
+  if (message.type === "RECORDER_STOPPED") {
+    void handleRecorderStopped(message, { sendNative: sendToNative }).then(() => {
+      broadcastRecordingState()
+    })
   }
 
   // ─── Picker routing ─────────────────────────────────────────────────
@@ -392,14 +249,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true })
   }
 
-  if (message.type === "OFFSCREEN_ERROR") {
-    recording.active = false
-    recording.tabId = null
-    recording.startedAt = null
-    recording.lastError = message.error || "Recording failed"
-    setRecordingBadge(false)
+  if (message.type === "RECORDER_ERROR") {
+    handleRecorderError(message.error || "Recording failed")
     broadcastRecordingState()
-    closeOffscreen()
   }
 })
 
@@ -632,7 +484,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       chrome.action.setBadgeText({ text: "+1" })
       chrome.action.setBadgeBackgroundColor({ color: "#4ade80" })
       setTimeout(() => {
-        if (!recording.active) chrome.action.setBadgeText({ text: "" })
+        if (!recorderState.active) chrome.action.setBadgeText({ text: "" })
       }, 1200)
     } catch (err) {
       console.warn("save-highlight failed:", err)
