@@ -7,12 +7,20 @@
  *   bg → { type: "RECORDER_STOP" }
  *   off → { type: "RECORDER_READY" }
  *   off → { type: "RECORDER_STARTED", id }
- *   off → { type: "RECORDER_STOPPED", id, source, durationMs, base64 }
+ *   off → { type: "RECORDER_STOPPED", id, source, durationMs, sizeBytes, blobUrl }
+ *   off → { type: "RECORDER_MIRROR_START",  id }
+ *   off → { type: "RECORDER_MIRROR_CHUNK",  id, base64 }      // many of these
+ *   off → { type: "RECORDER_MIRROR_FINISH", id }
  *   off → { type: "RECORDER_ERROR", error }
+ *
+ * Memory note: instead of sending a giant base64 string back to the SW, we
+ * create a Blob URL here (background just downloads it) and stream the
+ * native-mirror payload to the background in 768KB slices, peak memory
+ * ~768KB rather than the full recording.
  */
 import { useEffect } from "react"
 import { RECORDER_MIME, type RecorderSource } from "../types"
-import { blobToBase64 } from "../lib/recorder-chunks"
+import { DEFAULT_CHUNK_BYTES } from "../lib/recorder-chunks"
 
 type StartMsg = {
   type: "RECORDER_START"
@@ -49,6 +57,36 @@ async function acquireStream(msg: StartMsg): Promise<MediaStream> {
   }
   // camera
   return await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+}
+
+/**
+ * Stream a Blob to the background as `RECORDER_MIRROR_*` messages, slicing
+ * the blob into ~768KB pieces and base64-encoding each slice individually
+ * so peak memory stays ~768KB instead of the entire recording.
+ */
+export async function streamBlobToMirror(
+  blob: Blob,
+  id: string,
+  send: (m: unknown) => void,
+  sliceBytes = DEFAULT_CHUNK_BYTES
+): Promise<void> {
+  send({ type: "RECORDER_MIRROR_START", id })
+  // sliceBytes is the *binary* slice size; base64 expansion (~4/3) keeps each
+  // emitted message comfortably under the native messaging 1 MB cap.
+  for (let start = 0; start < blob.size; start += sliceBytes) {
+    const end = Math.min(start + sliceBytes, blob.size)
+    const slice = blob.slice(start, end)
+    const buf = new Uint8Array(await slice.arrayBuffer())
+    let binary = ""
+    const STR_SLICE = 0x8000 // 32 KB → safe for String.fromCharCode.apply
+    for (let i = 0; i < buf.length; i += STR_SLICE) {
+      const piece = buf.subarray(i, Math.min(i + STR_SLICE, buf.length))
+      binary += String.fromCharCode.apply(null, Array.from(piece) as number[])
+    }
+    const base64 = btoa(binary)
+    send({ type: "RECORDER_MIRROR_CHUNK", id, base64 })
+  }
+  send({ type: "RECORDER_MIRROR_FINISH", id })
 }
 
 async function startRecording(msg: StartMsg) {
@@ -93,14 +131,25 @@ async function startRecording(msg: StartMsg) {
       const durationMs = Date.now() - startedAt
       try {
         const blob = new Blob(chunks, { type: "video/mp4" })
-        const base64 = await blobToBase64(blob)
+        const blobUrl = URL.createObjectURL(blob)
         chrome.runtime.sendMessage({
           type: "RECORDER_STOPPED",
           id,
           source,
           durationMs,
-          base64
+          sizeBytes: blob.size,
+          blobUrl
         })
+        // Stream the mirror payload chunk-by-chunk to the SW (which forwards
+        // to native). Peak memory ~768KB regardless of recording length.
+        try {
+          await streamBlobToMirror(blob, id, (m) =>
+            chrome.runtime.sendMessage(m).catch(() => {})
+          )
+        } catch (err) {
+          // Mirror is best-effort; the download path already succeeded above.
+          console.warn("[recorder] mirror streaming failed", err)
+        }
       } catch (err) {
         chrome.runtime.sendMessage({
           type: "RECORDER_ERROR",

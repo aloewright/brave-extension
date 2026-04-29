@@ -13,7 +13,8 @@ import {
   stopRecording as stopRecorderM6,
   handleRecorderStopped,
   handleRecorderError,
-  handleRecorderReady
+  handleRecorderReady,
+  handleMirrorMessage
 } from "./background/recorder"
 import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
@@ -210,6 +211,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void handleRecorderStopped(message, { sendNative: sendToNative }).then(() => {
       broadcastRecordingState()
     })
+  }
+
+  if (
+    message.type === "RECORDER_MIRROR_START" ||
+    message.type === "RECORDER_MIRROR_CHUNK" ||
+    message.type === "RECORDER_MIRROR_FINISH"
+  ) {
+    handleMirrorMessage(message, { sendNative: sendToNative })
   }
 
   // ─── Picker routing ─────────────────────────────────────────────────

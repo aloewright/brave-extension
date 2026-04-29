@@ -9,7 +9,6 @@ import {
   type RecordingMetadata
 } from "../types"
 import { ulid } from "../lib/ulid"
-import { chunkBase64, DEFAULT_CHUNK_BYTES } from "../lib/recorder-chunks"
 
 const OFFSCREEN_URL = "tabs/offscreen.html"
 
@@ -82,8 +81,14 @@ export async function startRecording(opts: {
   source: RecorderSource
   tabId?: number
 }): Promise<{ ok: boolean; error?: string; id?: string }> {
-  if (recorderState.active) return { ok: false, error: "Already recording" }
+  if (recorderState.active || pendingStart) {
+    return { ok: false, error: "Already recording" }
+  }
   const id = ulid()
+  // Claim the slot synchronously so concurrent callers can't race past
+  // the guard above while we await tab/streamId/offscreen setup.
+  recorderState.active = true
+  pendingStart = { source: opts.source, id }
   try {
     let streamId: string | undefined
     let originUrl: string | null = null
@@ -93,7 +98,11 @@ export async function startRecording(opts: {
       let tid = opts.tabId
       if (!tid) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-        if (!tab?.id) return { ok: false, error: "No active tab" }
+        if (!tab?.id) {
+          recorderState.active = false
+          pendingStart = null
+          return { ok: false, error: "No active tab" }
+        }
         tid = tab.id
         originUrl = tab.url || null
       } else {
@@ -129,7 +138,6 @@ export async function startRecording(opts: {
         // Offscreen not yet listening; RECORDER_READY handler will retry.
       })
 
-    recorderState.active = true
     recorderState.source = opts.source
     recorderState.startedAt = Date.now()
     recorderState.tabId = tabId
@@ -140,6 +148,7 @@ export async function startRecording(opts: {
   } catch (err) {
     recorderState.lastError = (err as Error).message
     recorderState.active = false
+    pendingStart = null
     setBadge(false)
     return { ok: false, error: recorderState.lastError }
   }
@@ -162,8 +171,7 @@ async function persistMetadata(meta: RecordingMetadata) {
   await chrome.storage.local.set({ [RECORDER_STORAGE_KEY]: list.slice(0, 200) })
 }
 
-async function downloadBlob(blob: Blob, filename: string): Promise<void> {
-  const url = URL.createObjectURL(blob)
+async function downloadBlobUrl(url: string, filename: string): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       chrome.downloads.download(
@@ -180,52 +188,72 @@ async function downloadBlob(blob: Blob, filename: string): Promise<void> {
     })
   } finally {
     // Revoke after a short delay so chrome can fetch the blob URL.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // revokeObjectURL is unavailable in some SW environments; harmless.
+      }
+    }, 60_000)
   }
 }
 
-/** Mirror to ~/.config/ai-dev-sidebar/recordings/{id}.mp4 via native host. */
-async function mirrorToNative(
-  sendNative: (msg: unknown) => void,
-  id: string,
-  base64: string
-) {
-  sendNative({ type: "recorder.mirror.start", id })
-  for (const part of chunkBase64(base64, DEFAULT_CHUNK_BYTES)) {
-    sendNative({ type: "recorder.mirror.chunk", id, base64: part })
+/**
+ * Route a mirror message from the offscreen document to the native host.
+ * The offscreen now streams mirror chunks itself (peak ~768 KB instead of
+ * the entire recording), so this is just a translator from the offscreen
+ * `RECORDER_MIRROR_*` message names to the native `recorder.mirror.*`
+ * protocol.
+ */
+export function handleMirrorMessage(
+  msg: { type: string; id: string; base64?: string },
+  ctx: { sendNative: (m: unknown) => void }
+): boolean {
+  if (msg.type === "RECORDER_MIRROR_START") {
+    ctx.sendNative({ type: "recorder.mirror.start", id: msg.id })
+    return true
   }
-  sendNative({ type: "recorder.mirror.finish", id })
+  if (msg.type === "RECORDER_MIRROR_CHUNK") {
+    ctx.sendNative({
+      type: "recorder.mirror.chunk",
+      id: msg.id,
+      base64: msg.base64
+    })
+    return true
+  }
+  if (msg.type === "RECORDER_MIRROR_FINISH") {
+    ctx.sendNative({ type: "recorder.mirror.finish", id: msg.id })
+    return true
+  }
+  return false
 }
 
-/** Offscreen emitted RECORDER_STOPPED — blob arrives as base64 in `msg.base64`. */
+/**
+ * Offscreen emitted RECORDER_STOPPED — the blob lives in the offscreen
+ * document; we receive a blob URL and just hand it to chrome.downloads.
+ * No base64 decode, no Uint8Array, no Blob reconstruction in the SW.
+ */
 export async function handleRecorderStopped(
-  msg: { id: string; source: RecorderSource; durationMs: number; base64: string },
-  ctx: { sendNative: (msg: unknown) => void }
+  msg: {
+    id: string
+    source: RecorderSource
+    durationMs: number
+    sizeBytes: number
+    blobUrl: string
+  },
+  _ctx: { sendNative: (msg: unknown) => void }
 ): Promise<RecordingMetadata | null> {
   try {
-    // Decode just to compute byte size; we keep the base64 for native mirror
-    // and reconstruct a Blob for the browser-side download.
-    const binary = atob(msg.base64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const blob = new Blob([bytes], { type: "video/mp4" })
-
     const createdAt = new Date()
     const filename = `recording-${isoForFilename(createdAt)}.mp4`
 
-    await downloadBlob(blob, filename)
-
-    try {
-      await mirrorToNative(ctx.sendNative, msg.id, msg.base64)
-    } catch (err) {
-      console.warn("recorder: native mirror failed", err)
-    }
+    await downloadBlobUrl(msg.blobUrl, filename)
 
     const meta: RecordingMetadata = {
       id: msg.id,
       source: msg.source,
       durationMs: msg.durationMs,
-      sizeBytes: blob.size,
+      sizeBytes: msg.sizeBytes,
       mimeType: "video/mp4",
       filename,
       createdAt: createdAt.toISOString(),

@@ -23,29 +23,47 @@ export function ensureMirrorDir() {
 
 export function mirrorStart(id) {
   if (!id || typeof id !== "string") throw new Error("recorder.mirror.start: id required")
-  if (sessions.has(id)) {
+  const safeId = sanitizeId(id)
+  if (safeId !== id) {
+    throw new Error(`recorder.mirror.start: invalid id "${id}"`)
+  }
+  if (sessions.has(safeId)) {
     // Stale session — clean up and re-open.
     try {
-      sessions.get(id).stream.destroy()
+      sessions.get(safeId).stream.destroy()
     } catch {}
-    sessions.delete(id)
+    sessions.delete(safeId)
   }
   ensureMirrorDir()
-  const path = join(MIRROR_DIR, `${sanitizeId(id)}.mp4`)
+  const path = join(MIRROR_DIR, `${safeId}.mp4`)
   if (existsSync(path)) {
     try {
       unlinkSync(path)
     } catch {}
   }
   const stream = createWriteStream(path)
-  sessions.set(id, { stream, path, bytes: 0 })
+  stream.on("error", (err) => {
+    sessions.delete(safeId)
+    // No way to surface from a fire-and-forget write — log to stderr.
+    console.error(`[recorder-mirror] stream error for ${safeId}: ${err.message}`)
+  })
+  sessions.set(safeId, { stream, path, bytes: 0 })
   return { ok: true, path }
 }
 
 export function mirrorChunk(id, base64) {
-  const sess = sessions.get(id)
-  if (!sess) throw new Error(`recorder.mirror.chunk: no session for ${id}`)
+  if (!id || typeof id !== "string") throw new Error("recorder.mirror.chunk: id required")
+  const safeId = sanitizeId(id)
+  if (safeId !== id) {
+    throw new Error(`recorder.mirror.chunk: invalid id "${id}"`)
+  }
+  const sess = sessions.get(safeId)
+  if (!sess) throw new Error(`recorder.mirror.chunk: no session for ${safeId}`)
   if (typeof base64 !== "string") throw new Error("recorder.mirror.chunk: base64 required")
+  if (!sess.stream.writable) {
+    console.error(`[recorder-mirror] dropping chunk for ${safeId}: stream not writable`)
+    return { ok: false, bytes: sess.bytes, dropped: true }
+  }
   const buf = Buffer.from(base64, "base64")
   sess.stream.write(buf)
   sess.bytes += buf.length
@@ -53,11 +71,16 @@ export function mirrorChunk(id, base64) {
 }
 
 export function mirrorFinish(id) {
-  const sess = sessions.get(id)
-  if (!sess) throw new Error(`recorder.mirror.finish: no session for ${id}`)
+  if (!id || typeof id !== "string") throw new Error("recorder.mirror.finish: id required")
+  const safeId = sanitizeId(id)
+  if (safeId !== id) {
+    throw new Error(`recorder.mirror.finish: invalid id "${id}"`)
+  }
+  const sess = sessions.get(safeId)
+  if (!sess) throw new Error(`recorder.mirror.finish: no session for ${safeId}`)
   return new Promise((resolve, reject) => {
     sess.stream.end((err) => {
-      sessions.delete(id)
+      sessions.delete(safeId)
       if (err) reject(err)
       else resolve({ ok: true, path: sess.path, bytes: sess.bytes })
     })
