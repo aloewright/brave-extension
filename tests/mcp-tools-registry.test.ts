@@ -47,7 +47,9 @@ const EXPECTED_TOOLS = [
   "extensions_list",
   "extensions_set_enabled",
   "extensions_uninstall",
+  "profiles_list",
   "profiles_apply",
+  "groups_list",
   "groups_apply",
   "brave_search"
 ]

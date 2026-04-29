@@ -44,9 +44,12 @@ async function brave_search(args: any): Promise<ToolResult> {
   url.searchParams.set("q", query)
   url.searchParams.set("count", String(count))
 
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), 15_000)
   try {
     const res = await fetch(url.toString(), {
       method: "GET",
+      signal: ac.signal,
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": key
@@ -74,7 +77,12 @@ async function brave_search(args: any): Promise<ToolResult> {
         : serialized
     )
   } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      return err("Brave Search timed out")
+    }
     return err((e as Error).message)
+  } finally {
+    clearTimeout(timer)
   }
 }
 

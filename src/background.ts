@@ -686,18 +686,26 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
 // Wire up MCP resource publishers. Each push sends `mcp.resource.upsert`
 // over the native port; the host's MCPServer mirrors it into its resources
 // map, which then surfaces via tools/resources/list. Only one boot per SW.
-startResourcePublishers({
-  upsert: (uri, def) => {
-    sendToNative({
-      type: "mcp.resource.upsert",
-      uri,
-      name: def.name,
-      description: def.description,
-      mimeType: def.mimeType,
-      payload: def.payload
-    })
-  }
-})
+//
+// The teardown returned by startResourcePublishers is captured here for
+// hypothetical reload paths (e.g. settings flips that warrant a republish);
+// today the SW lifecycle never invokes it — when the SW dies, listeners die
+// with it, and the next wake-up re-runs this module top-to-bottom.
+let stopResourcePublishers: (() => void) | undefined
+if (!stopResourcePublishers) {
+  stopResourcePublishers = startResourcePublishers({
+    upsert: (uri, def) => {
+      sendToNative({
+        type: "mcp.resource.upsert",
+        uri,
+        name: def.name,
+        description: def.description,
+        mimeType: def.mimeType,
+        payload: def.payload
+      })
+    }
+  })
+}
 
 async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
   const handler = TOOL_HANDLERS[msg.name]

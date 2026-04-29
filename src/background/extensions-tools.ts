@@ -108,10 +108,12 @@ async function profiles_apply(args: any): Promise<ToolResult> {
     const all = await chrome.management.getAll()
     const changes: Array<{ id: string; enabled: boolean }> = []
     for (const e of all) {
-      // Skip themes and self-extension and anything we can't toggle.
+      // Skip themes, self-extension, and anything Chrome won't let us toggle.
+      // mayDisable=false applies regardless of allow-set membership: even if
+      // a profile lists a policy-locked extension we still cannot flip it.
       if (e.type === "theme") continue
       if (e.id === chrome.runtime?.id) continue
-      if (!e.mayDisable && !allow.has(e.id)) continue
+      if (!e.mayDisable) continue
       const target = allow.has(e.id)
       if (e.enabled === target) continue
       try {
@@ -163,6 +165,35 @@ async function groups_apply(args: any): Promise<ToolResult> {
   }
 }
 
+async function profiles_list(): Promise<ToolResult> {
+  try {
+    const profiles = await readJson<StoredProfile>(PROFILES_KEY)
+    const shaped = profiles.map((p) => ({
+      id: p.id,
+      name: p.name,
+      extensionIds: Array.isArray(p.extensionIds) ? p.extensionIds : []
+    }))
+    return ok(JSON.stringify(shaped, null, 2))
+  } catch (e) {
+    return err((e as Error).message)
+  }
+}
+
+async function groups_list(): Promise<ToolResult> {
+  try {
+    const groups = await readJson<StoredGroup>(GROUPS_KEY)
+    const shaped = groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      extensionIds: Array.isArray(g.extensionIds) ? g.extensionIds : [],
+      enabled: !!g.enabled
+    }))
+    return ok(JSON.stringify(shaped, null, 2))
+  } catch (e) {
+    return err((e as Error).message)
+  }
+}
+
 export const EXTENSIONS_TOOL_HANDLERS: Record<
   string,
   (args: any) => Promise<ToolResult>
@@ -170,6 +201,8 @@ export const EXTENSIONS_TOOL_HANDLERS: Record<
   extensions_list,
   extensions_set_enabled,
   extensions_uninstall,
+  profiles_list,
   profiles_apply,
+  groups_list,
   groups_apply
 }

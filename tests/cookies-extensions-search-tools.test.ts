@@ -39,7 +39,9 @@ describe("MCP tools registry (ALO-247 surface)", () => {
       "extensions_list",
       "extensions_set_enabled",
       "extensions_uninstall",
+      "profiles_list",
       "profiles_apply",
+      "groups_list",
       "groups_apply",
       "brave_search"
     ]) {
@@ -251,5 +253,117 @@ describe("brave_search", () => {
     const { SEARCH_TOOL_HANDLERS } = await import("../src/background/search-tools")
     const r = await SEARCH_TOOL_HANDLERS.brave_search({})
     expect(r.isError).toBe(true)
+  })
+
+  it("times out after 15s when fetch never resolves", async () => {
+    await chrome.storage.local.set({ "settings.braveSearchApiKey": "sekret" })
+    vi.useFakeTimers()
+    try {
+      ;(globalThis as any).fetch = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const sig = init.signal as AbortSignal
+            sig.addEventListener("abort", () => {
+              const err = new Error("aborted")
+              err.name = "AbortError"
+              reject(err)
+            })
+          })
+      )
+      const { SEARCH_TOOL_HANDLERS } = await import("../src/background/search-tools")
+      const p = SEARCH_TOOL_HANDLERS.brave_search({ query: "slow" })
+      await vi.advanceTimersByTimeAsync(16_000)
+      const r = await p
+      expect(r.isError).toBe(true)
+      expect(r.content[0].text).toMatch(/timed out/i)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("cookies_set sameSite validation", () => {
+  it("rejects invalid sameSite values", async () => {
+    await chrome.storage.local.set({ "settings.cookies.allowAll": true })
+    const { COOKIES_TOOL_HANDLERS } = await import("../src/background/cookies-tools")
+    const r = await COOKIES_TOOL_HANDLERS.cookies_set({
+      url: "https://example.com",
+      name: "n",
+      value: "v",
+      sameSite: "bogus"
+    })
+    expect(r.isError).toBe(true)
+    expect(r.content[0].text).toMatch(/invalid sameSite/i)
+    expect((chrome as any).cookies.set).not.toHaveBeenCalled()
+  })
+
+  it("accepts valid sameSite values", async () => {
+    await chrome.storage.local.set({ "settings.cookies.allowAll": true })
+    const { COOKIES_TOOL_HANDLERS } = await import("../src/background/cookies-tools")
+    for (const v of ["no_restriction", "lax", "strict", "unspecified"]) {
+      const r = await COOKIES_TOOL_HANDLERS.cookies_set({
+        url: "https://example.com",
+        name: "n",
+        value: "v",
+        sameSite: v
+      })
+      expect(r.isError, `sameSite=${v} should be accepted`).toBeFalsy()
+    }
+  })
+})
+
+describe("profiles_apply mayDisable guard", () => {
+  it("skips mayDisable=false extensions even when listed in the allow-set", async () => {
+    await chrome.storage.local.set({
+      lx_profiles: [{ id: "p1", name: "Lean", extensionIds: ["locked", "ok"] }]
+    })
+    ;(chrome as any).management.getAll = vi.fn(async () => [
+      { id: "locked", enabled: false, type: "extension", mayDisable: false },
+      { id: "ok", enabled: false, type: "extension", mayDisable: true }
+    ])
+    const { EXTENSIONS_TOOL_HANDLERS } = await import("../src/background/extensions-tools")
+    const r = await EXTENSIONS_TOOL_HANDLERS.profiles_apply({ profileId: "p1" })
+    expect(r.isError).toBeFalsy()
+    const calls = ((chrome as any).management.setEnabled as any).mock.calls
+    const ids = calls.map((c: any[]) => c[0])
+    expect(ids).not.toContain("locked")
+    expect(ids).toContain("ok")
+  })
+})
+
+describe("profiles_list / groups_list", () => {
+  it("profiles_list returns stored profiles", async () => {
+    await chrome.storage.local.set({
+      lx_profiles: [
+        { id: "p1", name: "Lean", extensionIds: ["a", "b"] },
+        { id: "p2", name: "Full", extensionIds: ["a", "b", "c"] }
+      ]
+    })
+    const { EXTENSIONS_TOOL_HANDLERS } = await import("../src/background/extensions-tools")
+    const r = await EXTENSIONS_TOOL_HANDLERS.profiles_list({})
+    expect(r.isError).toBeFalsy()
+    const arr = JSON.parse(r.content[0].text!)
+    expect(arr).toHaveLength(2)
+    expect(arr[0]).toEqual({ id: "p1", name: "Lean", extensionIds: ["a", "b"] })
+  })
+
+  it("groups_list returns stored groups", async () => {
+    await chrome.storage.local.set({
+      lx_groups: [
+        { id: "g1", name: "Dev", extensionIds: ["x"], enabled: true },
+        { id: "g2", name: "Off", extensionIds: ["y"], enabled: false }
+      ]
+    })
+    const { EXTENSIONS_TOOL_HANDLERS } = await import("../src/background/extensions-tools")
+    const r = await EXTENSIONS_TOOL_HANDLERS.groups_list({})
+    expect(r.isError).toBeFalsy()
+    const arr = JSON.parse(r.content[0].text!)
+    expect(arr).toHaveLength(2)
+    expect(arr[0]).toEqual({
+      id: "g1",
+      name: "Dev",
+      extensionIds: ["x"],
+      enabled: true
+    })
   })
 })

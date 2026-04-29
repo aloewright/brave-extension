@@ -14,6 +14,13 @@ type ToolResult = {
 
 export const COOKIES_GATE_KEY = "settings.cookies.allowAll"
 
+const VALID_SAME_SITE = new Set([
+  "no_restriction",
+  "lax",
+  "strict",
+  "unspecified"
+])
+
 function ok(text: string): ToolResult {
   return { isError: false, content: [{ type: "text", text }] }
 }
@@ -58,8 +65,10 @@ async function cookies_set(args: any): Promise<ToolResult> {
     if (typeof args?.path === "string") details.path = args.path
     if (typeof args?.secure === "boolean") details.secure = args.secure
     if (typeof args?.httpOnly === "boolean") details.httpOnly = args.httpOnly
-    if (typeof args?.sameSite === "string") {
+    if (typeof args?.sameSite === "string" && VALID_SAME_SITE.has(args.sameSite)) {
       details.sameSite = args.sameSite as chrome.cookies.SameSiteStatus
+    } else if (args?.sameSite !== undefined) {
+      return err(`invalid sameSite: ${args.sameSite}`)
     }
     if (typeof args?.expirationDate === "number") {
       details.expirationDate = args.expirationDate

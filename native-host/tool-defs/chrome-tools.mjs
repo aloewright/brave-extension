@@ -108,6 +108,12 @@ export const EXTENSIONS_TOOL_DEFS = [
     }
   },
   {
+    name: "profiles_list",
+    description:
+      "List saved _lx Profiles ({id, name, extensionIds}).",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
     name: "profiles_apply",
     description:
       "Apply a saved _lx Profile: enable the profile's extensions, disable the rest.",
@@ -118,6 +124,12 @@ export const EXTENSIONS_TOOL_DEFS = [
       },
       required: ["profileId"]
     }
+  },
+  {
+    name: "groups_list",
+    description:
+      "List saved _lx Groups ({id, name, extensionIds, enabled}).",
+    inputSchema: { type: "object", properties: {} }
   },
   {
     name: "groups_apply",
