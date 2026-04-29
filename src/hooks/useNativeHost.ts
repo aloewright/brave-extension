@@ -10,6 +10,10 @@ interface UseNativeHostOptions {
   onSessionEnded?: (backend: CLIBackend, code: number) => void
   onSessionReset?: (backend: CLIBackend) => void
   onMcpList?: (servers: any[]) => void
+  onPtyData?: (sessionId: string, data: string) => void
+  onPtyExit?: (sessionId: string, exitCode: number, signal?: number) => void
+  onPtySpawned?: (sessionId: string, pid: number) => void
+  onPtyError?: (sessionId: string | undefined, error: string) => void
 }
 
 export function useNativeHost(opts: UseNativeHostOptions = {}) {
@@ -49,6 +53,22 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
           case "session-reset":
             optsRef.current.onSessionReset?.(payload.backend!)
             break
+        }
+
+        // PTY events
+        const t = (payload as any).type as string
+        if (t === "pty.data") {
+          optsRef.current.onPtyData?.((payload as any).sessionId, (payload as any).data)
+        } else if (t === "pty.exit") {
+          optsRef.current.onPtyExit?.(
+            (payload as any).sessionId,
+            (payload as any).exitCode ?? 0,
+            (payload as any).signal
+          )
+        } else if (t === "pty.spawned") {
+          optsRef.current.onPtySpawned?.((payload as any).sessionId, (payload as any).pid ?? 0)
+        } else if (t === "pty.error") {
+          optsRef.current.onPtyError?.((payload as any).sessionId, (payload as any).error)
         }
 
         // mcp responses come back with type "mcp" — payload.data is JSON
@@ -121,5 +141,46 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     send({ type: "mcp", action: "add", server, configPath })
   }, [send])
 
-  return { connected, send, exec, execRaw, kill, resetBackend, getMCPServers, addMCPServer }
+  const ptySpawn = useCallback(
+    (sessionId: string, opts?: { cwd?: string; cols?: number; rows?: number; env?: Record<string, string> }) => {
+      send({ type: "pty.spawn", sessionId, ...(opts || {}) })
+    },
+    [send]
+  )
+
+  const ptyWrite = useCallback(
+    (sessionId: string, data: string) => {
+      send({ type: "pty.write", sessionId, data })
+    },
+    [send]
+  )
+
+  const ptyResize = useCallback(
+    (sessionId: string, cols: number, rows: number) => {
+      send({ type: "pty.resize", sessionId, cols, rows })
+    },
+    [send]
+  )
+
+  const ptyKill = useCallback(
+    (sessionId: string) => {
+      send({ type: "pty.kill", sessionId })
+    },
+    [send]
+  )
+
+  return {
+    connected,
+    send,
+    exec,
+    execRaw,
+    kill,
+    resetBackend,
+    getMCPServers,
+    addMCPServer,
+    ptySpawn,
+    ptyWrite,
+    ptyResize,
+    ptyKill
+  }
 }

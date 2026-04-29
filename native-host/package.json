@@ -1,0 +1,14 @@
+{
+  "name": "ai-dev-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native messaging host for AI Dev Sidebar — bridges browser to local CLI tools and PTY shells.",
+  "type": "module",
+  "main": "ai-dev-host.mjs",
+  "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

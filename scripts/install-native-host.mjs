@@ -4,9 +4,10 @@
  * Run: node scripts/install-native-host.mjs [extension-id]
  */
 
-import { writeFileSync, mkdirSync, chmodSync } from "fs"
+import { writeFileSync, mkdirSync, chmodSync, existsSync } from "fs"
 import { homedir } from "os"
 import { join, resolve } from "path"
+import { spawnSync } from "child_process"
 
 const HOST_NAME = "com.aidev.sidebar"
 const extensionId = process.argv[2] || "*"
@@ -74,5 +75,38 @@ try {
   chmodSync(hostPath, 0o755)
   console.log(`✓ Made host executable: ${hostPath}`)
 } catch {}
+
+// Install native-host npm dependencies (node-pty prebuilt + future MCP server deps).
+const hostDir = resolve(join(import.meta.dirname, "..", "native-host"))
+if (existsSync(join(hostDir, "package.json"))) {
+  const hasNodeModules = existsSync(join(hostDir, "node_modules"))
+  if (!hasNodeModules) {
+    console.log(`\nInstalling native-host dependencies in ${hostDir}…`)
+    const pm = spawnSync(
+      process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+      ["install", "--prod", "--silent"],
+      { cwd: hostDir, stdio: "inherit" }
+    )
+    if (pm.status !== 0) {
+      console.warn(
+        "⚠  pnpm install failed in native-host/. Falling back to npm…"
+      )
+      const np = spawnSync(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["install", "--omit=dev", "--silent"],
+        { cwd: hostDir, stdio: "inherit" }
+      )
+      if (np.status !== 0) {
+        console.warn(
+          "⚠  Could not install native-host deps automatically. Run `pnpm install` (or npm install) inside native-host/ to enable the PTY terminal."
+        )
+      }
+    } else {
+      console.log("✓ Native-host dependencies installed")
+    }
+  } else {
+    console.log("✓ Native-host node_modules already present")
+  }
+}
 
 console.log("\nDone! Restart your browser for changes to take effect.")

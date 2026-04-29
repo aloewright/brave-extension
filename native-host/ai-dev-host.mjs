@@ -16,6 +16,9 @@ import { spawn } from "child_process"
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
+import { PTYManager } from "./pty-manager.mjs"
+
+const ptyManager = new PTYManager((msg) => sendMessage(msg))
 
 /**
  * `hasSession` tracks whether each backend has an active session to continue.
@@ -464,6 +467,26 @@ async function main() {
 
       case "ping": {
         sendMessage({ type: "pong", data: "" })
+        break
+      }
+
+      case "pty.spawn": {
+        await ptyManager.spawn(msg)
+        break
+      }
+
+      case "pty.write": {
+        ptyManager.write(msg)
+        break
+      }
+
+      case "pty.resize": {
+        ptyManager.resize(msg)
+        break
+      }
+
+      case "pty.kill": {
+        ptyManager.kill(msg)
         break
       }
     }
