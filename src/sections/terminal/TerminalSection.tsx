@@ -12,8 +12,6 @@ interface Tab {
   exitInfo?: string
 }
 
-let nextTabIndex = 1
-
 function newSessionId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -106,7 +104,6 @@ export function TerminalSection() {
     setTabs((prev) => [...prev, { sessionId, status: "spawning" }])
     setActive(sessionId)
     host.ptySpawn(sessionId)
-    nextTabIndex++
   }, [host])
 
   const closeTab = useCallback(
@@ -153,54 +150,43 @@ export function TerminalSection() {
     return () => window.removeEventListener("keydown", onKey)
   }, [active, tabs, openTab, closeTab])
 
-  if (tabs.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-3">
-        <div className="text-fg/30 text-lg font-medium">Terminal</div>
-        {host.connected ? (
-          <button
-            onClick={openTab}
-            className="px-4 py-2 rounded bg-primary/20 text-primary hover:bg-primary/30 text-xs">
-            Open Terminal
-          </button>
-        ) : (
-          <div className="text-fg/40 text-xs max-w-xs leading-relaxed">
-            Native host not connected. Run{" "}
-            <code className="font-mono text-fg/60">pnpm install-host</code> and reload Brave.
-          </div>
-        )}
-        <div className="text-[10px] text-fg/30 mt-2">⌘T new tab · ⌘W close · ⌘1–9 switch</div>
-      </div>
-    )
-  }
+  // The header bar (with [+ Reference]) and the references tray are rendered
+  // unconditionally so users can capture/inspect references even before they
+  // open a terminal. The tab strip and `+ new tab` button only appear once at
+  // least one tab exists; the body switches between empty state and grid.
+  const hasTabs = tabs.length > 0
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center border-b border-border bg-bg/60">
         <div className="flex-1 flex items-center overflow-x-auto">
-          {tabs.map((t, i) => {
-            const isActive = t.sessionId === active
-            return (
-              <div
-                key={t.sessionId}
-                onClick={() => setActive(t.sessionId)}
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer border-r border-border ${
-                  isActive ? "bg-bg text-fg" : "text-fg/50 hover:text-fg/80"
-                }`}>
-                <span className="font-mono">{i + 1}</span>
-                <span>{t.status === "running" ? "shell" : t.status}</span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    closeTab(t.sessionId)
-                  }}
-                  className="text-fg/30 hover:text-fg/80"
-                  title="Close tab">
-                  ×
-                </button>
-              </div>
-            )
-          })}
+          {hasTabs ? (
+            tabs.map((t, i) => {
+              const isActive = t.sessionId === active
+              return (
+                <div
+                  key={t.sessionId}
+                  onClick={() => setActive(t.sessionId)}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer border-r border-border ${
+                    isActive ? "bg-bg text-fg" : "text-fg/50 hover:text-fg/80"
+                  }`}>
+                  <span className="font-mono">{i + 1}</span>
+                  <span>{t.status === "running" ? "shell" : t.status}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closeTab(t.sessionId)
+                    }}
+                    className="text-fg/30 hover:text-fg/80"
+                    title="Close tab">
+                    ×
+                  </button>
+                </div>
+              )
+            })
+          ) : (
+            <span className="px-3 py-1.5 text-fg/40 text-[11px]">Terminal</span>
+          )}
         </div>
         <button
           onClick={onAddReference}
@@ -209,25 +195,46 @@ export function TerminalSection() {
           className="px-2 py-1.5 text-fg/50 hover:text-fg text-[11px] border-l border-border disabled:opacity-50">
           {pickerBusy ? "Picking…" : "+ Reference"}
         </button>
-        <button
-          onClick={openTab}
-          title="New tab (⌘T)"
-          className="px-3 py-1.5 text-fg/40 hover:text-fg text-sm border-l border-border">
-          +
-        </button>
+        {hasTabs && (
+          <button
+            onClick={openTab}
+            title="New tab (⌘T)"
+            className="px-3 py-1.5 text-fg/40 hover:text-fg text-sm border-l border-border">
+            +
+          </button>
+        )}
       </div>
       <div className="relative flex-1 min-h-0">
-        {tabs.map((t) => (
-          <TerminalView
-            key={t.sessionId}
-            sessionId={t.sessionId}
-            active={t.sessionId === active}
-            onWrite={(data) => host.ptyWrite(t.sessionId, data)}
-            onResize={(cols, rows) => host.ptyResize(t.sessionId, cols, rows)}
-            registerData={registerData}
-            unregisterData={unregisterData}
-          />
-        ))}
+        {hasTabs ? (
+          tabs.map((t) => (
+            <TerminalView
+              key={t.sessionId}
+              sessionId={t.sessionId}
+              active={t.sessionId === active}
+              onWrite={(data) => host.ptyWrite(t.sessionId, data)}
+              onResize={(cols, rows) => host.ptyResize(t.sessionId, cols, rows)}
+              registerData={registerData}
+              unregisterData={unregisterData}
+            />
+          ))
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-3">
+            <div className="text-fg/30 text-lg font-medium">Terminal</div>
+            {host.connected ? (
+              <button
+                onClick={openTab}
+                className="px-4 py-2 rounded bg-primary/20 text-primary hover:bg-primary/30 text-xs">
+                Open Terminal
+              </button>
+            ) : (
+              <div className="text-fg/40 text-xs max-w-xs leading-relaxed">
+                Native host not connected. Run{" "}
+                <code className="font-mono text-fg/60">pnpm install-host</code> and reload Brave.
+              </div>
+            )}
+            <div className="text-[10px] text-fg/30 mt-2">⌘T new tab · ⌘W close · ⌘1–9 switch</div>
+          </div>
+        )}
       </div>
       <ReferencesTray
         references={references.references}

@@ -90,9 +90,15 @@ export function TerminalView({
     }
   }, [active])
 
-  // Accept drops from the references tray. Chips set
-  // dataTransfer "text/plain" to "@<refId>"; we forward the token to the PTY
-  // as if it were typed so the running CLI sees it on stdin.
+  // Accept drops from the references tray. Chips set dataTransfer "text/plain"
+  // to "@<refId>"; we forward the token to the PTY as if it were typed so the
+  // running CLI sees it on stdin.
+  //
+  // Reference ids are minted in `background.finalizeCapture` as
+  // `ref_<ULID>` (Crockford base32, see src/lib/ulid.ts), so the dragged
+  // token is `@ref_<ULID>` — e.g. `@ref_01HX0123456789ABCDEFGHJKMN`.
+  // The regex enforces that exact shape so stray text/plain payloads from
+  // other drag sources (e.g. selected text in the page) are ignored.
   const REF_TOKEN = /^@ref_[A-Z0-9]+$/i
 
   const onDragOver = (e: React.DragEvent) => {

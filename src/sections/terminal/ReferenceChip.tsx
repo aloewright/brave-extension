@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { truncate } from "../../lib/text"
 import type { Reference } from "../../types"
 
 interface Props {
@@ -12,11 +13,6 @@ function hostOf(url: string): string {
   } catch {
     return ""
   }
-}
-
-function truncate(s: string, n: number): string {
-  if (!s) return ""
-  return s.length > n ? s.slice(0, n - 1) + "…" : s
 }
 
 export function ReferenceChip({ reference, onRemove }: Props) {

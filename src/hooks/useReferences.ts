@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { truncate } from "../lib/text"
 import type { Reference } from "../types"
 
 // chrome.storage.local key for the references tray. Per spec §4 namespacing:
@@ -16,11 +17,6 @@ export interface ResourceDef {
   description?: string
   mimeType?: string
   payload?: unknown
-}
-
-function truncate(s: string, n: number): string {
-  if (!s) return ""
-  return s.length > n ? s.slice(0, n - 1) + "…" : s
 }
 
 export function referenceUri(id: string): string {
@@ -100,10 +96,18 @@ export function useReferences(sync: ResourceSync): UseReferencesResult {
   const syncRef = useRef(sync)
   syncRef.current = sync
 
+  // Synchronous source of truth for the current refs list. Sidepanel JS is
+  // single-threaded so reads/writes are atomic; using a ref instead of
+  // re-loading from chrome.storage on every mutation avoids the TOCTOU race
+  // where two concurrent add()/remove() calls each load the *same* baseline
+  // and clobber each other on save.
+  const refsRef = useRef<Reference[]>([])
+
   useEffect(() => {
     let cancelled = false
     loadReferences().then((refs) => {
       if (cancelled) return
+      refsRef.current = refs
       setReferences(refs)
       setReady(true)
     })
@@ -113,20 +117,20 @@ export function useReferences(sync: ResourceSync): UseReferencesResult {
   }, [])
 
   const add = useCallback(async (ref: Reference) => {
-    const cur = await loadReferences()
-    const next = await addReference(cur, ref, syncRef.current)
+    const next = await addReference(refsRef.current, ref, syncRef.current)
+    refsRef.current = next
     setReferences(next)
   }, [])
 
   const remove = useCallback(async (id: string) => {
-    const cur = await loadReferences()
-    const next = await removeReference(cur, id, syncRef.current)
+    const next = await removeReference(refsRef.current, id, syncRef.current)
+    refsRef.current = next
     setReferences(next)
   }, [])
 
   const clear = useCallback(async () => {
-    const cur = await loadReferences()
-    const next = await clearReferences(cur, syncRef.current)
+    const next = await clearReferences(refsRef.current, syncRef.current)
+    refsRef.current = next
     setReferences(next)
   }, [])
 

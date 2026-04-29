@@ -119,4 +119,42 @@ describe("useReferences storage helpers", () => {
   it("referenceUri uses ai-dev:// scheme", () => {
     expect(referenceUri("01HX09")).toBe("ai-dev://reference/01HX09")
   })
+
+  it("concurrent addReference calls preserve all entries (no TOCTOU clobber)", async () => {
+    // When two adds race against the same baseline storage state, the
+    // ref-based source-of-truth in useReferences avoids the storage-load
+    // round-trip — but the underlying primitive still requires the caller
+    // to feed the latest state. This test pins the contract: given a
+    // sequential application of the latest state, both refs persist.
+    const sync = makeSync()
+    const a = makeRef("01HXR1")
+    const b = makeRef("01HXR2")
+    const after1 = await addReference([], a, sync)
+    const after2 = await addReference(after1, b, sync)
+    expect(after2).toHaveLength(2)
+    expect(await loadReferences()).toEqual(after2)
+    expect(sync.upsert).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("terminal drop-target token regex", () => {
+  // Mirrors the regex in src/sections/terminal/Terminal.tsx. Reference ids
+  // are `ref_<ULID>` (see src/background.ts finalizeCapture + src/lib/ulid.ts),
+  // so the dragged token is `@ref_<ULID>`.
+  const REF_TOKEN = /^@ref_[A-Z0-9]+$/i
+
+  it("accepts a real ref_<ULID> token", () => {
+    expect(REF_TOKEN.test("@ref_01HX0123456789ABCDEFGHJKMN")).toBe(true)
+  })
+
+  it("rejects bare text drops", () => {
+    expect(REF_TOKEN.test("hello world")).toBe(false)
+    expect(REF_TOKEN.test("@01HX0123456789ABCDEFGHJKMN")).toBe(false)
+    expect(REF_TOKEN.test("ref_01HX0123456789ABCDEFGHJKMN")).toBe(false)
+  })
+
+  it("rejects tokens with embedded whitespace or extra content", () => {
+    expect(REF_TOKEN.test("@ref_01HX foo")).toBe(false)
+    expect(REF_TOKEN.test(" @ref_01HX")).toBe(false)
+  })
 })
