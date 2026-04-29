@@ -104,6 +104,18 @@ export function buildRecorderHostTools(server) {
         if (!id || typeof id !== "string") {
           return { isError: true, content: [{ type: "text", text: "id required" }] }
         }
+        // Validate id format strictly before any lookup or filesystem-path
+        // construction. Reject path traversal / shell metachar attempts up
+        // front so we don't even leak existence via the "no recording"
+        // branch. ULIDs (Crockford alphabet) are the canonical format from
+        // src/background/recorder.ts; we also accept short safe ids
+        // (letters, digits, `_`, `-`) for prefixed test fixtures like
+        // `rec_<ulid>`.
+        const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
+        const SAFE_RE = /^[A-Za-z0-9_-]{1,64}$/
+        if (!ULID_RE.test(id) && !SAFE_RE.test(id)) {
+          return { isError: true, content: [{ type: "text", text: "invalid id" }] }
+        }
         const list = getRecordingsList(server)
         const meta = list.find((r) => r && r.id === id)
         if (!meta) {

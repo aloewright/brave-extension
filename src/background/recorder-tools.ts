@@ -47,13 +47,14 @@ async function recorder_start(args: any): Promise<ToolResult> {
 
   // Subscribe BEFORE startRecording so we can't miss a fast RECORDER_STARTED.
   let unregister: (() => void) | null = null
+  let timer: ReturnType<typeof setTimeout> | undefined
   const startedP = new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       unregister?.()
       reject(new Error("timeout waiting for RECORDER_STARTED"))
     }, RECORDER_TOOL_TIMEOUT_MS)
     unregister = registerStartWaiter((id) => {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
       resolve(id)
     })
   })
@@ -61,6 +62,10 @@ async function recorder_start(args: any): Promise<ToolResult> {
   const startResult = await startRecording({ source, tabId })
   if (!startResult.ok) {
     unregister?.()
+    if (timer) clearTimeout(timer)
+    // Swallow the now-unhandled timeout rejection so it doesn't surface as
+    // an unhandledrejection later in the SW.
+    startedP.catch(() => {})
     return toolErr(startResult.error || "failed to start recording")
   }
 
@@ -76,13 +81,14 @@ async function recorder_stop(_args: any): Promise<ToolResult> {
   if (!recorderState.active) return toolErr("no active recording")
 
   let unregister: (() => void) | null = null
+  let timer: ReturnType<typeof setTimeout> | undefined
   const stoppedP = new Promise<RecordingMetadata | null>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       unregister?.()
       reject(new Error("timeout waiting for RECORDER_STOPPED"))
     }, RECORDER_TOOL_TIMEOUT_MS)
     unregister = registerStopWaiter((meta) => {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
       resolve(meta)
     })
   })
@@ -90,6 +96,8 @@ async function recorder_stop(_args: any): Promise<ToolResult> {
   const r = await stopRecording()
   if (!r.ok) {
     unregister?.()
+    if (timer) clearTimeout(timer)
+    stoppedP.catch(() => {})
     return toolErr("failed to send stop")
   }
 
