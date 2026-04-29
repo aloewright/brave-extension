@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNativeHost } from "../../hooks/useNativeHost"
+import { useReferences } from "../../hooks/useReferences"
+import { startPicker } from "../../hooks/usePicker"
+import { ReferencesTray } from "./ReferencesTray"
 import { TerminalView } from "./Terminal"
 
 interface Tab {
@@ -67,6 +70,35 @@ export function TerminalSection() {
       }
     }
   })
+
+  const resourceSync = useMemo(
+    () => ({
+      upsert: (uri: string, def: { name: string; description?: string; mimeType?: string; payload?: unknown }) =>
+        host.mcpResourceUpsert(uri, def),
+      remove: (uri: string) => host.mcpResourceRemove(uri)
+    }),
+    [host]
+  )
+  const references = useReferences(resourceSync)
+
+  const [pickerBusy, setPickerBusy] = useState(false)
+  const onAddReference = useCallback(async () => {
+    if (pickerBusy) return
+    setPickerBusy(true)
+    try {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      const tab = tabs[0]
+      if (!tab?.id) throw new Error("no active tab")
+      const ref = await startPicker(tab.id)
+      await references.add(ref)
+    } catch (err) {
+      // Picker rejected (user cancelled, no tab, etc.) — surface in console;
+      // a richer toast UX lives outside this milestone.
+      console.warn("[references] picker failed:", err)
+    } finally {
+      setPickerBusy(false)
+    }
+  }, [pickerBusy, references])
 
   const openTab = useCallback(() => {
     if (!host.connected) return
@@ -171,6 +203,13 @@ export function TerminalSection() {
           })}
         </div>
         <button
+          onClick={onAddReference}
+          disabled={pickerBusy}
+          title="Capture an element from the active tab as a reference"
+          className="px-2 py-1.5 text-fg/50 hover:text-fg text-[11px] border-l border-border disabled:opacity-50">
+          {pickerBusy ? "Picking…" : "+ Reference"}
+        </button>
+        <button
           onClick={openTab}
           title="New tab (⌘T)"
           className="px-3 py-1.5 text-fg/40 hover:text-fg text-sm border-l border-border">
@@ -190,6 +229,11 @@ export function TerminalSection() {
           />
         ))}
       </div>
+      <ReferencesTray
+        references={references.references}
+        onRemove={references.remove}
+        onClear={references.clear}
+      />
     </div>
   )
 }

@@ -169,6 +169,30 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     [send]
   )
 
+  const mcpResourceUpsert = useCallback(
+    (
+      uri: string,
+      def: { name: string; description?: string; mimeType?: string; payload?: unknown }
+    ) => {
+      send({
+        type: "mcp.resource.upsert",
+        uri,
+        name: def.name,
+        description: def.description,
+        mimeType: def.mimeType,
+        payload: def.payload
+      })
+    },
+    [send]
+  )
+
+  const mcpResourceRemove = useCallback(
+    (uri: string) => {
+      send({ type: "mcp.resource.remove", uri })
+    },
+    [send]
+  )
+
   return {
     connected,
     send,
@@ -181,6 +205,8 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     ptySpawn,
     ptyWrite,
     ptyResize,
-    ptyKill
+    ptyKill,
+    mcpResourceUpsert,
+    mcpResourceRemove
   }
 }

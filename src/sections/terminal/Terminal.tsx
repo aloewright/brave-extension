@@ -90,9 +90,32 @@ export function TerminalView({
     }
   }, [active])
 
+  // Accept drops from the references tray. Chips set
+  // dataTransfer "text/plain" to "@<refId>"; we forward the token to the PTY
+  // as if it were typed so the running CLI sees it on stdin.
+  const REF_TOKEN = /^@ref_[A-Z0-9]+$/i
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("text/plain")) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = "copy"
+    }
+  }
+
+  const onDrop = (e: React.DragEvent) => {
+    const text = e.dataTransfer.getData("text/plain")
+    if (!text) return
+    if (!REF_TOKEN.test(text)) return
+    e.preventDefault()
+    onWrite(text)
+    requestAnimationFrame(() => xtermRef.current?.focus())
+  }
+
   return (
     <div
       ref={containerRef}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       className={`absolute inset-0 ${active ? "block" : "hidden"}`}
       style={{ background: "#0a0a0a" }}
     />
