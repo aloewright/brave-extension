@@ -80,19 +80,31 @@ export function TerminalSection() {
   const references = useReferences(resourceSync)
 
   const [pickerBusy, setPickerBusy] = useState(false)
+  const [pickerStatus, setPickerStatus] = useState<string | null>(null)
+
   const onAddReference = useCallback(async () => {
     if (pickerBusy) return
     setPickerBusy(true)
+    setPickerStatus(null)
     try {
-      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-      const tab = tabs[0]
+      // Sidepanels don't take focus the same way popups do, but `lastFocusedWindow`
+      // can still return the sidepanel's hosting window. Query the last focused
+      // *normal* window explicitly so we land on the user's actual content tab.
+      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"], populate: false })
+      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
       if (!tab?.id) throw new Error("no active tab")
+      if (/^(chrome|chrome-extension|about|edge|brave):\/\//.test(tab.url || "")) {
+        throw new Error("can't pick on a browser-internal page")
+      }
       const ref = await startPicker(tab.id)
       await references.add(ref)
+      setPickerStatus(`✓ Captured ${ref.title || ref.url}`)
+      setTimeout(() => setPickerStatus(null), 2500)
     } catch (err) {
-      // Picker rejected (user cancelled, no tab, etc.) — surface in console;
-      // a richer toast UX lives outside this milestone.
+      const msg = err instanceof Error ? err.message : String(err)
       console.warn("[references] picker failed:", err)
+      setPickerStatus(`Picker failed: ${msg}`)
+      setTimeout(() => setPickerStatus(null), 3500)
     } finally {
       setPickerBusy(false)
     }
@@ -195,15 +207,22 @@ export function TerminalSection() {
           className="px-2 py-1.5 text-fg/50 hover:text-fg text-[11px] border-l border-border disabled:opacity-50">
           {pickerBusy ? "Picking…" : "+ Reference"}
         </button>
-        {hasTabs && (
-          <button
-            onClick={openTab}
-            title="New tab (⌘T)"
-            className="px-3 py-1.5 text-fg/40 hover:text-fg text-sm border-l border-border">
-            +
-          </button>
-        )}
+        <button
+          onClick={openTab}
+          disabled={!host.connected}
+          title={host.connected ? "New terminal (⌘T)" : "Native host not connected"}
+          className="px-3 py-1.5 text-fg/50 hover:text-fg text-sm border-l border-border disabled:opacity-30 disabled:cursor-not-allowed">
+          +
+        </button>
       </div>
+      {pickerStatus && (
+        <div
+          className={`px-3 py-1 text-[11px] border-b border-border ${
+            pickerStatus.startsWith("✓") ? "text-success bg-success/10" : "text-destructive bg-destructive/10"
+          }`}>
+          {pickerStatus}
+        </div>
+      )}
       <div className="relative flex-1 min-h-0">
         {hasTabs ? (
           tabs.map((t) => (

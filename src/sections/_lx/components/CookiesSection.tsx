@@ -1,5 +1,21 @@
 import { useEffect, useState } from "react"
 
+function Spinner({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={`animate-spin ${className}`}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  )
+}
+
 interface CookieEntry {
   name: string
   value: string
@@ -16,7 +32,7 @@ export function CookiesSection() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null)
-  const [clearing, setClearing] = useState<"cache" | "history" | "all" | null>(null)
+  const [clearing, setClearing] = useState<"cache" | "history" | "all" | "cookies" | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
@@ -76,50 +92,60 @@ export function CookiesSection() {
     if (selectedDomain === domain) setSelectedDomain(null)
   }
 
-  const deleteAllCookies = async () => {
-    await Promise.all(cookies.map((c) => {
-      const protocol = c.secure ? "https" : "http"
-      const d = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain
-      return chrome.cookies.remove({ url: `${protocol}://${d}${c.path}`, name: c.name })
-    }))
-    setCookies([])
-    setSelectedDomain(null)
-    showToast("All cookies deleted")
+  const deleteAllCookies = () => runClear(
+    "cookies",
+    async () => {
+      await Promise.all(cookies.map((c) => {
+        const protocol = c.secure ? "https" : "http"
+        const d = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain
+        return chrome.cookies.remove({ url: `${protocol}://${d}${c.path}`, name: c.name })
+      }))
+      setCookies([])
+      setSelectedDomain(null)
+    },
+    "All cookies deleted"
+  )
+
+  // Wrap a clear action so the spinner state is always restored — even on error
+  // — and so the "Clearing…" frame is visible long enough to read on fast disks.
+  const runClear = async (key: "cache" | "history" | "all" | "cookies", fn: () => Promise<unknown>, doneMsg: string) => {
+    if (clearing) return
+    setClearing(key)
+    const startedAt = Date.now()
+    try {
+      await fn()
+      const elapsed = Date.now() - startedAt
+      if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed))
+      showToast(doneMsg)
+    } catch (err) {
+      showToast(`Failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setClearing(null)
+    }
   }
 
-  const clearCache = async () => {
-    setClearing("cache")
-    await chrome.browsingData.removeCache({})
-    setClearing(null)
-    showToast("Cache cleared")
-  }
-
-  const clearHistory = async () => {
-    setClearing("history")
-    await chrome.browsingData.removeHistory({})
-    setClearing(null)
-    showToast("History cleared")
-  }
-
-  const clearAll = async () => {
-    setClearing("all")
-    await Promise.all([
-      chrome.browsingData.removeCache({}),
-      chrome.browsingData.removeHistory({}),
-      chrome.browsingData.removeCookies({}),
-      chrome.browsingData.removeLocalStorage({})
-    ])
-    setCookies([])
-    setSelectedDomain(null)
-    setClearing(null)
-    showToast("All browsing data cleared")
-  }
+  const clearCache = () => runClear("cache", () => chrome.browsingData.removeCache({}), "Cache cleared")
+  const clearHistory = () => runClear("history", () => chrome.browsingData.removeHistory({}), "History cleared")
+  const clearAll = () => runClear(
+    "all",
+    async () => {
+      await Promise.all([
+        chrome.browsingData.removeCache({}),
+        chrome.browsingData.removeHistory({}),
+        chrome.browsingData.removeCookies({}),
+        chrome.browsingData.removeLocalStorage({})
+      ])
+      setCookies([])
+      setSelectedDomain(null)
+    },
+    "All browsing data cleared"
+  )
 
   return (
     <div className="relative">
       {/* Toast */}
       {toast && (
-        <div className="fixed top-4 right-4 z-50 text-xs py-2 px-4 rounded bg-chart-1/20 text-chart-1 animate-fade-in">
+        <div className="fixed top-4 right-4 z-50 text-xs py-2 px-4 rounded bg-success/20 text-success animate-fade-in">
           {toast}
         </div>
       )}
@@ -132,8 +158,13 @@ export function CookiesSection() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={deleteAllCookies} className="text-xs py-1.5 px-3 rounded text-destructive hover:bg-destructive/10 transition-colors">
-            Delete All Cookies
+          <button
+            onClick={deleteAllCookies}
+            disabled={clearing !== null}
+            aria-busy={clearing === "cookies"}
+            className="text-xs py-1.5 px-3 rounded text-destructive hover:bg-destructive/10 transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+            {clearing === "cookies" && <Spinner className="w-3.5 h-3.5" />}
+            {clearing === "cookies" ? "Deleting…" : "Delete All Cookies"}
           </button>
         </div>
       </div>
@@ -143,31 +174,46 @@ export function CookiesSection() {
         <button
           onClick={clearCache}
           disabled={clearing !== null}
-          className="p-4 rounded-lg bg-card border border-border hover:border-chart-1/40 transition-colors text-center group">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-chart-1 transition-colors">
-            <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9m-9 9a9 9 0 0 1 9-9" />
-          </svg>
-          <span className="text-sm font-medium">{clearing === "cache" ? "Clearing..." : "Clear Cache"}</span>
+          aria-busy={clearing === "cache"}
+          className="p-4 rounded-lg bg-card border border-border hover:border-success/40 transition-colors text-center group disabled:opacity-50 disabled:cursor-not-allowed">
+          {clearing === "cache" ? (
+            <Spinner className="mx-auto mb-2 text-success" />
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-success transition-colors">
+              <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9m-9 9a9 9 0 0 1 9-9" />
+            </svg>
+          )}
+          <span className="text-sm font-medium transition-colors">{clearing === "cache" ? "Clearing…" : "Clear Cache"}</span>
         </button>
 
         <button
           onClick={clearHistory}
           disabled={clearing !== null}
-          className="p-4 rounded-lg bg-card border border-border hover:border-chart-5/40 transition-colors text-center group">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-chart-5 transition-colors">
-            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-          </svg>
-          <span className="text-sm font-medium">{clearing === "history" ? "Clearing..." : "Clear History"}</span>
+          aria-busy={clearing === "history"}
+          className="p-4 rounded-lg bg-card border border-border hover:border-info/40 transition-colors text-center group disabled:opacity-50 disabled:cursor-not-allowed">
+          {clearing === "history" ? (
+            <Spinner className="mx-auto mb-2 text-info" />
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-info transition-colors">
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
+          )}
+          <span className="text-sm font-medium transition-colors">{clearing === "history" ? "Clearing…" : "Clear History"}</span>
         </button>
 
         <button
           onClick={clearAll}
           disabled={clearing !== null}
-          className="p-4 rounded-lg bg-card border border-destructive/30 hover:border-destructive/60 transition-colors text-center group">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-destructive transition-colors">
-            <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-          <span className="text-sm font-medium text-destructive/80">{clearing === "all" ? "Clearing..." : "Clear Everything"}</span>
+          aria-busy={clearing === "all"}
+          className="p-4 rounded-lg bg-card border border-destructive/30 hover:border-destructive/60 transition-colors text-center group disabled:opacity-50 disabled:cursor-not-allowed">
+          {clearing === "all" ? (
+            <Spinner className="mx-auto mb-2 text-destructive" />
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-2 text-fg/40 group-hover:text-destructive transition-colors">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          )}
+          <span className="text-sm font-medium text-destructive/80 transition-colors">{clearing === "all" ? "Clearing…" : "Clear Everything"}</span>
           <p className="text-[10px] text-fg/20 mt-0.5">Cache + history + cookies + storage</p>
         </button>
       </div>
@@ -186,7 +232,7 @@ export function CookiesSection() {
         <button
           onClick={() => setSelectedDomain(null)}
           className={`text-[11px] py-0.5 px-2 rounded transition-colors ${
-            !selectedDomain ? "bg-chart-1/20 text-chart-1" : "bg-accent/50 text-fg/40 hover:text-fg/60"
+            !selectedDomain ? "bg-success/20 text-success" : "bg-accent/50 text-fg/40 hover:text-fg/60"
           }`}>
           All ({cookies.length})
         </button>
@@ -197,7 +243,7 @@ export function CookiesSection() {
               key={d}
               onClick={() => setSelectedDomain(selectedDomain === d ? null : d)}
               className={`text-[11px] py-0.5 px-2 rounded transition-colors ${
-                selectedDomain === d ? "bg-chart-1/20 text-chart-1" : "bg-accent/50 text-fg/40 hover:text-fg/60"
+                selectedDomain === d ? "bg-success/20 text-success" : "bg-accent/50 text-fg/40 hover:text-fg/60"
               }`}>
               {d} ({count})
             </button>
@@ -233,8 +279,8 @@ export function CookiesSection() {
                 </div>
                 <p className="text-[11px] text-fg/30 truncate mt-0.5 font-mono max-w-[500px]">{cookie.value || "(empty)"}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  {cookie.secure && <span className="text-[9px] px-1.5 py-0.5 rounded bg-chart-2/15 text-chart-2">Secure</span>}
-                  {cookie.httpOnly && <span className="text-[9px] px-1.5 py-0.5 rounded bg-chart-5/15 text-chart-5">HttpOnly</span>}
+                  {cookie.secure && <span className="text-[9px] px-1.5 py-0.5 rounded bg-success/15 text-success">Secure</span>}
+                  {cookie.httpOnly && <span className="text-[9px] px-1.5 py-0.5 rounded bg-info/15 text-info">HttpOnly</span>}
                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-fg/40">{cookie.sameSite}</span>
                   {cookie.expirationDate && (
                     <span className="text-[9px] text-fg/20">

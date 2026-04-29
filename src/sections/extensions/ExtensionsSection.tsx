@@ -26,8 +26,41 @@ export function ExtensionsSection() {
   const { groups, addGroup, removeGroup, toggleGroup } = useGroups()
   const { lastUsed } = useLastUsed()
 
+  const switchProfile = (profile: { id: string; extensionIds: string[] }) => {
+    // Enable everything in the profile (and pinned/alwaysEnabled), disable the rest.
+    const allow = new Set([...profile.extensionIds, ...(settings.alwaysEnabled || [])])
+    extensions
+      .filter((e) => e.mayDisable)
+      .forEach((e) => {
+        const target = allow.has(e.id)
+        if (e.enabled !== target) toggleExtension(e.id, target)
+      })
+    updateSettings({ activeProfileId: profile.id })
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* Profile pill row — visible across all tabs, mirrors the lean-extensions popup */}
+      {profiles.length > 0 && (
+        <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+          <span className="text-[10px] text-fg/30 uppercase tracking-wider">Profile</span>
+          <div className="flex gap-1 flex-1 overflow-x-auto">
+            {profiles.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => switchProfile(p)}
+                className={`text-[11px] py-1 px-2.5 rounded whitespace-nowrap transition-colors ${
+                  settings.activeProfileId === p.id
+                    ? "bg-primary/30 text-primary-foreground ring-1 ring-primary/50"
+                    : "bg-accent/50 text-fg/50 hover:text-fg hover:bg-accent"
+                }`}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex border-b border-border px-2 gap-1">
         {TABS.map((t) => (
           <button
