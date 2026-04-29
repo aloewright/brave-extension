@@ -18,6 +18,7 @@ pnpm install-host # install the native messaging host
 Unit tests live in `tests/` and run on Vitest with a `happy-dom` environment.
 An in-memory `chrome.storage.local` shim is installed in `tests/setup.ts`,
 so storage-layer tests run without any browser/extension runtime.
+Dependabot opens grouped weekly PRs; see `docs/ROADMAP.md`.
 
 ```sh
 npm test          # one-shot run
