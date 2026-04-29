@@ -269,14 +269,14 @@ export function ExtensionsSection({
       {loading ? (
         <div className="text-fg/40 text-sm">Loading...</div>
       ) : (
-        <div className="grid gap-1">
+        <div className="flex flex-col gap-1 min-w-0">
           {filtered.map((ext) => {
             const iconUrl = ext.icons?.length ? ext.icons[ext.icons.length - 1].url : undefined
             const isPinned = settings.alwaysEnabled?.includes(ext.id)
             const isLean = settings.leanExtensionIds?.includes(ext.id)
             const lastUsedDate = lastUsed[ext.id]
             return (
-              <div key={ext.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-card/50 transition-colors group min-w-0 ${selected.has(ext.id) ? "bg-card/30" : ""}`}>
+              <div key={ext.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg min-w-0 ${selected.has(ext.id) ? "bg-card/30" : ""}`}>
                 {selectMode && (
                   <input
                     type="checkbox"
@@ -294,7 +294,7 @@ export function ExtensionsSection({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span
-                      className={`text-xs font-medium truncate cursor-pointer hover:underline ${ext.enabled ? "text-fg" : "text-fg/40"}`}
+                      className={`text-xs font-medium break-words cursor-pointer hover:underline ${ext.enabled ? "text-fg" : "text-fg/40"}`}
                       onClick={() => chrome.tabs.create({ url: `https://chromewebstore.google.com/detail/${ext.id}` })}>
                       {ext.name}
                     </span>
@@ -304,7 +304,7 @@ export function ExtensionsSection({
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-fg/30 truncate">{ext.description || `v${ext.version}`}</p>
+                  <p className="text-[10px] text-fg/30 break-words">{ext.description || `v${ext.version}`}</p>
                 </div>
                 {/* Action buttons — pinned/lean stay visible if active; others reveal on hover */}
                 <button
@@ -315,7 +315,7 @@ export function ExtensionsSection({
                     onUpdateSettings({ alwaysEnabled: next })
                   }}
                   title={isPinned ? "Unpin app" : "Pin app (always enabled)"}
-                  className={`p-1 rounded flex-shrink-0 transition-all ${isPinned ? "text-warning" : "text-fg/20 opacity-0 group-hover:opacity-100 hover:text-fg/50"}`}>
+                  className={`p-1 rounded flex-shrink-0 ${isPinned ? "text-warning" : "text-fg/30 hover:text-fg/60"}`}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                     <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2l1-7z" />
                   </svg>
@@ -328,7 +328,7 @@ export function ExtensionsSection({
                     onUpdateSettings({ leanExtensionIds: next })
                   }}
                   title={isLean ? "Remove from Lean list" : "Add to Lean list"}
-                  className={`p-1 rounded flex-shrink-0 transition-all ${isLean ? "text-success" : "text-fg/20 opacity-0 group-hover:opacity-100 hover:text-success"}`}>
+                  className={`p-1 rounded flex-shrink-0 ${isLean ? "text-success" : "text-fg/30 hover:text-success"}`}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill={isLean ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                   </svg>
@@ -339,7 +339,7 @@ export function ExtensionsSection({
                     chrome.tabs.create({ url: `https://www.virustotal.com/gui/search/${encodeURIComponent(crxUrl)}` })
                   }}
                   title="Scan with VirusTotal"
-                  className="p-1 rounded flex-shrink-0 text-fg/20 opacity-0 group-hover:opacity-100 hover:text-info transition-all">
+                  className="p-1 rounded flex-shrink-0 text-fg/30 hover:text-info">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                   </svg>
@@ -347,7 +347,7 @@ export function ExtensionsSection({
                 <button
                   onClick={() => { if (confirm(`Uninstall ${ext.name}?`)) onUninstall(ext.id) }}
                   title="Uninstall"
-                  className="p-1 rounded flex-shrink-0 text-fg/20 opacity-0 group-hover:opacity-100 hover:text-destructive transition-all">
+                  className="p-1 rounded flex-shrink-0 text-fg/30 hover:text-destructive">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                   </svg>
