@@ -60,7 +60,8 @@
       "bookmarks",
       "cookies",
       "downloads",
-      "tabGroups"
+      "tabGroups",
+      "browsingData"
     ],
     "host_permissions": [
       "<all_urls>"

@@ -92,20 +92,6 @@ export function CookiesSection() {
     if (selectedDomain === domain) setSelectedDomain(null)
   }
 
-  const deleteAllCookies = () => runClear(
-    "cookies",
-    async () => {
-      await Promise.all(cookies.map((c) => {
-        const protocol = c.secure ? "https" : "http"
-        const d = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain
-        return chrome.cookies.remove({ url: `${protocol}://${d}${c.path}`, name: c.name })
-      }))
-      setCookies([])
-      setSelectedDomain(null)
-    },
-    "All cookies deleted"
-  )
-
   // Wrap a clear action so the spinner state is always restored — even on error
   // — and so the "Clearing…" frame is visible long enough to read on fast disks.
   const runClear = async (key: "cache" | "history" | "all" | "cookies", fn: () => Promise<unknown>, doneMsg: string) => {
@@ -124,11 +110,48 @@ export function CookiesSection() {
     }
   }
 
-  const clearCache = () => runClear("cache", () => chrome.browsingData.removeCache({}), "Cache cleared")
-  const clearHistory = () => runClear("history", () => chrome.browsingData.removeHistory({}), "History cleared")
-  const clearAll = () => runClear(
-    "all",
-    async () => {
+  // chrome.browsingData isn't always present (requires manifest permission +
+  // possibly a Brave flag). Guard up-front so the user gets a useful message
+  // instead of an opaque "undefined.removeCache" stack trace.
+  const requireBrowsingData = () => {
+    if (typeof chrome === "undefined" || !chrome.browsingData) {
+      throw new Error("chrome.browsingData unavailable — reload the extension")
+    }
+  }
+
+  const clearCache = () =>
+    runClear("cache", async () => {
+      requireBrowsingData()
+      await chrome.browsingData.removeCache({})
+    }, "Cache cleared")
+
+  const clearHistory = () =>
+    runClear("history", async () => {
+      requireBrowsingData()
+      await chrome.browsingData.removeHistory({})
+    }, "History cleared")
+
+  const deleteAllCookies = () =>
+    runClear("cookies", async () => {
+      // Prefer the bulk API — works even if our in-memory `cookies` is stale
+      // and is far faster than iterating chrome.cookies.remove per entry.
+      if (chrome.browsingData?.removeCookies) {
+        await chrome.browsingData.removeCookies({})
+      } else {
+        await Promise.all(cookies.map((c) => {
+          const protocol = c.secure ? "https" : "http"
+          const d = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain
+          return chrome.cookies.remove({ url: `${protocol}://${d}${c.path}`, name: c.name })
+        }))
+      }
+      setCookies([])
+      setSelectedDomain(null)
+      await fetchCookies()
+    }, "All cookies deleted")
+
+  const clearAll = () =>
+    runClear("all", async () => {
+      requireBrowsingData()
       await Promise.all([
         chrome.browsingData.removeCache({}),
         chrome.browsingData.removeHistory({}),
@@ -137,15 +160,19 @@ export function CookiesSection() {
       ])
       setCookies([])
       setSelectedDomain(null)
-    },
-    "All browsing data cleared"
-  )
+      await fetchCookies()
+    }, "All browsing data cleared")
 
   return (
     <div className="relative">
       {/* Toast */}
       {toast && (
-        <div className="fixed top-4 right-4 z-50 text-xs py-2 px-4 rounded bg-success/20 text-success animate-fade-in">
+        <div
+          className={`fixed top-4 right-4 z-50 text-xs py-2 px-4 rounded animate-fade-in ${
+            toast.startsWith("Failed")
+              ? "bg-destructive/20 text-destructive"
+              : "bg-success/20 text-success"
+          }`}>
           {toast}
         </div>
       )}
