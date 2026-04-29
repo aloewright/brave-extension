@@ -1,11 +1,9 @@
-import { ComingSoon } from "../ComingSoon"
+import { CookiesSection as LxCookiesSection } from "../_lx/components/CookiesSection"
 
 export function CookiesSection() {
   return (
-    <ComingSoon
-      title="Cookies"
-      milestone="M1 — pending merge from lean-extensions"
-      blurb="Per-domain cookie inspection and editing via chrome.cookies. Always prompt-on-write by default."
-    />
+    <div className="h-full overflow-y-auto p-4">
+      <LxCookiesSection />
+    </div>
   )
 }
