@@ -1,5 +1,7 @@
 import { ulid } from "./lib/ulid"
+import { cropScreenshot } from "./lib/screenshot"
 import { addHighlight } from "./review"
+import { DOM_TOOL_HANDLERS } from "./background/dom-tools"
 import type { PickerCapture, PickerMessage, Reference } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
@@ -452,8 +454,6 @@ async function scrapeTab(tabId: number) {
 // crops the visible-tab screenshot to the element's bounding box, packs a
 // Reference and resolves the original sender. Auto-cancels on tab nav.
 
-const SCREENSHOT_MAX_BYTES = 200 * 1024
-
 type PendingPicker = {
   resolve: (ref: Reference) => void
   reject: (err: Error) => void
@@ -498,54 +498,6 @@ async function cancelPicker(tabId: number) {
   }
 }
 
-async function cropScreenshot(
-  dataUrl: string,
-  capture: PickerCapture
-): Promise<string> {
-  const dpr = capture.devicePixelRatio || 1
-  const { x, y, w, h } = capture.boundingBox
-  if (w <= 0 || h <= 0) return dataUrl
-
-  const blob = await (await fetch(dataUrl)).blob()
-  const bitmap = await createImageBitmap(blob)
-
-  // captureVisibleTab returns a bitmap at device pixel resolution; the
-  // bounding box is in CSS pixels, so multiply by dpr. Clamp to the bitmap.
-  const sx = Math.max(0, Math.round(x * dpr))
-  const sy = Math.max(0, Math.round(y * dpr))
-  const sw = Math.max(1, Math.min(Math.round(w * dpr), bitmap.width - sx))
-  const sh = Math.max(1, Math.min(Math.round(h * dpr), bitmap.height - sy))
-
-  const canvas = new OffscreenCanvas(sw, sh)
-  const ctx = canvas.getContext("2d")
-  if (!ctx) return dataUrl
-  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
-  bitmap.close?.()
-
-  // Encode PNG first; if too large, fall back to JPEG and step quality down
-  // until under the 200KB cap.
-  const png = await canvas.convertToBlob({ type: "image/png" })
-  let chosen: Blob = png
-  if (png.size > SCREENSHOT_MAX_BYTES) {
-    const qualities = [0.92, 0.8, 0.65, 0.5, 0.35]
-    for (const q of qualities) {
-      const jpg = await canvas.convertToBlob({ type: "image/jpeg", quality: q })
-      chosen = jpg
-      if (jpg.size <= SCREENSHOT_MAX_BYTES) break
-    }
-  }
-  return await blobToDataUrl(chosen)
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(fr.result as string)
-    fr.onerror = () => reject(fr.error || new Error("FileReader failed"))
-    fr.readAsDataURL(blob)
-  })
-}
-
 async function finalizeCapture(tabId: number, capture: PickerCapture) {
   const pending = pendingPickers.get(tabId)
   if (!pending) return
@@ -560,7 +512,11 @@ async function finalizeCapture(tabId: number, capture: PickerCapture) {
         const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
           format: "png"
         })
-        screenshot = await cropScreenshot(dataUrl, capture)
+        screenshot = await cropScreenshot(
+          dataUrl,
+          capture.boundingBox,
+          capture.devicePixelRatio
+        )
       } catch (err) {
         console.warn("picker: captureVisibleTab failed:", err)
       }
@@ -714,7 +670,8 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
       isError: false
     }
-  }
+  },
+  ...DOM_TOOL_HANDLERS
 }
 
 async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {

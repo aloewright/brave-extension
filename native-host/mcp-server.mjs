@@ -24,6 +24,7 @@ import { randomBytes } from "crypto"
 import { writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
+import { DOM_TOOL_DEFS, buildReferenceTools } from "./tool-defs/dom-tools.mjs"
 
 const CONFIG_DIR = join(homedir(), ".config", "ai-dev-sidebar")
 const TOKEN_PATH = join(CONFIG_DIR, "mcp-token")
@@ -372,6 +373,24 @@ export class MCPServer {
       handler: async (args) => this._bridge("tabs_list", args)
     }
     this.tools.set(tabsList.name, tabsList)
+
+    // DOM/interaction tools (M4, ALO-245). All bridged to the extension
+    // background worker — schemas declared in tool-defs/dom-tools.mjs.
+    for (const def of DOM_TOOL_DEFS) {
+      const name = def.name
+      this.tools.set(name, {
+        name,
+        description: def.description,
+        inputSchema: def.inputSchema,
+        handler: async (args) => this._bridge(name, args)
+      })
+    }
+
+    // Reference tools (M4, ALO-245). Host-side; read/mutate the local
+    // resources map directly with no extension round-trip.
+    for (const def of buildReferenceTools(this)) {
+      this.tools.set(def.name, def)
+    }
   }
 
   async _bridge(name, args) {
