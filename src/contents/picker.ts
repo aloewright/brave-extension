@@ -9,8 +9,8 @@ export const config: PlasmoCSConfig = {
   all_frames: false
 }
 
-const OVERLAY_ID = "alexometer-picker-overlay"
-const STYLE_ID = "alexometer-picker-style"
+const OVERLAY_ID = "ai-dev-picker-overlay"
+const STYLE_ID = "ai-dev-picker-style"
 
 // Caps from the spec (§6 of terminal-mcp-sidebar-design): outerHTML ≤ 8KB,
 // textContent ≤ 4KB. The screenshot cap is enforced in the background where
@@ -46,7 +46,7 @@ function ensureStyle() {
       transition: all 60ms ease-out;
       box-sizing: border-box;
     }
-    body[data-alexometer-picker] * { cursor: crosshair !important; }
+    body[data-ai-dev-picker] * { cursor: crosshair !important; }
   `
   document.documentElement.appendChild(style)
 }
@@ -70,15 +70,18 @@ function paint(target: Element) {
   overlay.style.display = "block"
 }
 
+// Idempotent: safe to call multiple times. onClick disarms `active` and
+// removes listeners up-front (to prevent a double-capture race), then calls
+// teardown("silent") after capture resolves to clean up the rest.
 function teardown(notify: "cancelled" | "captured" | "silent" = "silent") {
-  if (!active) return
+  const wasActive = active
   active = false
   lastTarget = null
   if (raf) {
     cancelAnimationFrame(raf)
     raf = 0
   }
-  document.body.removeAttribute("data-alexometer-picker")
+  document.body.removeAttribute("data-ai-dev-picker")
   document.removeEventListener("mousemove", onMouseMove, true)
   document.removeEventListener("click", onClick, true)
   document.removeEventListener("keydown", onKey, true)
@@ -86,7 +89,7 @@ function teardown(notify: "cancelled" | "captured" | "silent" = "silent") {
   if (overlay) overlay.remove()
   const style = document.getElementById(STYLE_ID)
   if (style) style.remove()
-  if (notify === "cancelled") safeSend({ type: "picker:cancelled" })
+  if (notify === "cancelled" && wasActive) safeSend({ type: "picker:cancelled" })
 }
 
 function startup() {
@@ -94,7 +97,7 @@ function startup() {
   active = true
   ensureStyle()
   ensureOverlay()
-  document.body.setAttribute("data-alexometer-picker", "1")
+  document.body.setAttribute("data-ai-dev-picker", "1")
   document.addEventListener("mousemove", onMouseMove, true)
   document.addEventListener("click", onClick, true)
   document.addEventListener("keydown", onKey, true)
@@ -120,8 +123,18 @@ function onClick(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   e.stopImmediatePropagation()
+  // Disarm immediately so a second click during the rAF yield in capture()
+  // cannot trigger a second capture. teardown() is idempotent and will
+  // clean up the overlay/style/raf/body-attr after capture resolves.
+  active = false
+  document.removeEventListener("mousemove", onMouseMove, true)
+  document.removeEventListener("click", onClick, true)
+  document.removeEventListener("keydown", onKey, true)
   const target = lastTarget || document.elementFromPoint(e.clientX, e.clientY)
-  if (!target) return
+  if (!target) {
+    teardown("silent")
+    return
+  }
   capture(target).then((payload) => {
     safeSend({ type: "picker:captured", payload })
     teardown("silent")

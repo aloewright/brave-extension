@@ -351,7 +351,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ─── Picker routing ─────────────────────────────────────────────────
 
   if (message.type === "picker:start") {
-    const tabId = message.tabId as number | undefined
+    const tabId = message.tabId
     if (typeof tabId !== "number") {
       sendResponse({ ok: false, error: "tabId required" })
       return
@@ -363,7 +363,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "picker:cancel") {
-    const tabId = message.tabId as number | undefined
+    const tabId = message.tabId
     if (typeof tabId === "number") {
       cancelPicker(tabId).then(() => sendResponse({ ok: true }))
       return true
@@ -474,15 +474,18 @@ async function startPicker(tabId: number): Promise<Reference> {
   // Cancel any in-flight pick on this tab.
   rejectPending(tabId, "superseded")
 
-  await chrome.tabs.sendMessage(tabId, { type: "picker:start" })
-
   return new Promise<Reference>((resolve, reject) => {
     const timeout = setTimeout(() => {
       rejectPending(tabId, "timeout")
       // Best-effort cancel on the content script.
       chrome.tabs.sendMessage(tabId, { type: "picker:cancel" }).catch(() => {})
     }, 60_000)
+    // Register the pending entry BEFORE sending so a fast picker:captured
+    // message can never race ahead of the map insert.
     pendingPickers.set(tabId, { resolve, reject, timeout })
+    chrome.tabs.sendMessage(tabId, { type: "picker:start" }).catch((err) => {
+      rejectPending(tabId, err?.message ?? String(err))
+    })
   })
 }
 

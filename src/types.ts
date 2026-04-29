@@ -236,8 +236,8 @@ export interface Reference {
 }
 
 export type PickerMessage =
-  | { type: "picker:start" }
-  | { type: "picker:cancel" }
+  | { type: "picker:start"; tabId?: number }
+  | { type: "picker:cancel"; tabId?: number }
   | { type: "picker:cancelled" }
   | { type: "picker:captured"; payload: PickerCapture }
 
