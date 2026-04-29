@@ -30,7 +30,16 @@ const EXPECTED_TOOLS = [
   "eval_js",
   "list_references",
   "get_reference",
-  "clear_references"
+  "clear_references",
+  "bookmarks_search",
+  "bookmarks_create",
+  "bookmarks_remove",
+  "bookmarks_move",
+  "links_list",
+  "links_add",
+  "links_remove",
+  "captures_list",
+  "captures_get"
 ]
 
 describe("MCP tools registry", () => {

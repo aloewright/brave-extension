@@ -2,6 +2,8 @@ import { ulid } from "./lib/ulid"
 import { cropScreenshotDataUrl } from "./lib/screenshot"
 import { addHighlight } from "./review"
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools"
+import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools"
+import { startResourcePublishers } from "./background/resource-publishers"
 import type { PickerCapture, PickerMessage, Reference } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
@@ -671,8 +673,25 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       isError: false
     }
   },
-  ...DOM_TOOL_HANDLERS
+  ...DOM_TOOL_HANDLERS,
+  ...LIBRARY_TOOL_HANDLERS
 }
+
+// Wire up MCP resource publishers. Each push sends `mcp.resource.upsert`
+// over the native port; the host's MCPServer mirrors it into its resources
+// map, which then surfaces via tools/resources/list. Only one boot per SW.
+startResourcePublishers({
+  upsert: (uri, def) => {
+    sendToNative({
+      type: "mcp.resource.upsert",
+      uri,
+      name: def.name,
+      description: def.description,
+      mimeType: def.mimeType,
+      payload: def.payload
+    })
+  }
+})
 
 async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
   const handler = TOOL_HANDLERS[msg.name]
