@@ -155,6 +155,15 @@ export class MCPServer {
       }
     }
     cfg.mcpServers = cfg.mcpServers || {}
+    // NOTE: the `${AI_DEV_MCP_TOKEN}` literal here is intentional — Claude
+    // Code expands env-var references in `headers` at MCP-connection time
+    // using the env it was launched with. Our PTY shells inherit
+    // AI_DEV_MCP_TOKEN via mcpServer.ptyEnv(), so terminals spawned from the
+    // sidepanel get expansion for free. External terminals only get the
+    // expansion if the user runs `claude` from a shell that has the var
+    // exported — that's what the M7 wrapper script (spec §7.1) covers.
+    // Do NOT replace this with a baked-in token: that would write the secret
+    // to disk in plaintext.
     cfg.mcpServers["ai-dev-sidebar"] = {
       type: "sse",
       url: `http://127.0.0.1:${this.port}/sse`,

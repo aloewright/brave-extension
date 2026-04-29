@@ -1,5 +1,5 @@
 import { ulid } from "./lib/ulid"
-import { cropScreenshot } from "./lib/screenshot"
+import { cropScreenshotDataUrl } from "./lib/screenshot"
 import { addHighlight } from "./review"
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools"
 import type { PickerCapture, PickerMessage, Reference } from "./types"
@@ -512,7 +512,7 @@ async function finalizeCapture(tabId: number, capture: PickerCapture) {
         const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
           format: "png"
         })
-        screenshot = await cropScreenshot(
+        screenshot = await cropScreenshotDataUrl(
           dataUrl,
           capture.boundingBox,
           capture.devicePixelRatio

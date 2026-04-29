@@ -8,7 +8,23 @@
  * Result shape: `{ content: [{type, text|data}], isError?: boolean }`.
  */
 
-import { cropScreenshot } from "../lib/screenshot"
+import { cropScreenshot, stripDataUrl } from "../lib/screenshot"
+
+const RESTRICTED_URL_PREFIXES = [
+  "chrome://",
+  "chrome-extension://",
+  "edge://",
+  "about:",
+  "devtools://",
+  "view-source:"
+]
+
+function isRestrictedUrl(url: string | undefined | null): boolean {
+  if (!url) return false
+  return RESTRICTED_URL_PREFIXES.some((p) => url.startsWith(p))
+}
+
+const NO_TAB_ERR = "no active tab; pass tabId explicitly"
 
 type ToolResult = {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
@@ -31,8 +47,17 @@ function ok(text: string): ToolResult {
 
 async function resolveTabId(tabId: unknown): Promise<number | null> {
   if (typeof tabId === "number" && Number.isFinite(tabId)) return tabId
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  return tab?.id ?? null
+  // Prefer the last-focused browser window; if no window has focus (e.g.
+  // when the call originates from a devtools / popout / unfocused state),
+  // fall back to the current window. Filter out chrome:// and friends —
+  // content scripts can't run there, so returning one is a footgun.
+  let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (!tab) {
+    ;[tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  }
+  if (!tab || tab.id == null) return null
+  if (isRestrictedUrl(tab.url)) return null
+  return tab.id
 }
 
 /**
@@ -57,7 +82,7 @@ async function execIsolated<Args extends any[], R>(
 
 async function query_selector(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   if (!selector) return err("selector required")
   const all = !!args?.all
@@ -93,7 +118,7 @@ async function query_selector(args: any): Promise<ToolResult> {
 
 async function click(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   if (!selector) return err("selector required")
 
@@ -121,7 +146,7 @@ async function click(args: any): Promise<ToolResult> {
 
 async function type_(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   const text = String(args?.text ?? "")
   if (!selector) return err("selector required")
@@ -163,7 +188,7 @@ async function type_(args: any): Promise<ToolResult> {
 
 async function scroll_to(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   if (!selector) return err("selector required")
 
@@ -186,7 +211,7 @@ async function scroll_to(args: any): Promise<ToolResult> {
 
 async function wait_for_selector(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   if (!selector) return err("selector required")
   const timeoutMs = Number(args?.timeoutMs ?? DEFAULT_WAIT_MS)
@@ -212,7 +237,7 @@ async function wait_for_selector(args: any): Promise<ToolResult> {
 
 async function screenshot(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const format = args?.format === "jpeg" ? "jpeg" : "png"
   try {
     const tab = await chrome.tabs.get(tabId)
@@ -220,9 +245,13 @@ async function screenshot(args: any): Promise<ToolResult> {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
       format
     })
+    // MCP image content blocks expect raw base64 in `data`, not a data URL.
+    const { base64, mimeType } = stripDataUrl(dataUrl)
     return {
       isError: false,
-      content: [{ type: "image", data: dataUrl, mimeType: `image/${format}` }]
+      content: [
+        { type: "image", data: base64, mimeType: mimeType || `image/${format}` }
+      ]
     }
   } catch (e) {
     return err((e as Error).message)
@@ -231,18 +260,20 @@ async function screenshot(args: any): Promise<ToolResult> {
 
 async function screenshot_element(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "")
   if (!selector) return err("selector required")
 
   try {
+    // chrome.scripting.executeScript does NOT await Promises returned by
+    // `func` — an async function would resolve to undefined. Keep this fully
+    // synchronous: scroll instantly, then read the rect immediately.
     const info = await execIsolated(
       tabId,
-      async (sel: string) => {
+      (sel: string) => {
         const el = document.querySelector(sel) as HTMLElement | null
         if (!el) return null
         el.scrollIntoView({ behavior: "instant" as ScrollBehavior, block: "center" })
-        await new Promise<void>((r) => requestAnimationFrame(() => r()))
         const rect = el.getBoundingClientRect()
         return {
           x: rect.x,
@@ -258,14 +289,14 @@ async function screenshot_element(args: any): Promise<ToolResult> {
     const tab = await chrome.tabs.get(tabId)
     if (tab.windowId == null) return err("tab has no window")
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" })
-    const cropped = await cropScreenshot(
+    const { base64, mimeType } = await cropScreenshot(
       dataUrl,
       { x: info.x, y: info.y, w: info.w, h: info.h },
       info.dpr
     )
     return {
       isError: false,
-      content: [{ type: "image", data: cropped, mimeType: "image/png" }]
+      content: [{ type: "image", data: base64, mimeType }]
     }
   } catch (e) {
     return err((e as Error).message)
@@ -274,7 +305,7 @@ async function screenshot_element(args: any): Promise<ToolResult> {
 
 async function get_dom(args: any): Promise<ToolResult> {
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const selector = String(args?.selector ?? "html")
   const maxBytes = Number(args?.maxBytes ?? DEFAULT_DOM_BYTES)
 
@@ -306,7 +337,7 @@ async function eval_js(args: any): Promise<ToolResult> {
     return err("eval_js disabled in Settings")
   }
   const tabId = await resolveTabId(args?.tabId)
-  if (tabId == null) return err("no active tab")
+  if (tabId == null) return err(NO_TAB_ERR)
   const code = String(args?.code ?? "")
   if (!code) return err("code required")
 
