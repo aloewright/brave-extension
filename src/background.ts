@@ -1,4 +1,6 @@
+import { ulid } from "./lib/ulid"
 import { addHighlight } from "./review"
+import type { PickerCapture, PickerMessage, Reference } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
 const HEARTBEAT_ALARM = "native-heartbeat"
@@ -346,6 +348,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     closeOffscreen()
   }
 
+  // ─── Picker routing ─────────────────────────────────────────────────
+
+  if (message.type === "picker:start") {
+    const tabId = message.tabId as number | undefined
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, error: "tabId required" })
+      return
+    }
+    startPicker(tabId)
+      .then((ref) => sendResponse({ ok: true, reference: ref }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }))
+    return true
+  }
+
+  if (message.type === "picker:cancel") {
+    const tabId = message.tabId as number | undefined
+    if (typeof tabId === "number") {
+      cancelPicker(tabId).then(() => sendResponse({ ok: true }))
+      return true
+    }
+    sendResponse({ ok: false, error: "tabId required" })
+  }
+
+  if (message.type === "picker:captured") {
+    const tabId = sender.tab?.id
+    if (typeof tabId === "number") {
+      void finalizeCapture(tabId, (message as PickerMessage & { payload: PickerCapture }).payload)
+    }
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "picker:cancelled") {
+    const tabId = sender.tab?.id
+    if (typeof tabId === "number") rejectPending(tabId, "user-cancelled")
+    sendResponse({ ok: true })
+  }
+
   if (message.type === "OFFSCREEN_ERROR") {
     recording.active = false
     recording.tabId = null
@@ -406,6 +445,152 @@ async function scrapeTab(tabId: number) {
     return { error: (err as Error).message }
   }
 }
+
+// ─── Element picker (Reference capture, ALO-243) ────────────────────────
+// Sidepanel calls `picker:start` with a tabId. Background tells the
+// content script to start the picker, awaits a `picker:captured` message,
+// crops the visible-tab screenshot to the element's bounding box, packs a
+// Reference and resolves the original sender. Auto-cancels on tab nav.
+
+const SCREENSHOT_MAX_BYTES = 200 * 1024
+
+type PendingPicker = {
+  resolve: (ref: Reference) => void
+  reject: (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+const pendingPickers = new Map<number, PendingPicker>()
+
+function rejectPending(tabId: number, reason: string) {
+  const p = pendingPickers.get(tabId)
+  if (!p) return
+  pendingPickers.delete(tabId)
+  clearTimeout(p.timeout)
+  p.reject(new Error(reason))
+}
+
+async function startPicker(tabId: number): Promise<Reference> {
+  // Cancel any in-flight pick on this tab.
+  rejectPending(tabId, "superseded")
+
+  await chrome.tabs.sendMessage(tabId, { type: "picker:start" })
+
+  return new Promise<Reference>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      rejectPending(tabId, "timeout")
+      // Best-effort cancel on the content script.
+      chrome.tabs.sendMessage(tabId, { type: "picker:cancel" }).catch(() => {})
+    }, 60_000)
+    pendingPickers.set(tabId, { resolve, reject, timeout })
+  })
+}
+
+async function cancelPicker(tabId: number) {
+  rejectPending(tabId, "cancelled")
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "picker:cancel" })
+  } catch {
+    // Content script may already be gone (navigation, tab closed).
+  }
+}
+
+async function cropScreenshot(
+  dataUrl: string,
+  capture: PickerCapture
+): Promise<string> {
+  const dpr = capture.devicePixelRatio || 1
+  const { x, y, w, h } = capture.boundingBox
+  if (w <= 0 || h <= 0) return dataUrl
+
+  const blob = await (await fetch(dataUrl)).blob()
+  const bitmap = await createImageBitmap(blob)
+
+  // captureVisibleTab returns a bitmap at device pixel resolution; the
+  // bounding box is in CSS pixels, so multiply by dpr. Clamp to the bitmap.
+  const sx = Math.max(0, Math.round(x * dpr))
+  const sy = Math.max(0, Math.round(y * dpr))
+  const sw = Math.max(1, Math.min(Math.round(w * dpr), bitmap.width - sx))
+  const sh = Math.max(1, Math.min(Math.round(h * dpr), bitmap.height - sy))
+
+  const canvas = new OffscreenCanvas(sw, sh)
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return dataUrl
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
+  bitmap.close?.()
+
+  // Encode PNG first; if too large, fall back to JPEG and step quality down
+  // until under the 200KB cap.
+  const png = await canvas.convertToBlob({ type: "image/png" })
+  let chosen: Blob = png
+  if (png.size > SCREENSHOT_MAX_BYTES) {
+    const qualities = [0.92, 0.8, 0.65, 0.5, 0.35]
+    for (const q of qualities) {
+      const jpg = await canvas.convertToBlob({ type: "image/jpeg", quality: q })
+      chosen = jpg
+      if (jpg.size <= SCREENSHOT_MAX_BYTES) break
+    }
+  }
+  return await blobToDataUrl(chosen)
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(fr.result as string)
+    fr.onerror = () => reject(fr.error || new Error("FileReader failed"))
+    fr.readAsDataURL(blob)
+  })
+}
+
+async function finalizeCapture(tabId: number, capture: PickerCapture) {
+  const pending = pendingPickers.get(tabId)
+  if (!pending) return
+  pendingPickers.delete(tabId)
+  clearTimeout(pending.timeout)
+
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    let screenshot = ""
+    if (tab.windowId !== undefined) {
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "png"
+        })
+        screenshot = await cropScreenshot(dataUrl, capture)
+      } catch (err) {
+        console.warn("picker: captureVisibleTab failed:", err)
+      }
+    }
+
+    const ref: Reference = {
+      id: `ref_${ulid()}`,
+      tabId,
+      url: tab.url || "",
+      title: tab.title || "",
+      selector: capture.selector,
+      outerHTML: capture.outerHTML,
+      textContent: capture.textContent,
+      boundingBox: capture.boundingBox,
+      screenshot,
+      createdAt: Date.now()
+    }
+    pending.resolve(ref)
+  } catch (err) {
+    pending.reject(err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
+// Auto-cancel picker if the user navigates the tab away.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading" && pendingPickers.has(tabId)) {
+    rejectPending(tabId, "navigation")
+  }
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  rejectPending(tabId, "tab-closed")
+})
 
 // Side panel behavior — open on action click
 chrome.action.onClicked.addListener((tab) => {

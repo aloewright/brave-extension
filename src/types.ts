@@ -200,6 +200,47 @@ export interface CachedScan {
   cachedAt: string
 }
 
+// ── Element picker (Reference capture) ──────────────────────────────────
+// Separate from the Inspector. The picker captures a single element from
+// the active tab and returns a Reference payload the Terminal section
+// attaches to its prompt.
+
+export interface ReferenceBoundingBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface PickerCapture {
+  selector: string
+  outerHTML: string
+  textContent: string
+  boundingBox: ReferenceBoundingBox
+  // Device pixel ratio for the page at capture time. Background uses this
+  // when cropping captureVisibleTab output.
+  devicePixelRatio: number
+}
+
+export interface Reference {
+  id: string
+  tabId: number
+  url: string
+  title: string
+  selector: string
+  outerHTML: string
+  textContent: string
+  boundingBox: ReferenceBoundingBox
+  screenshot: string
+  createdAt: number
+}
+
+export type PickerMessage =
+  | { type: "picker:start" }
+  | { type: "picker:cancel" }
+  | { type: "picker:cancelled" }
+  | { type: "picker:captured"; payload: PickerCapture }
+
 export const BACKEND_INFO: Record<CLIBackend, { name: string; command: string; color: string; description: string }> = {
   claude: {
     name: "Claude Code",
