@@ -120,6 +120,50 @@ describe("library tool handlers (background side)", () => {
     })
   })
 
+  it("serializes concurrent links_add calls (no read-modify-write race)", async () => {
+    const { LIBRARY_TOOL_HANDLERS, LX_LINKS_KEY } = await import(
+      "../src/background/library-tools"
+    )
+    // Fire two adds in parallel — without the lock the second read would
+    // observe the empty list and overwrite the first add.
+    const [r1, r2] = await Promise.all([
+      LIBRARY_TOOL_HANDLERS.links_add({ url: "https://example.com/a", title: "A" }),
+      LIBRARY_TOOL_HANDLERS.links_add({ url: "https://example.com/b", title: "B" })
+    ])
+    expect(r1.isError).toBeFalsy()
+    expect(r2.isError).toBeFalsy()
+    const stored = await chrome.storage.local.get(LX_LINKS_KEY)
+    const list = (stored as any)[LX_LINKS_KEY] as Array<{ url: string }>
+    expect(list).toHaveLength(2)
+    const urls = list.map((l) => l.url).sort()
+    expect(urls).toEqual(["https://example.com/a", "https://example.com/b"])
+  })
+
+  it("bookmarks_create rejects non-numeric parentId", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_create({
+      title: "X",
+      url: "https://e",
+      parentId: "not-a-number"
+    })
+    expect(r.isError).toBe(true)
+    expect(r.content[0].text).toMatch(/invalid parentId/i)
+    expect((chrome as any).bookmarks.create).not.toHaveBeenCalled()
+  })
+
+  it("bookmarks_create accepts numeric-string parentId", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_create({
+      title: "X",
+      url: "https://e",
+      parentId: "42"
+    })
+    expect(r.isError).toBeFalsy()
+    expect((chrome as any).bookmarks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ parentId: "42" })
+    )
+  })
+
   it("captures_get truncates HTML body above the cap", async () => {
     const { LIBRARY_TOOL_HANDLERS, LX_CAPTURES_KEY } = await import(
       "../src/background/library-tools"

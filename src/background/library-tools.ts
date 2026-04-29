@@ -31,6 +31,32 @@ function rid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+// In-process serializer keyed on storage key. Prevents read-modify-write
+// races when multiple tool calls mutate the same storage list concurrently.
+const writeLocks = new Map<string, Promise<unknown>>()
+function withStorageLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeLocks.get(key) ?? Promise.resolve()
+  const next = prev.then(
+    () => fn(),
+    () => fn()
+  )
+  writeLocks.set(
+    key,
+    next.finally(() => {
+      if (writeLocks.get(key) === next) writeLocks.delete(key)
+    })
+  )
+  return next
+}
+
+// Chrome bookmark IDs are numeric strings. Normalize + reject anything else.
+function normalizeBookmarkId(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined
+  const t = v.trim()
+  if (!/^\d+$/.test(t)) return undefined
+  return t
+}
+
 // ── Bookmarks ────────────────────────────────────────────────────────────
 
 async function bookmarks_search(args: any): Promise<ToolResult> {
@@ -54,9 +80,14 @@ async function bookmarks_search(args: any): Promise<ToolResult> {
 async function bookmarks_create(args: any): Promise<ToolResult> {
   const title = String(args?.title ?? "")
   if (!title) return err("title required")
+  let parentId: string | undefined
+  if (args?.parentId !== undefined && args?.parentId !== null) {
+    parentId = normalizeBookmarkId(args.parentId)
+    if (!parentId) return err("invalid parentId")
+  }
   try {
     const node = await chrome.bookmarks.create({
-      parentId: args?.parentId,
+      parentId,
       title,
       url: args?.url,
       index: typeof args?.index === "number" ? args.index : undefined
@@ -74,8 +105,8 @@ async function bookmarks_create(args: any): Promise<ToolResult> {
 }
 
 async function bookmarks_remove(args: any): Promise<ToolResult> {
-  const id = String(args?.id ?? "")
-  if (!id) return err("id required")
+  const id = normalizeBookmarkId(args?.id)
+  if (!id) return err("invalid id")
   const recursive = !!args?.recursive
   try {
     if (recursive) await chrome.bookmarks.removeTree(id)
@@ -87,10 +118,14 @@ async function bookmarks_remove(args: any): Promise<ToolResult> {
 }
 
 async function bookmarks_move(args: any): Promise<ToolResult> {
-  const id = String(args?.id ?? "")
-  if (!id) return err("id required")
+  const id = normalizeBookmarkId(args?.id)
+  if (!id) return err("invalid id")
   const dest: chrome.bookmarks.BookmarkDestinationArg = {}
-  if (typeof args?.parentId === "string") dest.parentId = args.parentId
+  if (args?.parentId !== undefined && args?.parentId !== null) {
+    const parentId = normalizeBookmarkId(args.parentId)
+    if (!parentId) return err("invalid parentId")
+    dest.parentId = parentId
+  }
   if (typeof args?.index === "number") dest.index = args.index
   try {
     const node = await chrome.bookmarks.move(id, dest)
@@ -149,35 +184,39 @@ async function links_add(args: any): Promise<ToolResult> {
   const url = String(args?.url ?? "")
   if (!url) return err("url required")
   const tags = Array.isArray(args?.tags) ? args.tags.map(String) : []
-  try {
-    const list = await readLinks()
-    const link: StoredLink = {
-      id: rid("link"),
-      url,
-      title: args?.title ? String(args.title) : "",
-      tags,
-      date: new Date().toISOString()
+  return withStorageLock(LX_LINKS_KEY, async () => {
+    try {
+      const list = await readLinks()
+      const link: StoredLink = {
+        id: rid("link"),
+        url,
+        title: args?.title ? String(args.title) : "",
+        tags,
+        date: new Date().toISOString()
+      }
+      list.unshift(link)
+      await writeLinks(list)
+      return ok(JSON.stringify(shapeLink(link), null, 2))
+    } catch (e) {
+      return err((e as Error).message)
     }
-    list.unshift(link)
-    await writeLinks(list)
-    return ok(JSON.stringify(shapeLink(link), null, 2))
-  } catch (e) {
-    return err((e as Error).message)
-  }
+  })
 }
 
 async function links_remove(args: any): Promise<ToolResult> {
   const id = String(args?.id ?? "")
   if (!id) return err("id required")
-  try {
-    const list = await readLinks()
-    const next = list.filter((l) => l.id !== id)
-    if (next.length === list.length) return err(`no link ${id}`)
-    await writeLinks(next)
-    return ok(JSON.stringify({ removed: id }))
-  } catch (e) {
-    return err((e as Error).message)
-  }
+  return withStorageLock(LX_LINKS_KEY, async () => {
+    try {
+      const list = await readLinks()
+      const next = list.filter((l) => l.id !== id)
+      if (next.length === list.length) return err(`no link ${id}`)
+      await writeLinks(next)
+      return ok(JSON.stringify({ removed: id }))
+    } catch (e) {
+      return err((e as Error).message)
+    }
+  })
 }
 
 // ── Library captures ─────────────────────────────────────────────────────

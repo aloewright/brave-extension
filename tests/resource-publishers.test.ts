@@ -124,6 +124,40 @@ describe("resource publishers", () => {
     expect(total).toBe(2)
   })
 
+  it("trim note reports the original (untrimmed) bookmark size", async () => {
+    // Build a deeply nested bookmark tree large enough to exceed the 64KB cap.
+    const buildDeep = (depth: number, fanout: number): any => {
+      if (depth === 0) {
+        return { id: `leaf-${Math.random()}`, title: "L".repeat(200), url: "https://e" }
+      }
+      return {
+        id: `n-${depth}-${Math.random()}`,
+        title: "N",
+        children: Array.from({ length: fanout }, () => buildDeep(depth - 1, fanout))
+      }
+    }
+    const big = [{ id: "0", title: "", children: [buildDeep(5, 4)] }]
+    const expectedOriginalSize = JSON.stringify(big).length
+    bm.api.getTree = vi.fn(async () => big)
+
+    const { startResourcePublishers } = await import(
+      "../src/background/resource-publishers"
+    )
+    const upserts: Array<{ uri: string; description?: string }> = []
+    startResourcePublishers({
+      upsert: (uri, def) => upserts.push({ uri, description: def.description }),
+      debounceMs: 10
+    })
+    await vi.advanceTimersByTimeAsync(20)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const bookmarkPub = upserts.find((u) => u.uri === "ai-dev://bookmarks")
+    expect(bookmarkPub).toBeTruthy()
+    expect(bookmarkPub!.description).toContain("trimmed")
+    expect(bookmarkPub!.description).toContain(`${expectedOriginalSize}B`)
+  })
+
   it("republishes links when lx_collectedLinks changes", async () => {
     const { startResourcePublishers } = await import(
       "../src/background/resource-publishers"

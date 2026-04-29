@@ -61,11 +61,12 @@ async function publishBookmarks(upsert: ResourceUpsert): Promise<void> {
     const tree = await chrome.bookmarks.getTree()
     let payload: unknown = tree
     let serialized = JSON.stringify(tree)
+    const originalSize = serialized.length
     let note: string | undefined
     if (serialized.length > BOOKMARK_PAYLOAD_CAP) {
       payload = trimBookmarkTree(tree, 3)
       serialized = JSON.stringify(payload)
-      note = `bookmark tree trimmed to top 3 levels (full size ${serialized.length}B)`
+      note = `bookmark tree trimmed to top 3 levels (full size ${originalSize}B)`
     }
     upsert(BOOKMARKS_URI, {
       name: "Brave bookmarks",
@@ -128,18 +129,19 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
   const ms = opts.debounceMs ?? DEBOUNCE_MS
   const upsert = opts.upsert
 
-  const pubBookmarks = debounce(() => void publishBookmarks(upsert), ms)
-  const pubLinks = debounce(() => void publishLinks(upsert), ms)
-  const pubCaptures = debounce(() => void publishCaptures(upsert), ms)
+  const schedulePubBookmarks = debounce(() => void publishBookmarks(upsert), ms)
+  const schedulePubLinks = debounce(() => void publishLinks(upsert), ms)
+  const schedulePubCaptures = debounce(() => void publishCaptures(upsert), ms)
 
-  // Initial push.
-  pubBookmarks()
-  pubLinks()
-  pubCaptures()
+  // Initial push fires immediately so resources are populated for clients
+  // that connect right after boot. Subsequent updates remain debounced.
+  void publishBookmarks(upsert)
+  void publishLinks(upsert)
+  void publishCaptures(upsert)
 
   // Bookmark tree changes.
   const bm = chrome.bookmarks
-  const onBookmark = () => pubBookmarks()
+  const onBookmark = () => schedulePubBookmarks()
   bm?.onCreated?.addListener(onBookmark)
   bm?.onRemoved?.addListener(onBookmark)
   bm?.onChanged?.addListener(onBookmark)
@@ -151,8 +153,8 @@ export function startResourcePublishers(opts: ResourcePublishersOptions): () => 
     area: string
   ) => {
     if (area !== "local") return
-    if (LX_LINKS_KEY in changes) pubLinks()
-    if (LX_CAPTURES_KEY in changes) pubCaptures()
+    if (LX_LINKS_KEY in changes) schedulePubLinks()
+    if (LX_CAPTURES_KEY in changes) schedulePubCaptures()
   }
   chrome.storage?.onChanged?.addListener(onStorage)
 
