@@ -10,7 +10,7 @@
  * path block is marker-guarded so toggling it on/off is a clean round-trip.
  */
 
-import { writeFileSync, mkdirSync, chmodSync, existsSync } from "fs"
+import { writeFileSync, mkdirSync, chmodSync, existsSync, readFileSync } from "fs"
 import { homedir } from "os"
 import { join, resolve } from "path"
 import { spawnSync } from "child_process"
@@ -25,25 +25,83 @@ import {
 } from "../native-host/installer.mjs"
 
 const args = process.argv.slice(2)
-const extensionId = args.find((a) => !a.startsWith("--")) || "*"
+const argExtensionId = args.find((a) => !a.startsWith("--"))
 const enableTerminalPath = args.includes("--enable-terminal-path")
 
 const hostPath = resolve(join(import.meta.dirname, "..", "native-host", "ai-dev-host.mjs"))
+const repoRoot = resolve(join(import.meta.dirname, ".."))
+
+// Chrome native messaging does NOT support wildcards in allowed_origins —
+// connectNative() will silently fail unless the exact extension ID is listed.
+// If the caller didn't supply one, scan Brave's Preferences for an unpacked
+// extension whose path lives inside this repo.
+function detectExtensionId() {
+  const prefPaths = []
+  if (process.platform === "darwin") {
+    prefPaths.push(
+      join(homedir(), "Library", "Application Support", "BraveSoftware", "Brave-Browser", "Default", "Preferences"),
+      join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Preferences"),
+      join(homedir(), "Library", "Application Support", "Chromium", "Default", "Preferences")
+    )
+  } else if (process.platform === "linux") {
+    prefPaths.push(join(homedir(), ".config", "BraveSoftware", "Brave-Browser", "Default", "Preferences"))
+  }
+  for (const p of prefPaths) {
+    if (!existsSync(p)) continue
+    try {
+      const data = JSON.parse(readFileSync(p, "utf-8"))
+      const exts = data.extensions?.settings || {}
+      for (const [id, ext] of Object.entries(exts)) {
+        const path = ext?.path || ""
+        if (typeof path === "string" && path.includes(repoRoot)) {
+          return { id, source: p }
+        }
+      }
+    } catch {
+      /* ignore unparseable Preferences files */
+    }
+  }
+  return null
+}
+
+let extensionId = argExtensionId
+let detectedFrom = null
+if (!extensionId) {
+  const found = detectExtensionId()
+  if (found) {
+    extensionId = found.id
+    detectedFrom = found.source
+  }
+}
+
+if (!extensionId) {
+  console.error("✗ No extension ID provided and none auto-detected.")
+  console.error("")
+  console.error("  Chrome/Brave native messaging requires the exact extension ID in the manifest.")
+  console.error("  Wildcards do not work, so we won't write a manifest that's guaranteed to fail.")
+  console.error("")
+  console.error("  How to fix:")
+  console.error("    1) Run `pnpm build` (already done if you see build/chrome-mv3-prod).")
+  console.error("    2) Open brave://extensions, enable Developer Mode, click 'Load unpacked',")
+  console.error("       and select build/chrome-mv3-prod inside this repo.")
+  console.error("    3) Copy the extension ID Brave assigned (long lowercase string).")
+  console.error("    4) Re-run:  pnpm install-host <extension-id>")
+  process.exit(1)
+}
 
 const manifest = {
   name: HOST_NAME,
   description: "AI Dev Sidebar native messaging host — bridges browser to local CLI tools",
   path: hostPath,
   type: "stdio",
-  allowed_origins: extensionId === "*"
-    ? ["chrome-extension://*/"]
-    : [`chrome-extension://${extensionId}/`]
+  allowed_origins: [`chrome-extension://${extensionId}/`]
 }
 
-if (extensionId === "*") {
-  console.log("⚠  No extension ID provided. You'll need to update the manifest after loading the extension.")
-  console.log("   Usage: node scripts/install-native-host.mjs <extension-id> [--enable-terminal-path]")
-  console.log("")
+if (detectedFrom) {
+  console.log(`✓ Auto-detected extension ID ${extensionId}`)
+  console.log(`  (from ${detectedFrom})`)
+} else {
+  console.log(`✓ Using extension ID ${extensionId}`)
 }
 
 const platform = process.platform

@@ -65,7 +65,7 @@ export function SettingsPanel({
                 style={{
                   borderColor: settings.backend === key ? info.color : "transparent",
                   backgroundColor: settings.backend === key ? info.color + "15" : undefined,
-                  ringColor: info.color
+                  ["--tw-ring-color" as never]: info.color
                 }}
               >
                 <div className="flex items-center gap-1.5">

@@ -276,7 +276,7 @@ export function ExtensionsSection({
             const isLean = settings.leanExtensionIds?.includes(ext.id)
             const lastUsedDate = lastUsed[ext.id]
             return (
-              <div key={ext.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-card/50 transition-colors group ${selected.has(ext.id) ? "bg-card/30" : ""}`}>
+              <div key={ext.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-card/50 transition-colors group min-w-0 ${selected.has(ext.id) ? "bg-card/30" : ""}`}>
                 {selectMode && (
                   <input
                     type="checkbox"
@@ -292,7 +292,7 @@ export function ExtensionsSection({
                   <div className="w-7 h-7 rounded bg-accent flex-shrink-0 flex items-center justify-center text-xs text-fg/50">{ext.name[0]}</div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <span
                       className={`text-xs font-medium truncate cursor-pointer hover:underline ${ext.enabled ? "text-fg" : "text-fg/40"}`}
                       onClick={() => chrome.tabs.create({ url: `https://chromewebstore.google.com/detail/${ext.id}` })}>
