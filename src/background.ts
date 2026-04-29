@@ -14,6 +14,15 @@ function connectNativeHost() {
     nativePort.onMessage.addListener((msg: any) => {
       // Drop pongs — they're keepalive noise the sidebar doesn't need.
       if (msg?.type === "pong") return
+
+      // Tool-call bridge from MCP server → background. Currently only a tiny
+      // surface (tabs_list) lands here; M4/M5 expand it. Replies are sent
+      // back over the same native port using mcp.tool.result.
+      if (msg?.type === "mcp.tool.call") {
+        void handleMcpToolCall(msg)
+        return
+      }
+
       // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-response", payload: msg })
@@ -491,5 +500,53 @@ chrome.commands.onCommand.addListener(async (command) => {
     }
   }
 })
+
+// ── MCP tool bridge ──────────────────────────────────────────────────────
+// The native host's MCP server dispatches tool calls that need chrome.* APIs
+// here via the native port. Each tool returns a value compatible with the
+// MCP `tools/call` result shape: `{ content: [{type, text}], isError? }`.
+//
+// M3 ships only the basics (tabs_list); M4/M5 register more.
+
+type ToolHandler = (args: any) => Promise<any>
+
+const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  async tabs_list() {
+    const tabs = await chrome.tabs.query({})
+    const summary = tabs.map((t) => ({
+      id: t.id,
+      windowId: t.windowId,
+      url: t.url,
+      title: t.title,
+      active: t.active,
+      pinned: t.pinned,
+      groupId: t.groupId
+    }))
+    return {
+      content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
+      isError: false
+    }
+  }
+}
+
+async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
+  const handler = TOOL_HANDLERS[msg.name]
+  const port = nativePort ?? connectNativeHost()
+  if (!port) return
+  try {
+    if (!handler) {
+      port.postMessage({ type: "mcp.tool.result", id: msg.id, error: `unknown tool ${msg.name}` })
+      return
+    }
+    const result = await handler(msg.args || {})
+    port.postMessage({ type: "mcp.tool.result", id: msg.id, result })
+  } catch (err) {
+    port.postMessage({
+      type: "mcp.tool.result",
+      id: msg.id,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+}
 
 export {}

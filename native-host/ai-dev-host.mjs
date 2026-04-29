@@ -17,8 +17,37 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
 import { PTYManager } from "./pty-manager.mjs"
+import { MCPServer } from "./mcp-server.mjs"
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
+
+const mcp = new MCPServer({
+  logger: (line) => sendMessage({ type: "stderr", data: line })
+})
+
+// Pending tool-call promises waiting for an extension reply.
+const pendingToolCalls = new Map() // id -> { resolve, reject }
+let nextToolCallId = 1
+
+mcp.setToolRequestBridge((name, args) => {
+  const id = nextToolCallId++
+  return new Promise((resolve, reject) => {
+    pendingToolCalls.set(id, { resolve, reject })
+    sendMessage({ type: "mcp.tool.call", id, name, args })
+    setTimeout(() => {
+      if (pendingToolCalls.delete(id)) {
+        reject(new Error(`tool ${name} timed out (15s)`))
+      }
+    }, 15_000)
+  }).catch((err) => ({
+    isError: true,
+    content: [{ type: "text", text: err.message }]
+  }))
+})
+
+mcp.start().catch((err) => {
+  sendMessage({ type: "stderr", data: `[mcp] failed to start: ${err.message}` })
+})
 
 /**
  * `hasSession` tracks whether each backend has an active session to continue.
@@ -471,7 +500,11 @@ async function main() {
       }
 
       case "pty.spawn": {
-        await ptyManager.spawn(msg)
+        const merged = {
+          ...msg,
+          env: { ...(msg.env || {}), ...mcp.ptyEnv() }
+        }
+        await ptyManager.spawn(merged)
         break
       }
 
@@ -487,6 +520,47 @@ async function main() {
 
       case "pty.kill": {
         ptyManager.kill(msg)
+        break
+      }
+
+      case "mcp.status": {
+        sendMessage({
+          type: "mcp.status",
+          port: mcp.port,
+          tokenSet: !!mcp.token,
+          resources: mcp.resources.size,
+          tools: mcp.tools.size
+        })
+        break
+      }
+
+      case "mcp.resource.upsert": {
+        if (msg.uri) {
+          mcp.upsertResource(msg.uri, {
+            name: msg.name,
+            description: msg.description,
+            mimeType: msg.mimeType,
+            payload: msg.payload
+          })
+        }
+        break
+      }
+
+      case "mcp.resource.remove": {
+        if (msg.uri) mcp.removeResource(msg.uri)
+        break
+      }
+
+      case "mcp.tool.result": {
+        const pending = pendingToolCalls.get(msg.id)
+        if (pending) {
+          pendingToolCalls.delete(msg.id)
+          if (msg.error) {
+            pending.resolve({ isError: true, content: [{ type: "text", text: msg.error }] })
+          } else {
+            pending.resolve(msg.result)
+          }
+        }
         break
       }
     }
