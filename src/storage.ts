@@ -1,12 +1,23 @@
-import type { Settings, ChatMessage, PageInspection, CLIBackend } from "./types"
+import type {
+  CachedScan,
+  ChatMessage,
+  CLIBackend,
+  InspectorSettings,
+  ScanResult,
+  Settings
+} from "./types"
+import { DEFAULT_INSPECTOR_SETTINGS } from "./types"
 
 const KEYS = {
   settings: "ai-dev-settings",
   // Legacy single-array key — migrated to per-backend shards on first read
   legacyMessages: "ai-dev-messages",
-  inspections: "ai-dev-inspections",
-  scrapes: "ai-dev-scrapes"
+  scrapes: "ai-dev-scrapes",
+  inspectorSettings: "ai-dev-inspector-settings",
+  scanCache: "ai-dev-scan-cache"
 }
+
+const SCAN_CACHE_LIMIT = 50
 
 const BACKENDS: CLIBackend[] = ["claude", "gemini", "copilot", "codex"]
 
@@ -109,16 +120,50 @@ export async function clearMessages(backend?: CLIBackend): Promise<void> {
   await chrome.storage.local.set(grouped)
 }
 
-export async function getInspections(): Promise<PageInspection[]> {
-  const result = await chrome.storage.local.get(KEYS.inspections)
-  return result[KEYS.inspections] || []
+// ─── Design inspector storage ─────────────────────────────────────────
+
+export async function getInspectorSettings(): Promise<InspectorSettings> {
+  const result = await chrome.storage.local.get(KEYS.inspectorSettings)
+  return { ...DEFAULT_INSPECTOR_SETTINGS, ...result[KEYS.inspectorSettings] }
 }
 
-export async function addInspection(inspection: PageInspection): Promise<void> {
-  const current = await getInspections()
+export async function setInspectorSettings(
+  settings: Partial<InspectorSettings>
+): Promise<void> {
+  const current = await getInspectorSettings()
   await chrome.storage.local.set({
-    [KEYS.inspections]: [inspection, ...current].slice(0, 50)
+    [KEYS.inspectorSettings]: { ...current, ...settings }
   })
+}
+
+export function scanCacheKey(url: string): string {
+  return url.split("#")[0]
+}
+
+export async function getCachedScan(url: string): Promise<CachedScan | null> {
+  const result = await chrome.storage.local.get(KEYS.scanCache)
+  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  return cache[scanCacheKey(url)] ?? null
+}
+
+export async function setCachedScan(scan: ScanResult): Promise<void> {
+  const result = await chrome.storage.local.get(KEYS.scanCache)
+  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  const key = scanCacheKey(scan.url)
+  cache[key] = { url: key, result: scan, cachedAt: new Date().toISOString() }
+
+  const entries = Object.values(cache)
+  if (entries.length > SCAN_CACHE_LIMIT) {
+    entries.sort((a, b) => (a.cachedAt < b.cachedAt ? -1 : 1))
+    const overflow = entries.length - SCAN_CACHE_LIMIT
+    for (let i = 0; i < overflow; i++) delete cache[entries[i].url]
+  }
+
+  await chrome.storage.local.set({ [KEYS.scanCache]: cache })
+}
+
+export async function clearScanCache(): Promise<void> {
+  await chrome.storage.local.set({ [KEYS.scanCache]: {} })
 }
 
 function defaultSettings(): Settings {

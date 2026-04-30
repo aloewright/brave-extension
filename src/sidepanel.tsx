@@ -8,7 +8,7 @@ import { InspectorPanel } from "./components/InspectorPanel"
 import { SettingsPanel } from "./components/SettingsPanel"
 import { BackendSwitcher } from "./components/BackendSwitcher"
 import { ReviewPanel } from "./components/ReviewPanel"
-import type { ChatMessage, CLIBackend, PageInspection, ConsoleError, ScrapeResult, MCPServer } from "./types"
+import type { ChatMessage, CLIBackend, ConsoleError, ScrapeResult, MCPServer } from "./types"
 import { addMessage, getMessages, clearMessages } from "./storage"
 
 type Panel = "chat" | "inspector" | "settings" | "review"
@@ -19,7 +19,6 @@ function SidePanel() {
   const [panel, setPanel] = useState<Panel>("chat")
   const [isRunning, setIsRunning] = useState(false)
   const [activePid, setActivePid] = useState<number | null>(null)
-  const [inspection, setInspection] = useState<PageInspection | null>(null)
   const [consoleErrors, setConsoleErrors] = useState<ConsoleError[]>([])
   const [scrapeData, setScrapeData] = useState<ScrapeResult | null>(null)
   const [streamBuffer, setStreamBuffer] = useState("")
@@ -103,10 +102,6 @@ function SidePanel() {
         backend: settings?.backend
       })
     },
-    onInspect: (result: PageInspection) => {
-      setInspection(result)
-      setPanel("inspector")
-    },
     onSelection: (data: { text: string; url: string }) => {
       setInput((prev) => prev + (prev ? "\n" : "") + data.text)
       inputRef.current?.focus()
@@ -140,13 +135,7 @@ function SidePanel() {
     }
 
     if (text.startsWith("/inspect")) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tab?.id) {
-        chrome.runtime.sendMessage({ type: "INSPECT_TAB", tabId: tab.id }, (result) => {
-          setInspection(result)
-          setPanel("inspector")
-        })
-      }
+      setPanel("inspector")
       return
     }
 
@@ -260,7 +249,6 @@ function SidePanel() {
   if (panel === "inspector") {
     return (
       <InspectorPanel
-        inspection={inspection}
         consoleErrors={consoleErrors}
         onClose={() => setPanel("chat")}
         onSendToChat={(text) => {
@@ -311,20 +299,12 @@ function SidePanel() {
         </button>
 
         <button
-          onClick={async () => {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (tab?.id) {
-              chrome.runtime.sendMessage({ type: "INSPECT_TAB", tabId: tab.id }, (result) => {
-                setInspection(result)
-                setPanel("inspector")
-              })
-            }
-          }}
+          onClick={() => setPanel("inspector")}
           title="Inspect page"
           className="p-1.5 rounded hover:bg-accent text-fg/40 hover:text-fg transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" />
           </svg>
         </button>
 

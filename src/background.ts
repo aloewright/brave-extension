@@ -1,7 +1,9 @@
 import { addHighlight } from "./review"
 
 const HOST_NAME = "com.aidev.sidebar"
+const HEARTBEAT_ALARM = "native-heartbeat"
 let nativePort: chrome.runtime.Port | null = null
+let lastDisconnectAt = 0
 const pendingCallbacks = new Map<string, (msg: any) => void>()
 
 function connectNativeHost() {
@@ -10,7 +12,9 @@ function connectNativeHost() {
     nativePort = chrome.runtime.connectNative(HOST_NAME)
 
     nativePort.onMessage.addListener((msg: any) => {
-      // Forward to all connected sidebar ports
+      // Drop pongs — they're keepalive noise the sidebar doesn't need.
+      if (msg?.type === "pong") return
+      // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-response", payload: msg })
       }
@@ -18,9 +22,21 @@ function connectNativeHost() {
 
     nativePort.onDisconnect.addListener(() => {
       const err = chrome.runtime.lastError?.message || "disconnected"
+      const now = Date.now()
+      const sinceLast = now - lastDisconnectAt
+      lastDisconnectAt = now
       console.warn("Native host disconnected:", err)
       nativePort = null
-      // Notify sidebars
+
+      // Silent auto-reconnect for transient drops (typical: SW recycled,
+      // host process EOF'd, then we wake on the next message). The host
+      // re-loads persisted hasSession so the CLI conversation continues.
+      // Only surface the failure to the sidebar if reconnects are flapping
+      // (multiple disconnects within 5s = real problem, not a recycle).
+      if (sidebarPorts.size === 0) return
+      const reconnected = connectNativeHost()
+      if (reconnected && sinceLast > 5000) return
+
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-disconnected", error: err })
       }
@@ -32,6 +48,26 @@ function connectNativeHost() {
     return null
   }
 }
+
+// Heartbeat — keep the SW alive and the native port from going idle.
+// chrome.alarms wakes the SW even after it's been GC'd, at which point we
+// re-establish the native connection (the host re-loads hasSession from
+// disk, so chat context is preserved across SW restarts).
+chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== HEARTBEAT_ALARM) return
+  // No active sidebar → no reason to keep the host alive. Let the SW idle
+  // out and the host EOF naturally.
+  if (sidebarPorts.size === 0) return
+  const port = nativePort ?? connectNativeHost()
+  if (!port) return
+  try {
+    port.postMessage({ type: "ping" })
+  } catch {
+    // postMessage on a torn-down port throws — let the next disconnect
+    // handler reconnect it.
+  }
+})
 
 function sendToNative(msg: any) {
   const port = connectNativeHost()
@@ -116,9 +152,13 @@ function setRecordingBadge(on: boolean) {
     chrome.action.setBadgeText({ text: "●" })
     chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
     chrome.action.setTitle({ title: "Recording tab — click to stop" })
+    // Show the popup during recording so the toolbar click reveals a Stop
+    // button. In idle, no popup → click opens the sidebar directly.
+    chrome.action.setPopup({ popup: "popup.html" })
   } else {
     chrome.action.setBadgeText({ text: "" })
     chrome.action.setTitle({ title: "AI Dev Sidebar" })
+    chrome.action.setPopup({ popup: "" })
   }
 }
 
@@ -235,11 +275,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ connected: !!nativePort })
   }
 
-  if (message.type === "INSPECT_TAB") {
-    inspectTab(message.tabId).then((result) => sendResponse(result))
-    return true
-  }
-
   if (message.type === "SCRAPE_TAB") {
     scrapeTab(message.tabId).then((result) => sendResponse(result))
     return true
@@ -316,69 +351,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Console error tracking per tab
 const consoleErrors = new Map<number, any[]>()
 
-// Inspect active tab — gather CSS issues, meta, errors
-async function inspectTab(tabId: number) {
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const meta: Record<string, string> = {}
-        document.querySelectorAll("meta").forEach((m) => {
-          const name = m.getAttribute("name") || m.getAttribute("property") || ""
-          const content = m.getAttribute("content") || ""
-          if (name && content) meta[name] = content
-        })
-
-        // Check for common CSS issues
-        const cssIssues: any[] = []
-        const sheets = document.styleSheets
-        for (let i = 0; i < sheets.length; i++) {
-          try {
-            const rules = sheets[i].cssRules
-            for (let j = 0; j < rules.length; j++) {
-              const rule = rules[j] as CSSStyleRule
-              if (rule.selectorText) {
-                // Check for deprecated properties
-                const style = rule.style
-                if (style.getPropertyValue("-webkit-appearance")) {
-                  cssIssues.push({
-                    selector: rule.selectorText,
-                    property: "-webkit-appearance",
-                    value: style.getPropertyValue("-webkit-appearance"),
-                    issue: "Use 'appearance' instead of vendor prefix"
-                  })
-                }
-              }
-            }
-          } catch { /* cross-origin sheets */ }
-        }
-
-        // Get computed accessibility issues
-        const images = Array.from(document.querySelectorAll("img")).filter((img) => !img.alt)
-        const noAlt = images.map((img) => ({
-          selector: `img[src="${img.src.slice(0, 60)}"]`,
-          property: "alt",
-          value: "(missing)",
-          issue: "Image missing alt text"
-        }))
-
-        return {
-          url: location.href,
-          title: document.title,
-          html: document.documentElement.outerHTML.slice(0, 50000),
-          css: [...cssIssues, ...noAlt],
-          meta,
-          timestamp: Date.now()
-        }
-      }
-    })
-
-    return results[0]?.result || null
-  } catch (err) {
-    return { error: (err as Error).message }
-  }
-}
-
 // Scrape page content
 async function scrapeTab(tabId: number) {
   try {
@@ -438,16 +410,23 @@ chrome.sidePanel.setOptions({
   enabled: true
 })
 
+// Detach the default popup so a toolbar click goes straight to the
+// onClicked listener above (which opens the sidebar). The popup is
+// re-attached only while a recording is active — see setRecordingBadge.
+// Plasmo wires `default_popup: "popup.html"` automatically because
+// src/popup.tsx exists; this clears it at runtime. setPopup is
+// persistent, so we only need this on install + browser start.
+chrome.action.setPopup({ popup: "" })
+chrome.runtime.onStartup.addListener(() => {
+  chrome.action.setPopup({ popup: "" })
+})
+
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.action.setPopup({ popup: "" })
   chrome.contextMenus.create({
     id: "scrape-page",
     title: "Scrape page to AI Dev Sidebar",
-    contexts: ["page"]
-  })
-  chrome.contextMenus.create({
-    id: "inspect-page",
-    title: "Inspect page with AI Dev",
     contexts: ["page"]
   })
   chrome.contextMenus.create({
@@ -469,13 +448,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const result = await scrapeTab(tab.id)
     for (const [, port] of sidebarPorts) {
       port.postMessage({ type: "scrape-result", payload: result })
-    }
-  }
-
-  if (info.menuItemId === "inspect-page") {
-    const result = await inspectTab(tab.id)
-    for (const [, port] of sidebarPorts) {
-      port.postMessage({ type: "inspect-result", payload: result })
     }
   }
 

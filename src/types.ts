@@ -28,24 +28,6 @@ export interface ChatMessage {
   isStreaming?: boolean
 }
 
-export interface PageInspection {
-  url: string
-  title: string
-  html?: string
-  css?: CSSIssue[]
-  errors?: ConsoleError[]
-  network?: NetworkEntry[]
-  meta?: Record<string, string>
-  timestamp: number
-}
-
-export interface CSSIssue {
-  selector: string
-  property: string
-  value: string
-  issue: string
-}
-
 export interface ConsoleError {
   level: "error" | "warning" | "info" | "log"
   message: string
@@ -120,6 +102,102 @@ export const DEFAULT_SETTINGS: Settings = {
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
   cloudosServiceToken: "",
   cloudosPruneAfterSync: false
+}
+
+// ─── Design inspector types (folded in from Alexometer) ───────────────
+
+export type ColorFormat = "hex" | "rgb" | "hsl" | "oklch"
+
+export interface RGBA {
+  r: number
+  g: number
+  b: number
+  a: number
+}
+
+export interface BoxModel {
+  margin: { top: number; right: number; bottom: number; left: number }
+  border: { top: number; right: number; bottom: number; left: number }
+  padding: { top: number; right: number; bottom: number; left: number }
+  width: number
+  height: number
+}
+
+export interface ElementSnapshot {
+  tagName: string
+  selector: string
+  rect: { x: number; y: number; width: number; height: number }
+  box: BoxModel
+  computed: Record<string, string>
+  colors: { kind: "color" | "background" | "border"; value: string }[]
+  font: {
+    family: string
+    size: string
+    weight: string
+    lineHeight: string
+    letterSpacing: string
+    style: string
+  }
+  text?: string
+  outerHTML: string
+}
+
+export interface ScannedAsset {
+  type: "image" | "svg" | "lottie" | "video"
+  url: string
+  inlineSvg?: string
+  alt?: string
+  width?: number
+  height?: number
+}
+
+export interface ScanResult {
+  url: string
+  title: string
+  scannedAt: string
+  colors: { value: string; count: number }[]
+  fonts: { family: string; sizes: string[]; weights: string[]; count: number }[]
+  spacing: { value: string; count: number }[]
+  assets: ScannedAsset[]
+}
+
+export type TokenFormat = "tailwind" | "css" | "json"
+
+export interface InspectorSettings {
+  colorFormat: ColorFormat
+  contrastTarget: "AA" | "AAA"
+  exportDefaults: {
+    tokenFormat: TokenFormat
+    includeSpacing: boolean
+    includeFonts: boolean
+  }
+}
+
+export const DEFAULT_INSPECTOR_SETTINGS: InspectorSettings = {
+  colorFormat: "hex",
+  contrastTarget: "AA",
+  exportDefaults: {
+    tokenFormat: "tailwind",
+    includeSpacing: true,
+    includeFonts: true
+  }
+}
+
+export type InspectorMessage =
+  | { type: "inspector:start" }
+  | { type: "inspector:stop" }
+  | { type: "inspector:stopped" }
+  | { type: "inspector:hover"; payload: ElementSnapshot }
+  | { type: "inspector:pick"; payload: ElementSnapshot }
+  | { type: "scan:run" }
+  | { type: "scan:result"; payload: ScanResult }
+  | { type: "asset:fetch"; url: string }
+  | { type: "asset:fetched"; url: string; dataUrl: string | null }
+
+export interface CachedScan {
+  url: string
+  result: ScanResult
+  cachedAt: string
 }
 
 export const BACKEND_INFO: Record<CLIBackend, { name: string; command: string; color: string; description: string }> = {

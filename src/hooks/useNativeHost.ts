@@ -73,12 +73,6 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
         }
       }
 
-      if (msg.type === "inspect-result") {
-        if ((optsRef.current as any).onInspect) {
-          (optsRef.current as any).onInspect(msg.payload)
-        }
-      }
-
       if (msg.type === "selection") {
         if ((optsRef.current as any).onSelection) {
           (optsRef.current as any).onSelection(msg.payload)
