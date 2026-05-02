@@ -31,3 +31,19 @@ The `tests` GitHub Actions workflow (`.github/workflows/test.yml`) runs the
 same `npm test` on every pull request and on every push to `main`. CI installs
 deps with `--ignore-scripts` so Plasmo's post-install hooks don't fire — the
 storage/types tests run in plain Node and don't need the built extension.
+
+### Native-host integration tests
+
+`tests/native-host.integration.test.ts` spawns `native-host/ai-dev-host.mjs`
+as a child process and drives it over Chrome's length-prefixed JSON framing,
+covering `exec` (with streaming stdout), `kill`, `session-status`, and
+`reset-backend` round-trips. The host honors two test-only env vars so CI
+never has to spawn real CLI binaries:
+
+- `AI_DEV_SIDEBAR_EXEC_OVERRIDE` — JSON `{cmd, args}` that replaces the
+  resolved backend command. The original prompt is appended as the final
+  argv. Unset in production.
+- `AI_DEV_SIDEBAR_SESSION_STATE_PATH` — overrides the on-disk
+  `~/.ai-dev-sidebar/session-state.json` path so tests don't leak state.
+
+Run the full suite (unit + integration) with `npm test`.

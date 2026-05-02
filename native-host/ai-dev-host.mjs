@@ -25,7 +25,9 @@ import { join, dirname } from "path"
  * SW restart starts a brand new CLI session — chat history visibly resets.
  * The on-disk flag tells the next host instance "yes, --continue is safe."
  */
-const SESSION_STATE_PATH = join(homedir(), ".ai-dev-sidebar", "session-state.json")
+const SESSION_STATE_PATH =
+  process.env.AI_DEV_SIDEBAR_SESSION_STATE_PATH ||
+  join(homedir(), ".ai-dev-sidebar", "session-state.json")
 const hasSession = loadSessionState()
 
 function loadSessionState() {
@@ -313,9 +315,32 @@ function resolveBackendCommand(backend, prompt) {
   }
 }
 
+/**
+ * Test-only hook that lets integration tests stub the spawned child. When
+ * `AI_DEV_SIDEBAR_EXEC_OVERRIDE` is set, its JSON value (`{cmd, args}`) replaces
+ * the resolved backend command. The original prompt is appended as the final
+ * argv so tests can assert it round-trips through the protocol.
+ *
+ * Production behavior is unchanged when the env var is unset — this is a
+ * narrow seam to avoid spawning real `claude`/`gemini`/`codex`/`gh` binaries
+ * in CI where they aren't installed.
+ */
+function applyExecOverride(resolved, prompt) {
+  const raw = process.env.AI_DEV_SIDEBAR_EXEC_OVERRIDE
+  if (!raw) return resolved
+  try {
+    const override = JSON.parse(raw)
+    if (!override || typeof override.cmd !== "string") return resolved
+    const overrideArgs = Array.isArray(override.args) ? override.args.slice() : []
+    return { cmd: override.cmd, args: [...overrideArgs, prompt] }
+  } catch {
+    return resolved
+  }
+}
+
 function runCommand(backend, prompt, cwd) {
   const resolvedCwd = (cwd || "~").replace("~", homedir())
-  const { cmd, args } = resolveBackendCommand(backend, prompt)
+  const { cmd, args } = applyExecOverride(resolveBackendCommand(backend, prompt), prompt)
 
   const proc = spawn(cmd, args, {
     cwd: resolvedCwd,
