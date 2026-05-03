@@ -10,11 +10,16 @@ import { DEFAULT_INSPECTOR_SETTINGS } from "./types"
 
 const KEYS = {
   settings: "ai-dev-settings",
-  // Legacy single-array key — migrated to per-backend shards on first read
+  // Legacy single-array key — migrated to per-backend shards on first read.
+  // Kept around (not deleted) until every backend has been migrated, so that
+  // switching backends never wipes history mid-migration.
   legacyMessages: "ai-dev-messages",
   scrapes: "ai-dev-scrapes",
   inspectorSettings: "ai-dev-inspector-settings",
-  scanCache: "ai-dev-scan-cache"
+  scanCache: "ai-dev-scan-cache",
+  // Top-level marker that signals every backend shard has been hydrated from
+  // the legacy key and the legacy key is safe to drop.
+  legacyMigrationComplete: "migration:ai-dev-messages-complete"
 }
 
 const SCAN_CACHE_LIMIT = 50
@@ -23,6 +28,10 @@ const BACKENDS: CLIBackend[] = ["claude", "gemini", "copilot", "codex"]
 
 function messageKey(backend: CLIBackend): string {
   return `ai-dev-messages-${backend}`
+}
+
+function migrationMarkerKey(backend: CLIBackend): string {
+  return `migration:ai-dev-messages:${backend}`
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -36,37 +45,132 @@ export async function setSettings(settings: Partial<Settings>): Promise<void> {
 }
 
 /**
- * Get all messages across all backends, sorted by timestamp.
- * Performs a one-time migration from the legacy single-array format.
+ * Get messages for a specific backend.
+ *
+ * Cold-start path: a single `chrome.storage.local.get` of the shard key.
+ * If the shard is already populated we return immediately — no extra
+ * round-trip to look at the legacy `ai-dev-messages` key. Only when the
+ * shard is missing AND we have not yet recorded a migration marker for
+ * this backend do we issue a second `get` to consult the legacy key and
+ * (if present) hydrate this backend's shard from it.
+ *
+ * The migration is idempotent — once `migration:ai-dev-messages:<backend>`
+ * is set, the legacy key is never re-read for that backend, so re-running
+ * the migration cannot double-shard.
  */
-export async function getMessages(): Promise<ChatMessage[]> {
-  const keys = [KEYS.legacyMessages, ...BACKENDS.map(messageKey)]
-  const result = await chrome.storage.local.get(keys)
-
-  // Migrate legacy single-array format if present
-  const legacy: ChatMessage[] | undefined = result[KEYS.legacyMessages]
-  if (legacy && legacy.length > 0) {
-    const grouped: Record<string, ChatMessage[]> = {}
-    for (const m of legacy) {
-      const b = m.backend || "claude"
-      if (!grouped[messageKey(b)]) grouped[messageKey(b)] = []
-      grouped[messageKey(b)].push(m)
-    }
-    // Merge with any existing per-backend data
-    for (const key of Object.keys(grouped)) {
-      const existing: ChatMessage[] = result[key] || []
-      grouped[key] = [...existing, ...grouped[key]].sort((a, b) => a.timestamp - b.timestamp)
-    }
-    await chrome.storage.local.set(grouped)
-    await chrome.storage.local.remove(KEYS.legacyMessages)
-    // Re-fetch after migration
-    return getMessages()
+export async function getMessagesForBackend(backend: CLIBackend): Promise<ChatMessage[]> {
+  const shardKey = messageKey(backend)
+  const first = await chrome.storage.local.get(shardKey)
+  if (shardKey in first) {
+    return (first[shardKey] as ChatMessage[]) ?? []
   }
 
-  // Concatenate all backend shards and sort
+  // Shard missing: the only reason to do a second round-trip is to look at
+  // the legacy key (and only if we haven't already migrated this backend).
+  const markerKey = migrationMarkerKey(backend)
+  const second = await chrome.storage.local.get([
+    KEYS.legacyMessages,
+    markerKey
+  ])
+  if (second[markerKey]) {
+    // Already migrated for this backend — nothing in the legacy key belongs
+    // to us anymore. Return empty, do not touch the legacy key.
+    return []
+  }
+
+  const legacy = second[KEYS.legacyMessages] as ChatMessage[] | undefined
+  if (!legacy || legacy.length === 0) {
+    // Mark migration complete for this backend so future cold starts
+    // short-circuit on a single get even if the legacy key is later set.
+    await chrome.storage.local.set({ [markerKey]: true })
+    await maybeFinalizeLegacyCleanup()
+    return []
+  }
+
+  const owned = legacy
+    .filter((m) => (m.backend ?? "claude") === backend)
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  await chrome.storage.local.set({
+    [shardKey]: owned,
+    [markerKey]: true
+  })
+  await maybeFinalizeLegacyCleanup()
+  return owned
+}
+
+/**
+ * Get all messages across all backends, sorted by timestamp.
+ *
+ * Performs a one-time, idempotent migration from the legacy single-array
+ * format. Re-running this with all migration markers present is a no-op.
+ */
+export async function getMessages(): Promise<ChatMessage[]> {
+  const markerKeys = BACKENDS.map(migrationMarkerKey)
+  const keys = [
+    KEYS.legacyMessages,
+    KEYS.legacyMigrationComplete,
+    ...markerKeys,
+    ...BACKENDS.map(messageKey)
+  ]
+  const result = await chrome.storage.local.get(keys)
+
+  const legacy = result[KEYS.legacyMessages] as ChatMessage[] | undefined
+  const allMarkersSet = BACKENDS.every((b) => result[migrationMarkerKey(b)])
+
+  if (legacy && legacy.length > 0 && !allMarkersSet) {
+    // Migrate only the backends we have not already migrated. Existing
+    // shards win — we never overwrite already-migrated data.
+    const writes: Record<string, unknown> = {}
+    for (const backend of BACKENDS) {
+      const marker = migrationMarkerKey(backend)
+      if (result[marker]) continue
+      const owned = legacy
+        .filter((m) => (m.backend ?? "claude") === backend)
+        .sort((a, b) => a.timestamp - b.timestamp)
+      const existing = (result[messageKey(backend)] as ChatMessage[] | undefined) ?? []
+      // Existing shard data wins so we never double-shard.
+      const merged = existing.length > 0 ? existing : owned
+      writes[messageKey(backend)] = merged
+      writes[marker] = true
+    }
+    if (Object.keys(writes).length > 0) {
+      await chrome.storage.local.set(writes)
+    }
+    await maybeFinalizeLegacyCleanup()
+    // Re-fetch after migration with the updated shards.
+    return collectAllShards()
+  }
+
+  // No legacy data (or already fully migrated). Make sure we set the
+  // migration markers so future cold starts can short-circuit, then read.
+  if (!allMarkersSet && (!legacy || legacy.length === 0)) {
+    const writes: Record<string, unknown> = {}
+    for (const backend of BACKENDS) {
+      if (!result[migrationMarkerKey(backend)]) {
+        writes[migrationMarkerKey(backend)] = true
+      }
+    }
+    if (Object.keys(writes).length > 0) {
+      await chrome.storage.local.set(writes)
+    }
+    await maybeFinalizeLegacyCleanup()
+  }
+
   const all: ChatMessage[] = []
   for (const backend of BACKENDS) {
-    const shard: ChatMessage[] = result[messageKey(backend)] || []
+    const shard = (result[messageKey(backend)] as ChatMessage[] | undefined) ?? []
+    all.push(...shard)
+  }
+  all.sort((a, b) => a.timestamp - b.timestamp)
+  return all
+}
+
+async function collectAllShards(): Promise<ChatMessage[]> {
+  const result = await chrome.storage.local.get(BACKENDS.map(messageKey))
+  const all: ChatMessage[] = []
+  for (const backend of BACKENDS) {
+    const shard = (result[messageKey(backend)] as ChatMessage[] | undefined) ?? []
     all.push(...shard)
   }
   all.sort((a, b) => a.timestamp - b.timestamp)
@@ -74,37 +178,56 @@ export async function getMessages(): Promise<ChatMessage[]> {
 }
 
 /**
- * Get messages for a specific backend.
+ * If every backend has been migrated, drop the legacy key (atomic — gated
+ * by `migration:ai-dev-messages-complete`). Idempotent — calling repeatedly
+ * after completion is a no-op.
  */
-export async function getMessagesForBackend(backend: CLIBackend): Promise<ChatMessage[]> {
-  const result = await chrome.storage.local.get(messageKey(backend))
-  return result[messageKey(backend)] || []
+async function maybeFinalizeLegacyCleanup(): Promise<void> {
+  const peek = await chrome.storage.local.get([
+    KEYS.legacyMigrationComplete,
+    ...BACKENDS.map(migrationMarkerKey)
+  ])
+  if (peek[KEYS.legacyMigrationComplete]) return
+  if (!BACKENDS.every((b) => peek[migrationMarkerKey(b)])) return
+
+  await chrome.storage.local.set({ [KEYS.legacyMigrationComplete]: true })
+  await chrome.storage.local.remove(KEYS.legacyMessages)
 }
 
 /**
  * Append a message to its backend's shard. No cap.
  */
 export async function addMessage(message: ChatMessage): Promise<void> {
-  const backend: CLIBackend = message.backend || "claude"
-  const key = messageKey(backend)
-  const result = await chrome.storage.local.get(key)
-  const existing: ChatMessage[] = result[key] || []
+  const backend: CLIBackend = message.backend ?? "claude"
+  const existing = await getMessagesForBackend(backend)
   existing.push(message)
-  await chrome.storage.local.set({ [key]: existing })
+  const key = messageKey(backend)
+  await chrome.storage.local.set({
+    [key]: existing,
+    [migrationMarkerKey(backend)]: true
+  })
+  await maybeFinalizeLegacyCleanup()
 }
 
 /**
  * Replace all messages (used by setMessages — kept for API compatibility).
- * Re-shards by backend.
+ * Re-shards by backend and marks every backend as migrated. If this write
+ * completes the migration, the legacy key is dropped.
  */
 export async function setMessages(messages: ChatMessage[]): Promise<void> {
   const grouped: Record<string, ChatMessage[]> = {}
   for (const backend of BACKENDS) grouped[messageKey(backend)] = []
   for (const m of messages) {
-    const key = messageKey(m.backend || "claude")
+    const key = messageKey(m.backend ?? "claude")
     grouped[key].push(m)
   }
-  await chrome.storage.local.set(grouped)
+
+  const writes: Record<string, unknown> = { ...grouped }
+  for (const backend of BACKENDS) {
+    writes[migrationMarkerKey(backend)] = true
+  }
+  await chrome.storage.local.set(writes)
+  await maybeFinalizeLegacyCleanup()
 }
 
 /**
@@ -112,12 +235,20 @@ export async function setMessages(messages: ChatMessage[]): Promise<void> {
  */
 export async function clearMessages(backend?: CLIBackend): Promise<void> {
   if (backend) {
-    await chrome.storage.local.set({ [messageKey(backend)]: [] })
+    await chrome.storage.local.set({
+      [messageKey(backend)]: [],
+      [migrationMarkerKey(backend)]: true
+    })
+    await maybeFinalizeLegacyCleanup()
     return
   }
-  const grouped: Record<string, ChatMessage[]> = {}
-  for (const b of BACKENDS) grouped[messageKey(b)] = []
-  await chrome.storage.local.set(grouped)
+  const writes: Record<string, unknown> = {}
+  for (const b of BACKENDS) {
+    writes[messageKey(b)] = []
+    writes[migrationMarkerKey(b)] = true
+  }
+  await chrome.storage.local.set(writes)
+  await maybeFinalizeLegacyCleanup()
 }
 
 // ─── Design inspector storage ─────────────────────────────────────────

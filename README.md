@@ -22,6 +22,24 @@ An in-memory `chrome.storage.local` shim is installed in `tests/setup.ts`,
 so storage-layer tests run without any browser/extension runtime.
 Dependabot opens grouped weekly PRs; see `docs/ROADMAP.md`.
 
+### Storage / migration
+
+Chat history is stored as per-backend shards under
+`ai-dev-messages-<backend>` (one of `claude`, `gemini`, `copilot`, `codex`).
+Older builds wrote a single `ai-dev-messages` array; the storage layer
+migrates that legacy key into shards lazily, idempotently, and without
+ever wiping history when the user switches backends mid-migration.
+
+Cold-start reads via `getMessagesForBackend(backend)` issue a single
+`chrome.storage.local.get` of the shard key. The legacy key is only
+consulted on a second round-trip when the shard is missing _and_ no
+`migration:ai-dev-messages:<backend>` marker is set. Once every backend
+has been hydrated, the top-level `migration:ai-dev-messages-complete`
+flag is set and the legacy key is dropped atomically. Migration markers
+also let `getMessages()` and `setMessages()` re-run safely — repeated
+calls do not double-shard or lose data
+(`tests/migration.ai-dev-messages.test.ts`).
+
 ```sh
 npm test          # one-shot run
 npm run test:watch
