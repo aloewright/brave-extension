@@ -5,8 +5,6 @@
   `chrome.storage.local` shim and the storage + types layers have happy-path coverage.
 - GitHub Actions `tests` workflow gates `npm test` on every PR and push to
   `main` (Node 22, deps installed with `--ignore-scripts`).
-- Hardening the legacy `ai-dev-messages` migration into per-backend shards
-  (`getMessages()` / `setMessages()`).
 
 ## Next
 - Playwright end-to-end smoke for the sidepanel (load extension, send a message,
@@ -17,6 +15,10 @@
   suite expands beyond the storage layer.
 
 ## Recently shipped
+- Idempotent per-backend shard migration for the legacy `ai-dev-messages`
+  key — `getMessagesForBackend` short-circuits on a single storage round-trip
+  when the shard is present, the legacy key is only consulted when needed,
+  and re-runs never double-shard or wipe history (PDX-87).
 - Native-host integration tests covering `exec`, `stream`, `kill`, and
   `session-status` round-trips against a stub child process (PDX-88).
 
