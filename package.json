@@ -10,7 +10,8 @@
     "package": "plasmo package",
     "install-host": "node scripts/install-native-host.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@plasmohq/prettier-plugin-sort-imports": "4.0.1",
     "@types/chrome": "^0.0.287",
+    "@types/node": "^22.19.17",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitest/coverage-v8": "^2.1.9",
