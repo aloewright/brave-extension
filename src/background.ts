@@ -118,9 +118,33 @@ let pendingStart: {
   serviceToken?: string
 } | null = null
 
+// chrome.runtime.getContexts and chrome.offscreen are MV3 APIs whose shapes
+// differ across @types/chrome versions. We declare the minimal surface we
+// actually call so this file type-checks against any reasonable @types/chrome
+// version without resorting to `any` or `@ts-ignore` (PDX-124).
+interface RuntimeContextsQuery {
+  contextTypes?: string[]
+  documentUrls?: string[]
+}
+interface OffscreenCreateOptions {
+  url: string
+  reasons: string[]
+  justification: string
+}
+interface ExtendedChromeRuntime {
+  getContexts?: (filter: RuntimeContextsQuery) => Promise<unknown[]>
+}
+interface OffscreenApi {
+  createDocument: (options: OffscreenCreateOptions) => Promise<void>
+  closeDocument: () => Promise<void>
+}
+type ChromeWithOffscreen = typeof chrome & { offscreen: OffscreenApi }
+
 async function hasOffscreen(): Promise<boolean> {
-  // @ts-ignore — available on MV3 Chrome
-  const existing = await chrome.runtime.getContexts?.({
+  const runtime = chrome.runtime as typeof chrome.runtime & ExtendedChromeRuntime
+  const getContexts = runtime.getContexts
+  if (!getContexts) return false
+  const existing = await getContexts({
     contextTypes: ["OFFSCREEN_DOCUMENT"],
     documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)]
   })
@@ -129,8 +153,8 @@ async function hasOffscreen(): Promise<boolean> {
 
 async function ensureOffscreen() {
   if (await hasOffscreen()) return
-  // @ts-ignore — chrome.offscreen is available with "offscreen" permission
-  await chrome.offscreen.createDocument({
+  const offscreen = (chrome as ChromeWithOffscreen).offscreen
+  await offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: ["USER_MEDIA"],
     justification: "Record the active tab to save as a video in media storage"
@@ -140,8 +164,8 @@ async function ensureOffscreen() {
 async function closeOffscreen() {
   if (!(await hasOffscreen())) return
   try {
-    // @ts-ignore
-    await chrome.offscreen.closeDocument()
+    const offscreen = (chrome as ChromeWithOffscreen).offscreen
+    await offscreen.closeDocument()
   } catch {
     // ignore
   }

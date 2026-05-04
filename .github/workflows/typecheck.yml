@@ -1,4 +1,4 @@
-name: tests
+name: typecheck
 
 on:
   pull_request:
@@ -6,8 +6,13 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  typecheck:
     runs-on: ubuntu-latest
+    # Scaffolding gate (PDX-124): we run `tsc --noEmit` on every PR/push to
+    # publish typecheck status, but the job is non-blocking until a follow-up
+    # flips `continue-on-error: false`. This gives downstream branches a
+    # window to clean up any drift introduced before the gate landed.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,12 +22,12 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # --ignore-scripts skips Plasmo's post-install hooks; the storage
-      # and types tests don't need the extension to be built.
+      # --ignore-scripts skips Plasmo's post-install hooks; the typecheck
+      # only needs the TS toolchain + types, not the built extension.
       #
       # NOTE (PDX-124): --no-frozen-lockfile temporarily set so pnpm can
       # bring pnpm-lock.yaml into sync with the new `@types/node` devDep.
       # A follow-up PR will commit the regenerated lockfile and restore
       # --frozen-lockfile.
       - run: pnpm install --no-frozen-lockfile --ignore-scripts
-      - run: pnpm test
+      - run: pnpm typecheck

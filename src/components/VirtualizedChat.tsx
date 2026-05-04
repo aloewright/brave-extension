@@ -33,7 +33,7 @@ const MIN_BUBBLE_HEIGHT = 36
 // Cache height estimates by message id so we don't re-measure on every render
 const heightCache = new Map<string, number>()
 
-function stripFormatting(content: string): string {
+export function stripFormatting(content: string): string {
   // Strip ANSI escape codes, code-fence markers, and inline-code backticks
   // so Pretext measures something close to the rendered text.
   return content
@@ -41,6 +41,23 @@ function stripFormatting(content: string): string {
     .replace(/```\w*\n?/g, "")
     .replace(/`/g, "")
     .replace(/\*\*/g, "")
+}
+
+/**
+ * Compute the extra vertical space added by fenced code blocks in a message.
+ *
+ * Exposed for unit tests (PDX-124) so the regression around
+ * `String.prototype.match` returning `null` — which previously poisoned
+ * `Array.prototype.reduce`'s accumulator type as `never` when paired with
+ * the `|| []` fallback — stays locked in. We use `?? []` with an explicit
+ * `string[]` annotation so reduce infers the accumulator as `number`.
+ */
+export function codeBlockOverhead(content: string): number {
+  const codeBlocks: string[] = content.match(/```[\s\S]*?```/g) ?? []
+  return codeBlocks.reduce<number>((sum, block) => {
+    const lines = block.split("\n").length
+    return sum + lines * 16 + 16 // ~16px per line + 16px padding
+  }, 0)
 }
 
 function estimateHeight(message: ChatMessage, width: number): number {
@@ -70,11 +87,7 @@ function estimateHeight(message: ChatMessage, width: number): number {
   }
 
   // Code blocks add vertical space (padding + monospace line height)
-  const codeBlocks = message.content.match(/```[\s\S]*?```/g) || []
-  const codeOverhead = codeBlocks.reduce((sum, block) => {
-    const lines = block.split("\n").length
-    return sum + lines * 16 + 16 // ~16px per line + 16px padding
-  }, 0)
+  const codeOverhead = codeBlockOverhead(message.content)
 
   const total = Math.max(textHeight + codeOverhead + BUBBLE_OVERHEAD, MIN_BUBBLE_HEIGHT + BUBBLE_OVERHEAD)
   heightCache.set(message.id, total)

@@ -25,7 +25,10 @@ type AnyMsg = Record<string, unknown>
 
 class HostClient {
   child: ChildProcessWithoutNullStreams
-  private buf = Buffer.alloc(0)
+  // Buffer.concat returns Buffer<ArrayBufferLike> in @types/node v22, while
+  // Buffer.alloc(0) is Buffer<ArrayBuffer>. Annotate the field as the wider
+  // Buffer type so reassignment from concat() type-checks cleanly (PDX-124).
+  private buf: Buffer = Buffer.alloc(0)
   private queue: AnyMsg[] = []
   private waiters: Array<{ predicate: (m: AnyMsg) => boolean; resolve: (m: AnyMsg) => void }> = []
   stderr = ""
