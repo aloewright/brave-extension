@@ -13,7 +13,18 @@ pnpm install
 pnpm dev          # starts plasmo dev (loads as unpacked extension from build/)
 pnpm build        # production build
 pnpm install-host # install the native messaging host
+pnpm typecheck    # runs `tsc --noEmit -p .` (no emit, just type-checking)
 ```
+
+## Typechecking
+
+`pnpm typecheck` runs the full TypeScript compiler in `--noEmit` mode against
+`tsconfig.json`. The same command runs in the `typecheck` GitHub Actions
+workflow on every PR and push to `main` (Node 22, deps installed with
+`--ignore-scripts`).
+
+The job is currently **non-blocking** (`continue-on-error: true`) — see
+`ROADMAP.md` for the plan to flip it to a hard gate.
 
 ## Testing
 
