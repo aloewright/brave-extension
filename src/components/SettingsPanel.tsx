@@ -56,8 +56,12 @@ export function SettingsPanel({
                 style={{
                   borderColor: settings.backend === key ? info.color : "transparent",
                   backgroundColor: settings.backend === key ? info.color + "15" : undefined,
-                  ringColor: info.color
-                }}
+                  // Tailwind reads ring color from the --tw-ring-color custom
+                  // property; "ringColor" is not a valid React.CSSProperties
+                  // key. Setting the CSS variable lets us drive the ring
+                  // color per-backend without expanding the Tailwind config.
+                  ["--tw-ring-color" as string]: info.color
+                } as React.CSSProperties}
               >
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: info.color }} />
