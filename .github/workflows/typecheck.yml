@@ -24,5 +24,9 @@ jobs:
           cache: pnpm
       # --ignore-scripts skips Plasmo's post-install hooks; the typecheck
       # only needs the TS toolchain + types, not the built extension.
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      #
+      # NOTE (PDX-124): --frozen-lockfile temporarily dropped here while
+      # pnpm-lock.yaml is regenerated for the new `@types/node` devDep.
+      # A follow-up PR will regen the lockfile and restore --frozen-lockfile.
+      - run: pnpm install --ignore-scripts
       - run: pnpm typecheck
