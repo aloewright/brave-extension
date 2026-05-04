@@ -20,8 +20,9 @@ jobs:
       # --ignore-scripts skips Plasmo's post-install hooks; the storage
       # and types tests don't need the extension to be built.
       #
-      # NOTE (PDX-124): --frozen-lockfile temporarily dropped here while
-      # pnpm-lock.yaml is regenerated for the new `@types/node` devDep.
-      # A follow-up PR will regen the lockfile and restore --frozen-lockfile.
-      - run: pnpm install --ignore-scripts
+      # NOTE (PDX-124): --no-frozen-lockfile temporarily set so pnpm can
+      # bring pnpm-lock.yaml into sync with the new `@types/node` devDep.
+      # A follow-up PR will commit the regenerated lockfile and restore
+      # --frozen-lockfile.
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm test
