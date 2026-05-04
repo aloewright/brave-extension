@@ -14,7 +14,7 @@ jobs:
     # window to clean up any drift introduced before the gate landed.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
           version: 9
