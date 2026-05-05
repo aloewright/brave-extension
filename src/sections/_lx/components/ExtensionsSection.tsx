@@ -146,8 +146,37 @@ export function ExtensionsSection({
     URL.revokeObjectURL(url)
   }
 
+  const pinnedExtensions = (settings.alwaysEnabled || [])
+    .map((id) => extensions.find((e) => e.id === id))
+    .filter((e): e is ExtensionInfo => !!e)
+
   return (
     <div>
+      {/* Pinned-extensions bar — quick toggle icons for pinned apps */}
+      {pinnedExtensions.length > 0 && (
+        <div className="mb-3 -mx-1 px-1 pb-2 flex gap-1.5 overflow-x-auto border-b border-border">
+          {pinnedExtensions.map((ext) => {
+            const iconUrl = ext.icons?.length ? ext.icons[ext.icons.length - 1].url : undefined
+            return (
+              <button
+                key={ext.id}
+                onClick={() => ext.mayDisable && onToggle(ext.id, !ext.enabled)}
+                title={`${ext.name} — ${ext.enabled ? "enabled (click to disable)" : "disabled (click to enable)"}`}
+                className={`relative flex-shrink-0 p-1 rounded transition-opacity ${
+                  ext.enabled ? "opacity-100" : "opacity-40 hover:opacity-70"
+                } ${ext.mayDisable ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                {iconUrl ? (
+                  <img src={iconUrl} alt={ext.name} className="w-7 h-7 rounded" />
+                ) : (
+                  <div className="w-7 h-7 rounded bg-accent flex items-center justify-center text-xs text-fg/50">{ext.name[0]}</div>
+                )}
+                <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ring-2 ring-bg ${ext.enabled ? "bg-success" : "bg-fg/30"}`} />
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Header + compact stats line */}
       <div className="mb-3">
         <div className="flex items-baseline justify-between">

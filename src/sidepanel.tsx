@@ -42,7 +42,17 @@ function SidePanel() {
       <div className="flex-1 min-h-0 flex">
         <SidebarRail active={active} onChange={change} />
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
-          {active === "terminal" && <TerminalSection />}
+          {/*
+           * TerminalSection stays mounted across section switches so the
+           * native-host port (and therefore any running shells / dev servers
+           * the user spawned) survive when the user navigates to another
+           * section in the rail. Hidden via CSS when inactive; the other
+           * sections remain conditionally rendered to keep their original
+           * mount/unmount semantics.
+           */}
+          <div className={`flex-1 min-h-0 flex flex-col ${active === "terminal" ? "" : "hidden"}`}>
+            <TerminalSection active={active === "terminal"} />
+          </div>
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
           {active === "library" && <LibrarySection />}

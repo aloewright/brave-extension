@@ -452,7 +452,7 @@ function Toggle({
           onChange={() => onChange(!checked)}
           className="sr-only peer"
         />
-        <div className="w-7 h-4 bg-secondary rounded-full peer peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-fg after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-3" />
+        <div className="w-7 h-4 rounded-full border border-border bg-secondary/50 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-success/40 peer-checked:border-success/70 peer-checked:bg-success/80 after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:h-2.5 after:w-2.5 after:rounded-full after:bg-fg/55 after:shadow-sm after:transition-all after:duration-150 peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
       </label>
     </div>
   )

@@ -32,6 +32,17 @@ let nativePort: chrome.runtime.Port | null = null
 let lastDisconnectAt = 0
 const pendingCallbacks = new Map<string, (msg: any) => void>()
 
+function safeRuntimeWarning(message: string, err?: unknown) {
+  console.warn(`[ai-dev-sidebar] ${message}`, err instanceof Error ? err.message : err ?? "")
+}
+
+// PTY sessions currently live in the native host. Tracked here so the
+// heartbeat keeps the host alive (and therefore the user's shells / dev
+// servers) even when no sidebar port is connected — e.g. between the
+// instant the sidepanel disconnects and the next time it reconnects. We
+// observe the host's pty.* messages on their way through to update this set.
+const activePtySessions = new Set<string>()
+
 function connectNativeHost() {
   if (nativePort) return nativePort
   try {
@@ -49,6 +60,17 @@ function connectNativeHost() {
         return
       }
 
+      // Mirror PTY lifecycle into our local set so the heartbeat below
+      // can keep the host alive while shells are still running.
+      if (msg?.type === "pty.spawned" && typeof msg.sessionId === "string") {
+        activePtySessions.add(msg.sessionId)
+      } else if (
+        (msg?.type === "pty.exit" || msg?.type === "pty.error") &&
+        typeof msg?.sessionId === "string"
+      ) {
+        activePtySessions.delete(msg.sessionId)
+      }
+
       // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-response", payload: msg })
@@ -62,6 +84,10 @@ function connectNativeHost() {
       lastDisconnectAt = now
       console.warn("Native host disconnected:", err)
       nativePort = null
+      // PTYs only live inside the host process, so a host disconnect means
+      // they're gone. Drop the tracking set so we don't keep the heartbeat
+      // hot for sessions that no longer exist.
+      activePtySessions.clear()
 
       // Silent auto-reconnect for transient drops (typical: SW recycled,
       // host process EOF'd, then we wake on the next message). The host
@@ -88,21 +114,38 @@ function connectNativeHost() {
 // chrome.alarms wakes the SW even after it's been GC'd, at which point we
 // re-establish the native connection (the host re-loads hasSession from
 // disk, so chat context is preserved across SW restarts).
-chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== HEARTBEAT_ALARM) return
-  // No active sidebar → no reason to keep the host alive. Let the SW idle
-  // out and the host EOF naturally.
-  if (sidebarPorts.size === 0) return
-  const port = nativePort ?? connectNativeHost()
-  if (!port) return
+if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
   try {
-    port.postMessage({ type: "ping" })
-  } catch {
-    // postMessage on a torn-down port throws — let the next disconnect
-    // handler reconnect it.
+    chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name !== HEARTBEAT_ALARM) return
+      // Keep the host alive whenever a sidebar is connected OR there are
+      // PTY sessions still running. The latter case matters for transient
+      // gaps (e.g. when the user closes/reopens the sidepanel quickly): we
+      // don't want a 30-second window where the host idles out and kills the
+      // user's `npm run dev`.
+      //
+      // Note: if the sidepanel is fully closed for a long time, MV3 will
+      // eventually GC the service worker regardless of this heartbeat. At
+      // that point the native port closes, the host's stdin EOFs, and the
+      // PTYs die. Surviving an extended sidepanel-closed window would need
+      // an offscreen-document-backed port; tracked separately.
+      if (sidebarPorts.size === 0 && activePtySessions.size === 0) return
+      const port = nativePort ?? connectNativeHost()
+      if (!port) return
+      try {
+        port.postMessage({ type: "ping" })
+      } catch {
+        // postMessage on a torn-down port throws — let the next disconnect
+        // handler reconnect it.
+      }
+    })
+  } catch (err) {
+    safeRuntimeWarning("failed to initialize heartbeat alarm", err)
   }
-})
+} else {
+  safeRuntimeWarning("chrome.alarms is unavailable; native host heartbeat disabled")
+}
 
 function sendToNative(msg: any) {
   const port = connectNativeHost()
@@ -501,16 +544,30 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 })
 
 // Side panel behavior — open on action click
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.windowId) {
-    chrome.sidePanel.open({ windowId: tab.windowId })
+function openSidePanel(windowId?: number) {
+  if (!windowId) return
+  const open = chrome.sidePanel?.open
+  if (!open) {
+    safeRuntimeWarning("chrome.sidePanel.open is unavailable")
+    return
   }
+  open({ windowId }).catch((err) => {
+    safeRuntimeWarning("failed to open side panel", err)
+  })
+}
+
+chrome.action?.onClicked?.addListener((tab) => {
+  openSidePanel(tab.windowId)
 })
 
 // Enable side panel on all sites
-chrome.sidePanel.setOptions({
-  enabled: true
-})
+try {
+  chrome.sidePanel?.setOptions?.({
+    enabled: true
+  })
+} catch (err) {
+  safeRuntimeWarning("failed to enable side panel", err)
+}
 
 // Detach the default popup so a toolbar click goes straight to the
 // onClicked listener above (which opens the sidebar). The popup is
@@ -518,29 +575,39 @@ chrome.sidePanel.setOptions({
 // Plasmo wires `default_popup: "popup.html"` automatically because
 // src/popup.tsx exists; this clears it at runtime. setPopup is
 // persistent, so we only need this on install + browser start.
-chrome.action.setPopup({ popup: "" })
-chrome.runtime.onStartup.addListener(() => {
-  chrome.action.setPopup({ popup: "" })
-})
+function clearActionPopup() {
+  try {
+    chrome.action?.setPopup?.({ popup: "" })
+  } catch (err) {
+    safeRuntimeWarning("failed to clear action popup", err)
+  }
+}
+
+clearActionPopup()
+chrome.runtime.onStartup.addListener(clearActionPopup)
 
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.action.setPopup({ popup: "" })
-  chrome.contextMenus.create({
-    id: "scrape-page",
-    title: "Scrape page to AI Dev Sidebar",
-    contexts: ["page"]
-  })
-  chrome.contextMenus.create({
-    id: "send-selection",
-    title: "Send selection to AI Dev",
-    contexts: ["selection"]
-  })
-  chrome.contextMenus.create({
-    id: "save-highlight",
-    title: "Save highlight for review",
-    contexts: ["selection"]
-  })
+  clearActionPopup()
+  try {
+    chrome.contextMenus.create({
+      id: "scrape-page",
+      title: "Scrape page to AI Dev Sidebar",
+      contexts: ["page"]
+    })
+    chrome.contextMenus.create({
+      id: "send-selection",
+      title: "Send selection to AI Dev",
+      contexts: ["selection"]
+    })
+    chrome.contextMenus.create({
+      id: "save-highlight",
+      title: "Save highlight for review",
+      contexts: ["selection"]
+    })
+  } catch (err) {
+    safeRuntimeWarning("failed to create context menus", err)
+  }
 })
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -588,9 +655,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "toggle-sidebar") {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tab?.windowId) {
-      chrome.sidePanel.open({ windowId: tab.windowId })
-    }
+    openSidePanel(tab?.windowId)
   }
 })
 

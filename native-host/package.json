@@ -6,9 +6,14 @@
   "type": "module",
   "main": "ai-dev-host.mjs",
   "dependencies": {
-    "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0"
+    "node-pty": "^1.1.0"
   },
   "engines": {
     "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty"
+    ]
   }
 }

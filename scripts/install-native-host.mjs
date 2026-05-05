@@ -190,6 +190,61 @@ if (existsSync(join(hostDir, "package.json"))) {
   }
 }
 
+// macOS: strip the `com.apple.quarantine` xattr from the node-pty Darwin
+// prebuilds (pty.node + spawn-helper) so Gatekeeper doesn't reject them on
+// first dlopen/exec.
+//
+// We do NOT re-sign. The shipped Microsoft prebuilds carry stable
+// ad-hoc CDHashes that are identical for every user on the same package
+// version, so a single "Allow Anyway" in System Settings → Privacy &
+// Security persists across reinstalls. Re-signing here would mint a new
+// CDHash on every install and invalidate that grant.
+if (process.platform === "darwin") {
+  const ptyPrebuildsDir = join(
+    hostDir,
+    "node_modules",
+    ".pnpm",
+    "node-pty@1.1.0",
+    "node_modules",
+    "node-pty",
+    "prebuilds",
+    `darwin-${process.arch === "arm64" ? "arm64" : "x64"}`
+  )
+  const fallbackDir = join(
+    hostDir,
+    "node_modules",
+    "node-pty",
+    "prebuilds",
+    `darwin-${process.arch === "arm64" ? "arm64" : "x64"}`
+  )
+  const prebuildsDir = existsSync(ptyPrebuildsDir)
+    ? ptyPrebuildsDir
+    : existsSync(fallbackDir)
+      ? fallbackDir
+      : null
+  if (prebuildsDir) {
+    const targets = [join(prebuildsDir, "pty.node"), join(prebuildsDir, "spawn-helper")].filter(
+      existsSync
+    )
+    if (targets.length > 0) {
+      for (const t of targets) {
+        spawnSync("xattr", ["-d", "com.apple.quarantine", t], { stdio: "ignore" })
+      }
+      const spawnHelper = join(prebuildsDir, "spawn-helper")
+      if (existsSync(spawnHelper)) {
+        chmodSync(spawnHelper, 0o755)
+      }
+      console.log(`✓ Cleared quarantine on node-pty prebuilds in ${prebuildsDir}`)
+      console.log("✓ Ensured node-pty spawn-helper is executable")
+      console.log(
+        "  If Brave still pops 'Apple could not verify…' on first launch, open\n" +
+          "  System Settings → Privacy & Security and click 'Allow Anyway' once;\n" +
+          "  the grant persists across reinstalls of the same node-pty version."
+      )
+    }
+  }
+}
+
 // Token + env file (placeholder port — real port is chosen at MCP server
 // start; the host rotates the token and rewrites these files at startup).
 // We pre-seed so that ~/.claude.json registration has something to point at

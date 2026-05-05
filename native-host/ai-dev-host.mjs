@@ -95,7 +95,7 @@ const activeProcesses = new Map()
 function sendMessage(msg) {
   const json = JSON.stringify(msg)
   const buf = Buffer.alloc(4)
-  buf.writeUInt32LE(json.length, 0)
+  buf.writeUInt32LE(Buffer.byteLength(json, "utf8"), 0)
   process.stdout.write(buf)
   process.stdout.write(json)
 }

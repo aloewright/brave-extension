@@ -19,7 +19,18 @@ function newSessionId() {
   return `pty_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-export function TerminalSection() {
+interface TerminalSectionProps {
+  /**
+   * Whether the terminal section is the currently visible section in the
+   * sidepanel rail. The component stays mounted across section switches so
+   * PTY sessions (and any servers running inside them) survive — this prop
+   * just lets us pause user-facing behavior (keyboard shortcuts, autofocus)
+   * while the section is hidden.
+   */
+  active?: boolean
+}
+
+export function TerminalSection({ active: sectionActive = true }: TerminalSectionProps = {}) {
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState<string | null>(null)
 
@@ -36,16 +47,31 @@ export function TerminalSection() {
     dataSinks.current.delete(sessionId)
   }, [])
 
+  // SessionIds whose tab is in a terminal state (errored / exited / lost).
+  // We keep a ref alongside the React state so the per-tab onWrite/onResize
+  // closures can short-circuit synchronously without waiting for a re-render
+  // — otherwise a fast typist can squeeze in a dozen pty.write calls between
+  // the first error and the corresponding setState flush, generating one
+  // "no such session" reply per keystroke.
+  const deadSessions = useRef(new Set<string>())
+
+  // Suppress repeat "session lost" banners so a burst of pty.error replies
+  // (one per buffered keystroke) only paints the user-facing message once.
+  const announcedLost = useRef(new Set<string>())
+
   const host = useNativeHost({
     onPtyData: (sessionId, data) => {
       dataSinks.current.get(sessionId)?.(data)
     },
     onPtySpawned: (sessionId, pid) => {
+      deadSessions.current.delete(sessionId)
+      announcedLost.current.delete(sessionId)
       setTabs((prev) =>
         prev.map((t) => (t.sessionId === sessionId ? { ...t, pid, status: "running" } : t))
       )
     },
     onPtyExit: (sessionId, exitCode, signal) => {
+      deadSessions.current.add(sessionId)
       const sink = dataSinks.current.get(sessionId)
       sink?.(
         `\r\n\x1b[2m[process exited code=${exitCode}${signal ? ` signal=${signal}` : ""}]\x1b[0m\r\n`
@@ -59,9 +85,33 @@ export function TerminalSection() {
       )
     },
     onPtyError: (sessionId, error) => {
+      // "no such session" means the native host has no record of this id
+      // — typically because the host process was restarted (SW recycle,
+      // sidepanel close/reopen) so its in-memory PTY map is empty. The
+      // sidebar still had the sessionId in its tabs list, so every queued
+      // keystroke maps to one of these errors. Treat the session as dead
+      // exactly once and stop sending writes/resizes for it.
+      if (sessionId && /no such session/i.test(error)) {
+        deadSessions.current.add(sessionId)
+        if (!announcedLost.current.has(sessionId)) {
+          announcedLost.current.add(sessionId)
+          dataSinks.current.get(sessionId)?.(
+            "\r\n\x1b[33m[session lost — the native host restarted. Close this tab (⌘W) and open a new one with the + button.]\x1b[0m\r\n"
+          )
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.sessionId === sessionId
+                ? { ...t, status: "exited", exitInfo: "session lost" }
+                : t
+            )
+          )
+        }
+        return
+      }
       const sink = sessionId ? dataSinks.current.get(sessionId) : undefined
       sink?.(`\r\n\x1b[31m[pty error] ${error}\x1b[0m\r\n`)
       if (sessionId) {
+        deadSessions.current.add(sessionId)
         setTabs((prev) =>
           prev.map((t) => (t.sessionId === sessionId ? { ...t, status: "error", exitInfo: error } : t))
         )
@@ -121,6 +171,8 @@ export function TerminalSection() {
   const closeTab = useCallback(
     (sessionId: string) => {
       host.ptyKill(sessionId)
+      deadSessions.current.delete(sessionId)
+      announcedLost.current.delete(sessionId)
       setTabs((prev) => {
         const next = prev.filter((t) => t.sessionId !== sessionId)
         if (active === sessionId) {
@@ -132,15 +184,44 @@ export function TerminalSection() {
     [host, active]
   )
 
-  useEffect(() => {
-    return () => {
-      // Sidepanel closing — kill all sessions.
-      for (const t of tabs) host.ptyKill(t.sessionId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // onWrite/onResize are called by xterm on user input. Routing them
+  // through this guard means a tab whose session has died (host restart,
+  // crash, exit) silently absorbs keystrokes instead of generating a
+  // "no such session" pty.error per byte sent.
+  const ptyWrite = useCallback(
+    (sessionId: string, data: string) => {
+      if (deadSessions.current.has(sessionId)) return
+      host.ptyWrite(sessionId, data)
+    },
+    [host]
+  )
+  const ptyResize = useCallback(
+    (sessionId: string, cols: number, rows: number) => {
+      if (deadSessions.current.has(sessionId)) return
+      host.ptyResize(sessionId, cols, rows)
+    },
+    [host]
+  )
 
+  // NOTE: we intentionally do NOT kill sessions on unmount.
+  //
+  // Earlier this component had a `useEffect(() => () => kill-all, [])`
+  // cleanup that fired when the section unmounted. Two problems with that:
+  //   1. The closure captured `tabs` from the first render (always `[]`),
+  //      so it never actually killed anything — dead code masquerading as
+  //      cleanup.
+  //   2. More importantly, unmount fires on *section switches* in the rail,
+  //      not just sidepanel close. Killing every PTY whenever the user
+  //      flipped to Inspector / Settings would terminate any dev server or
+  //      shell job they had running in the terminal.
+  //
+  // The component now stays mounted (see sidepanel.tsx) so this cleanup
+  // is moot, but the intent of "kill on real sidepanel close" can't be
+  // safely served from React anyway: in MV3 the sidepanel page is torn
+  // down abruptly and effect cleanup is best-effort. Sessions are reaped
+  // by the native host when its stdin EOFs (i.e. the SW dies).
   useEffect(() => {
+    if (!sectionActive) return
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey
       if (!meta) return
@@ -160,7 +241,7 @@ export function TerminalSection() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [active, tabs, openTab, closeTab])
+  }, [sectionActive, active, tabs, openTab, closeTab])
 
   // The header bar (with [+ Reference]) and the references tray are rendered
   // unconditionally so users can capture/inspect references even before they
@@ -230,8 +311,8 @@ export function TerminalSection() {
               key={t.sessionId}
               sessionId={t.sessionId}
               active={t.sessionId === active}
-              onWrite={(data) => host.ptyWrite(t.sessionId, data)}
-              onResize={(cols, rows) => host.ptyResize(t.sessionId, cols, rows)}
+              onWrite={(data) => ptyWrite(t.sessionId, data)}
+              onResize={(cols, rows) => ptyResize(t.sessionId, cols, rows)}
               registerData={registerData}
               unregisterData={unregisterData}
             />

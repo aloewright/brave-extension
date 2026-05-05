@@ -17,6 +17,7 @@ let stdoutBuf = Buffer.alloc(0)
 const inbox: any[] = []
 const waiters: Array<(m: any) => boolean> = []
 const waiterResolves: Array<(m: any) => void> = []
+const parseErrors: string[] = []
 
 function pumpFrames() {
   while (stdoutBuf.length >= 4) {
@@ -27,7 +28,8 @@ function pumpFrames() {
     let msg: any
     try {
       msg = JSON.parse(body)
-    } catch {
+    } catch (err) {
+      parseErrors.push(err instanceof Error ? err.message : String(err))
       continue
     }
     let matched = false
@@ -140,5 +142,14 @@ describe("native host child-process integration", () => {
     // anything new and asserting host is still running.
     await new Promise((r) => setTimeout(r, 100))
     expect(proc!.killed).toBe(false)
+  })
+
+  it("frames UTF-8 stdout payloads by byte length", async () => {
+    if (!proc) return
+    parseErrors.length = 0
+    send({ type: "exec-raw", command: "printf '✓ → —\\n'" })
+    const reply = await waitFor((m) => m?.type === "stdout" && m.data.includes("✓"))
+    expect(reply.data).toContain("✓ → —")
+    expect(parseErrors).toEqual([])
   })
 })

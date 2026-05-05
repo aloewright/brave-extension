@@ -23,7 +23,13 @@ let ptyModule = null
 async function loadPty() {
   if (ptyModule) return ptyModule
   try {
-    ptyModule = await import("@homebridge/node-pty-prebuilt-multiarch")
+    // We use Microsoft's official `node-pty` because it ships notarized
+    // Darwin prebuilds (signed by Microsoft Corporation, Developer ID UBF8T346G9).
+    // The `@homebridge/node-pty-prebuilt-multiarch` fork only had Linux
+    // prebuilds, forcing a node-gyp source build on macOS — the resulting
+    // ad-hoc-signed `.node` would trip Gatekeeper's online malware check
+    // every time it was loaded.
+    ptyModule = await import("node-pty")
     return ptyModule
   } catch (err) {
     throw new Error(
