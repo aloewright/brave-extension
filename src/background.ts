@@ -1,10 +1,47 @@
+import { ulid } from "./lib/ulid"
+import { cropScreenshotDataUrl } from "./lib/screenshot"
 import { addHighlight } from "./review"
+import { DOM_TOOL_HANDLERS } from "./background/dom-tools"
+import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools"
+import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools"
+import { EXTENSIONS_TOOL_HANDLERS } from "./background/extensions-tools"
+import { SEARCH_TOOL_HANDLERS } from "./background/search-tools"
+import { startResourcePublishers } from "./background/resource-publishers"
+import {
+  recorderState,
+  startRecording as startRecorderM6,
+  stopRecording as stopRecorderM6,
+  handleRecorderStopped,
+  handleRecorderError,
+  handleRecorderReady,
+  handleMirrorMessage,
+  notifyRecorderStarted,
+  notifyRecorderFinalized
+} from "./background/recorder"
+import { RECORDER_TOOL_HANDLERS } from "./background/recorder-tools"
+import {
+  requestConsent,
+  handleConsentResponse,
+  type ConsentResponseMessage
+} from "./background/consent"
+import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
 const HEARTBEAT_ALARM = "native-heartbeat"
 let nativePort: chrome.runtime.Port | null = null
 let lastDisconnectAt = 0
 const pendingCallbacks = new Map<string, (msg: any) => void>()
+
+function safeRuntimeWarning(message: string, err?: unknown) {
+  console.warn(`[ai-dev-sidebar] ${message}`, err instanceof Error ? err.message : err ?? "")
+}
+
+// PTY sessions currently live in the native host. Tracked here so the
+// heartbeat keeps the host alive (and therefore the user's shells / dev
+// servers) even when no sidebar port is connected — e.g. between the
+// instant the sidepanel disconnects and the next time it reconnects. We
+// observe the host's pty.* messages on their way through to update this set.
+const activePtySessions = new Set<string>()
 
 function connectNativeHost() {
   if (nativePort) return nativePort
@@ -14,6 +51,26 @@ function connectNativeHost() {
     nativePort.onMessage.addListener((msg: any) => {
       // Drop pongs — they're keepalive noise the sidebar doesn't need.
       if (msg?.type === "pong") return
+
+      // Tool-call bridge from MCP server → background. Currently only a tiny
+      // surface (tabs_list) lands here; M4/M5 expand it. Replies are sent
+      // back over the same native port using mcp.tool.result.
+      if (msg?.type === "mcp.tool.call") {
+        void handleMcpToolCall(msg)
+        return
+      }
+
+      // Mirror PTY lifecycle into our local set so the heartbeat below
+      // can keep the host alive while shells are still running.
+      if (msg?.type === "pty.spawned" && typeof msg.sessionId === "string") {
+        activePtySessions.add(msg.sessionId)
+      } else if (
+        (msg?.type === "pty.exit" || msg?.type === "pty.error") &&
+        typeof msg?.sessionId === "string"
+      ) {
+        activePtySessions.delete(msg.sessionId)
+      }
+
       // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-response", payload: msg })
@@ -27,6 +84,10 @@ function connectNativeHost() {
       lastDisconnectAt = now
       console.warn("Native host disconnected:", err)
       nativePort = null
+      // PTYs only live inside the host process, so a host disconnect means
+      // they're gone. Drop the tracking set so we don't keep the heartbeat
+      // hot for sessions that no longer exist.
+      activePtySessions.clear()
 
       // Silent auto-reconnect for transient drops (typical: SW recycled,
       // host process EOF'd, then we wake on the next message). The host
@@ -53,21 +114,38 @@ function connectNativeHost() {
 // chrome.alarms wakes the SW even after it's been GC'd, at which point we
 // re-establish the native connection (the host re-loads hasSession from
 // disk, so chat context is preserved across SW restarts).
-chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== HEARTBEAT_ALARM) return
-  // No active sidebar → no reason to keep the host alive. Let the SW idle
-  // out and the host EOF naturally.
-  if (sidebarPorts.size === 0) return
-  const port = nativePort ?? connectNativeHost()
-  if (!port) return
+if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
   try {
-    port.postMessage({ type: "ping" })
-  } catch {
-    // postMessage on a torn-down port throws — let the next disconnect
-    // handler reconnect it.
+    chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 })
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name !== HEARTBEAT_ALARM) return
+      // Keep the host alive whenever a sidebar is connected OR there are
+      // PTY sessions still running. The latter case matters for transient
+      // gaps (e.g. when the user closes/reopens the sidepanel quickly): we
+      // don't want a 30-second window where the host idles out and kills the
+      // user's `npm run dev`.
+      //
+      // Note: if the sidepanel is fully closed for a long time, MV3 will
+      // eventually GC the service worker regardless of this heartbeat. At
+      // that point the native port closes, the host's stdin EOFs, and the
+      // PTYs die. Surviving an extended sidepanel-closed window would need
+      // an offscreen-document-backed port; tracked separately.
+      if (sidebarPorts.size === 0 && activePtySessions.size === 0) return
+      const port = nativePort ?? connectNativeHost()
+      if (!port) return
+      try {
+        port.postMessage({ type: "ping" })
+      } catch {
+        // postMessage on a torn-down port throws — let the next disconnect
+        // handler reconnect it.
+      }
+    })
+  } catch (err) {
+    safeRuntimeWarning("failed to initialize heartbeat alarm", err)
   }
-})
+} else {
+  safeRuntimeWarning("chrome.alarms is unavailable; native host heartbeat disabled")
+}
 
 function sendToNative(msg: any) {
   const port = connectNativeHost()
@@ -87,119 +165,12 @@ function sendToNative(msg: any) {
   }
 }
 
-// ─── Tab recording state ──────────────────────────────────────────────
-// We keep the MediaRecorder in an offscreen document because service
-// workers can't run MediaRecorder. Background orchestrates lifecycle and
-// exposes the red-dot badge indicator while recording is active.
-
-const OFFSCREEN_URL = "tabs/offscreen.html"
-const RECORDING_SETTINGS_KEY = "ai-dev-settings"
-
-interface RecordingState {
-  active: boolean
-  tabId: number | null
-  startedAt: number | null
-  lastUpload: { key?: string; url?: string; size: number; at: number } | null
-  lastError: string | null
-}
-
-const recording: RecordingState = {
-  active: false,
-  tabId: null,
-  startedAt: null,
-  lastUpload: null,
-  lastError: null
-}
-
-// Queue a pending start message until the offscreen document signals ready
-let pendingStart: {
-  streamId: string
-  uploadUrl: string
-  serviceToken?: string
-} | null = null
-
-// chrome.runtime.getContexts and chrome.offscreen are MV3 APIs whose shapes
-// differ across @types/chrome versions. We declare the minimal surface we
-// actually call so this file type-checks against any reasonable @types/chrome
-// version without resorting to `any` or `@ts-ignore` (PDX-124).
-interface RuntimeContextsQuery {
-  contextTypes?: string[]
-  documentUrls?: string[]
-}
-interface OffscreenCreateOptions {
-  url: string
-  reasons: string[]
-  justification: string
-}
-interface ExtendedChromeRuntime {
-  getContexts?: (filter: RuntimeContextsQuery) => Promise<unknown[]>
-}
-interface OffscreenApi {
-  createDocument: (options: OffscreenCreateOptions) => Promise<void>
-  closeDocument: () => Promise<void>
-}
-type ChromeWithOffscreen = typeof chrome & { offscreen: OffscreenApi }
-
-async function hasOffscreen(): Promise<boolean> {
-  const runtime = chrome.runtime as typeof chrome.runtime & ExtendedChromeRuntime
-  const getContexts = runtime.getContexts
-  if (!getContexts) return false
-  const existing = await getContexts({
-    contextTypes: ["OFFSCREEN_DOCUMENT"],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)]
-  })
-  return Array.isArray(existing) && existing.length > 0
-}
-
-async function ensureOffscreen() {
-  if (await hasOffscreen()) return
-  const offscreen = (chrome as ChromeWithOffscreen).offscreen
-  await offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ["USER_MEDIA"],
-    justification: "Record the active tab to save as a video in media storage"
-  })
-}
-
-async function closeOffscreen() {
-  if (!(await hasOffscreen())) return
-  try {
-    const offscreen = (chrome as ChromeWithOffscreen).offscreen
-    await offscreen.closeDocument()
-  } catch {
-    // ignore
-  }
-}
-
-function setRecordingBadge(on: boolean) {
-  if (on) {
-    chrome.action.setBadgeText({ text: "●" })
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
-    chrome.action.setTitle({ title: "Recording tab — click to stop" })
-    // Show the popup during recording so the toolbar click reveals a Stop
-    // button. In idle, no popup → click opens the sidebar directly.
-    chrome.action.setPopup({ popup: "popup.html" })
-  } else {
-    chrome.action.setBadgeText({ text: "" })
-    chrome.action.setTitle({ title: "AI Dev Sidebar" })
-    chrome.action.setPopup({ popup: "" })
-  }
-}
-
-async function getRecordingUploadConfig(): Promise<{ uploadUrl: string; serviceToken?: string }> {
-  const result = await chrome.storage.local.get(RECORDING_SETTINGS_KEY)
-  const settings = result[RECORDING_SETTINGS_KEY] as
-    | { cloudosNotesUrl?: string; cloudosServiceToken?: string }
-    | undefined
-  // Derive the media upload URL from the existing notes URL the user already
-  // configured: https://notes.pdx.software/api/notes → .../api/media/upload
-  const notesUrl = settings?.cloudosNotesUrl || "https://notes.pdx.software/api/notes"
-  const uploadUrl = notesUrl.replace(/\/api\/notes\/?$/, "/api/media/upload")
-  return { uploadUrl, serviceToken: settings?.cloudosServiceToken || undefined }
-}
+// ─── Recorder state broadcasting ──────────────────────────────────────
+// Recorder lifecycle lives in src/background/recorder.ts. We just wire
+// runtime messages and broadcast state to connected sidebars.
 
 function broadcastRecordingState() {
-  const payload = { type: "recording-state", state: { ...recording } }
+  const payload = { type: "recording-state", state: { ...recorderState } }
   for (const [, port] of sidebarPorts) {
     try {
       port.postMessage(payload)
@@ -207,65 +178,6 @@ function broadcastRecordingState() {
       // ignore
     }
   }
-}
-
-async function startTabRecording(targetTabId?: number): Promise<{ ok: boolean; error?: string }> {
-  if (recording.active) return { ok: false, error: "Already recording" }
-  try {
-    let tabId = targetTabId
-    if (!tabId) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) return { ok: false, error: "No active tab" }
-      tabId = tab.id
-    }
-
-    // Mint a media stream id for the target tab. Consumer is the offscreen
-    // document, which doesn't have a tab id — leaving consumerTabId unset
-    // lets any document in this extension consume it.
-    const streamId = await new Promise<string>((resolve, reject) => {
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId! }, (id) => {
-        if (chrome.runtime.lastError || !id) {
-          reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
-        } else {
-          resolve(id)
-        }
-      })
-    })
-
-    const { uploadUrl, serviceToken } = await getRecordingUploadConfig()
-    pendingStart = { streamId, uploadUrl, serviceToken }
-    await ensureOffscreen()
-    // The offscreen page will send OFFSCREEN_READY when mounted; at that
-    // point we flush the pending start. It also might mount instantly if
-    // the document was already open — send the start message directly.
-    chrome.runtime.sendMessage({
-      type: "OFFSCREEN_START",
-      streamId,
-      uploadUrl,
-      serviceToken
-    }).catch(() => {
-      // no listener yet — handler below on OFFSCREEN_READY will retry
-    })
-
-    recording.active = true
-    recording.tabId = tabId
-    recording.startedAt = Date.now()
-    recording.lastError = null
-    setRecordingBadge(true)
-    broadcastRecordingState()
-    return { ok: true }
-  } catch (err) {
-    recording.lastError = (err as Error).message
-    setRecordingBadge(false)
-    return { ok: false, error: recording.lastError }
-  }
-}
-
-async function stopTabRecording(): Promise<{ ok: boolean }> {
-  if (!recording.active) return { ok: false }
-  chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" }).catch(() => {})
-  // Actual cleanup happens on OFFSCREEN_UPLOADED / OFFSCREEN_ERROR
-  return { ok: true }
 }
 
 // Track sidebar connections
@@ -290,6 +202,12 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "consent:response") {
+    handleConsentResponse(message as ConsentResponseMessage)
+    sendResponse({ ok: true })
+    return
+  }
+
   if (message.type === "NATIVE_SEND") {
     sendToNative(message.payload)
     sendResponse({ ok: true })
@@ -315,62 +233,162 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true })
   }
 
-  // ─── Recording control ──────────────────────────────────────────────
+  // ─── Recorder control (M6, ALO-248) ─────────────────────────────────
 
   if (message.type === "START_RECORDING") {
-    startTabRecording(message.tabId).then((result) => sendResponse(result))
+    const source = (message.source || "tab") as RecorderSource
+    startRecorderM6({ source, tabId: message.tabId })
+      .then((result) => {
+        broadcastRecordingState()
+        sendResponse(result)
+      })
     return true
   }
 
   if (message.type === "STOP_RECORDING") {
-    stopTabRecording().then((result) => sendResponse(result))
+    stopRecorderM6().then((result) => sendResponse(result))
     return true
   }
 
   if (message.type === "GET_RECORDING_STATE") {
-    sendResponse({ state: { ...recording } })
+    sendResponse({ state: { ...recorderState } })
   }
 
-  // ─── Offscreen document lifecycle events ────────────────────────────
+  if (message.type === "RECORDER_READY") {
+    handleRecorderReady((m) => {
+      chrome.runtime.sendMessage(m).catch(() => {})
+    })
+  }
 
-  if (message.type === "OFFSCREEN_READY") {
-    // Flush a queued start if background raced ahead of the document mount
-    if (pendingStart) {
-      chrome.runtime.sendMessage({ type: "OFFSCREEN_START", ...pendingStart }).catch(() => {})
-      pendingStart = null
+  if (message.type === "RECORDER_STARTED") {
+    notifyRecorderStarted(message.id)
+    broadcastRecordingState()
+  }
+
+  if (message.type === "RECORDER_STOPPED") {
+    void handleRecorderStopped(message, { sendNative: sendToNative }).then(() => {
+      broadcastRecordingState()
+    })
+  }
+
+  if (
+    message.type === "RECORDER_MIRROR_START" ||
+    message.type === "RECORDER_MIRROR_CHUNK" ||
+    message.type === "RECORDER_MIRROR_FINISH"
+  ) {
+    handleMirrorMessage(message, { sendNative: sendToNative })
+  }
+
+  // ─── Picker routing ─────────────────────────────────────────────────
+
+  if (message.type === "picker:start") {
+    const tabId = message.tabId
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, error: "tabId required" })
+      return
     }
+    startPicker(tabId)
+      .then((ref) => sendResponse({ ok: true, reference: ref }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }))
+    return true
   }
 
-  if (message.type === "OFFSCREEN_STARTED") {
-    broadcastRecordingState()
-  }
-
-  if (message.type === "OFFSCREEN_UPLOADED") {
-    recording.active = false
-    recording.tabId = null
-    recording.startedAt = null
-    recording.lastUpload = {
-      key: message.key,
-      url: message.url,
-      size: message.size,
-      at: Date.now()
+  if (message.type === "picker:cancel") {
+    const tabId = message.tabId
+    if (typeof tabId === "number") {
+      cancelPicker(tabId).then(() => sendResponse({ ok: true }))
+      return true
     }
-    recording.lastError = null
-    setRecordingBadge(false)
-    broadcastRecordingState()
-    closeOffscreen()
+    sendResponse({ ok: false, error: "tabId required" })
   }
 
-  if (message.type === "OFFSCREEN_ERROR") {
-    recording.active = false
-    recording.tabId = null
-    recording.startedAt = null
-    recording.lastError = message.error || "Recording failed"
-    setRecordingBadge(false)
+  if (message.type === "picker:captured") {
+    const tabId = sender.tab?.id
+    if (typeof tabId === "number") {
+      void finalizeCapture(tabId, (message as PickerMessage & { payload: PickerCapture }).payload)
+    }
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "picker:cancelled") {
+    const tabId = sender.tab?.id
+    if (typeof tabId === "number") rejectPending(tabId, "user-cancelled")
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "RECORDER_ERROR") {
+    handleRecorderError(message.error || "Recording failed")
+    notifyRecorderFinalized(null)
     broadcastRecordingState()
-    closeOffscreen()
+  }
+
+  // ─── Quick-actions bar (lifted from lean-extensions) ────────────────
+
+  if (message.type === "RESOLVE_IP") {
+    resolveHostname(message.hostname).then((ip) => sendResponse({ ip }))
+    return true
+  }
+
+  if (message.type === "SAVE_LINK") {
+    saveLinkToLibrary(message.url, message.title).then(() => sendResponse({ ok: true }))
+    return true
+  }
+
+  if (message.type === "GET_FEEDS") {
+    // Forwarded to the page's content script if any has registered for feeds.
+    // We don't yet ship a feed-detector content script in this repo, so fall
+    // back to "no feeds" so the UI doesn't hang. Wire a real detector later.
+    sendResponse({ feeds: [] })
+    return false
+  }
+
+  if (message.type === "TECH_DETECTED") {
+    cachedTech.set(message.hostname, { techs: message.techs, ts: Date.now() })
+    sendResponse({ ok: true })
+  }
+
+  if (message.type === "GET_TECH") {
+    // Best-effort: if a tech-detector content script ran on the active tab and
+    // posted TECH_DETECTED, return the cached result. Otherwise empty.
+    const hostname = message.hostname || (sender.tab?.url ? new URL(sender.tab.url).hostname : "")
+    const entry = cachedTech.get(hostname)
+    sendResponse({ techs: entry?.techs || [] })
   }
 })
+
+// Tiny in-memory caches + helpers for the quick-actions bar.
+const cachedTech = new Map<string, { techs: any[]; ts: number }>()
+
+async function resolveHostname(hostname: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`)
+    const data = await res.json()
+    const answer = (data.Answer || []).find((a: any) => a.type === 1)
+    return answer?.data || null
+  } catch {
+    return null
+  }
+}
+
+async function saveLinkToLibrary(url: string, title: string): Promise<void> {
+  const key = "lx_collectedLinks"
+  const cur = await chrome.storage.local.get(key)
+  const links: any[] = Array.isArray(cur[key]) ? cur[key] : []
+  const tags: string[] = []
+  const u = (url || "").toLowerCase()
+  if (u.includes("youtube.com") || u.includes("youtu.be")) tags.push("youtube")
+  if (u.includes("github.com")) tags.push("github")
+  if (u.includes("arxiv.org")) tags.push("research")
+  if (u.includes("stackoverflow.com")) tags.push("stackoverflow")
+  links.unshift({
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `link_${Date.now()}`,
+    url,
+    title,
+    tags,
+    date: new Date().toISOString()
+  })
+  await chrome.storage.local.set({ [key]: links })
+}
 
 // Console error tracking per tab
 const consoleErrors = new Map<number, any[]>()
@@ -422,17 +440,134 @@ async function scrapeTab(tabId: number) {
   }
 }
 
-// Side panel behavior — open on action click
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.windowId) {
-    chrome.sidePanel.open({ windowId: tab.windowId })
+// ─── Element picker (Reference capture, ALO-243) ────────────────────────
+// Sidepanel calls `picker:start` with a tabId. Background tells the
+// content script to start the picker, awaits a `picker:captured` message,
+// crops the visible-tab screenshot to the element's bounding box, packs a
+// Reference and resolves the original sender. Auto-cancels on tab nav.
+
+type PendingPicker = {
+  resolve: (ref: Reference) => void
+  reject: (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+const pendingPickers = new Map<number, PendingPicker>()
+
+function rejectPending(tabId: number, reason: string) {
+  const p = pendingPickers.get(tabId)
+  if (!p) return
+  pendingPickers.delete(tabId)
+  clearTimeout(p.timeout)
+  p.reject(new Error(reason))
+}
+
+async function startPicker(tabId: number): Promise<Reference> {
+  // Cancel any in-flight pick on this tab.
+  rejectPending(tabId, "superseded")
+
+  return new Promise<Reference>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      rejectPending(tabId, "timeout")
+      // Best-effort cancel on the content script.
+      chrome.tabs.sendMessage(tabId, { type: "picker:cancel" }).catch(() => {})
+    }, 60_000)
+    // Register the pending entry BEFORE sending so a fast picker:captured
+    // message can never race ahead of the map insert.
+    pendingPickers.set(tabId, { resolve, reject, timeout })
+    chrome.tabs.sendMessage(tabId, { type: "picker:start" }).catch((err) => {
+      rejectPending(tabId, err?.message ?? String(err))
+    })
+  })
+}
+
+async function cancelPicker(tabId: number) {
+  rejectPending(tabId, "cancelled")
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "picker:cancel" })
+  } catch {
+    // Content script may already be gone (navigation, tab closed).
+  }
+}
+
+async function finalizeCapture(tabId: number, capture: PickerCapture) {
+  const pending = pendingPickers.get(tabId)
+  if (!pending) return
+  pendingPickers.delete(tabId)
+  clearTimeout(pending.timeout)
+
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    let screenshot = ""
+    if (tab.windowId !== undefined) {
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "png"
+        })
+        screenshot = await cropScreenshotDataUrl(
+          dataUrl,
+          capture.boundingBox,
+          capture.devicePixelRatio
+        )
+      } catch (err) {
+        console.warn("picker: captureVisibleTab failed:", err)
+      }
+    }
+
+    const ref: Reference = {
+      id: `ref_${ulid()}`,
+      tabId,
+      url: tab.url || "",
+      title: tab.title || "",
+      selector: capture.selector,
+      outerHTML: capture.outerHTML,
+      textContent: capture.textContent,
+      boundingBox: capture.boundingBox,
+      screenshot,
+      createdAt: Date.now()
+    }
+    pending.resolve(ref)
+  } catch (err) {
+    pending.reject(err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
+// Auto-cancel picker if the user navigates the tab away.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading" && pendingPickers.has(tabId)) {
+    rejectPending(tabId, "navigation")
   }
 })
 
-// Enable side panel on all sites
-chrome.sidePanel.setOptions({
-  enabled: true
+chrome.tabs.onRemoved.addListener((tabId) => {
+  rejectPending(tabId, "tab-closed")
 })
+
+// Side panel behavior — open on action click
+function openSidePanel(windowId?: number) {
+  if (!windowId) return
+  const open = chrome.sidePanel?.open
+  if (!open) {
+    safeRuntimeWarning("chrome.sidePanel.open is unavailable")
+    return
+  }
+  open({ windowId }).catch((err) => {
+    safeRuntimeWarning("failed to open side panel", err)
+  })
+}
+
+chrome.action?.onClicked?.addListener((tab) => {
+  openSidePanel(tab.windowId)
+})
+
+// Enable side panel on all sites
+try {
+  chrome.sidePanel?.setOptions?.({
+    enabled: true
+  })
+} catch (err) {
+  safeRuntimeWarning("failed to enable side panel", err)
+}
 
 // Detach the default popup so a toolbar click goes straight to the
 // onClicked listener above (which opens the sidebar). The popup is
@@ -440,29 +575,39 @@ chrome.sidePanel.setOptions({
 // Plasmo wires `default_popup: "popup.html"` automatically because
 // src/popup.tsx exists; this clears it at runtime. setPopup is
 // persistent, so we only need this on install + browser start.
-chrome.action.setPopup({ popup: "" })
-chrome.runtime.onStartup.addListener(() => {
-  chrome.action.setPopup({ popup: "" })
-})
+function clearActionPopup() {
+  try {
+    chrome.action?.setPopup?.({ popup: "" })
+  } catch (err) {
+    safeRuntimeWarning("failed to clear action popup", err)
+  }
+}
+
+clearActionPopup()
+chrome.runtime.onStartup.addListener(clearActionPopup)
 
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.action.setPopup({ popup: "" })
-  chrome.contextMenus.create({
-    id: "scrape-page",
-    title: "Scrape page to AI Dev Sidebar",
-    contexts: ["page"]
-  })
-  chrome.contextMenus.create({
-    id: "send-selection",
-    title: "Send selection to AI Dev",
-    contexts: ["selection"]
-  })
-  chrome.contextMenus.create({
-    id: "save-highlight",
-    title: "Save highlight for review",
-    contexts: ["selection"]
-  })
+  clearActionPopup()
+  try {
+    chrome.contextMenus.create({
+      id: "scrape-page",
+      title: "Scrape page to AI Dev Sidebar",
+      contexts: ["page"]
+    })
+    chrome.contextMenus.create({
+      id: "send-selection",
+      title: "Send selection to AI Dev",
+      contexts: ["selection"]
+    })
+    chrome.contextMenus.create({
+      id: "save-highlight",
+      title: "Save highlight for review",
+      contexts: ["selection"]
+    })
+  } catch (err) {
+    safeRuntimeWarning("failed to create context menus", err)
+  }
 })
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -498,7 +643,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       chrome.action.setBadgeText({ text: "+1" })
       chrome.action.setBadgeBackgroundColor({ color: "#4ade80" })
       setTimeout(() => {
-        if (!recording.active) chrome.action.setBadgeText({ text: "" })
+        if (!recorderState.active) chrome.action.setBadgeText({ text: "" })
       }, 1200)
     } catch (err) {
       console.warn("save-highlight failed:", err)
@@ -510,10 +655,101 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "toggle-sidebar") {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tab?.windowId) {
-      chrome.sidePanel.open({ windowId: tab.windowId })
-    }
+    openSidePanel(tab?.windowId)
   }
 })
+
+// ── MCP tool bridge ──────────────────────────────────────────────────────
+// The native host's MCP server dispatches tool calls that need chrome.* APIs
+// here via the native port. Each tool returns a value compatible with the
+// MCP `tools/call` result shape: `{ content: [{type, text}], isError? }`.
+//
+// M3 ships only the basics (tabs_list); M4/M5 register more.
+
+type ToolHandler = (args: any) => Promise<any>
+
+const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  async tabs_list() {
+    const tabs = await chrome.tabs.query({})
+    const summary = tabs.map((t) => ({
+      id: t.id,
+      windowId: t.windowId,
+      url: t.url,
+      title: t.title,
+      active: t.active,
+      pinned: t.pinned,
+      groupId: t.groupId
+    }))
+    return {
+      content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
+      isError: false
+    }
+  },
+  ...DOM_TOOL_HANDLERS,
+  ...LIBRARY_TOOL_HANDLERS,
+  ...COOKIES_TOOL_HANDLERS,
+  ...EXTENSIONS_TOOL_HANDLERS,
+  ...SEARCH_TOOL_HANDLERS,
+  ...RECORDER_TOOL_HANDLERS
+}
+
+// Wire up MCP resource publishers. Each push sends `mcp.resource.upsert`
+// over the native port; the host's MCPServer mirrors it into its resources
+// map, which then surfaces via tools/resources/list. Only one boot per SW.
+//
+// The teardown returned by startResourcePublishers is captured here for
+// hypothetical reload paths (e.g. settings flips that warrant a republish);
+// today the SW lifecycle never invokes it — when the SW dies, listeners die
+// with it, and the next wake-up re-runs this module top-to-bottom.
+let stopResourcePublishers: (() => void) | undefined
+if (!stopResourcePublishers) {
+  stopResourcePublishers = startResourcePublishers({
+    upsert: (uri, def) => {
+      sendToNative({
+        type: "mcp.resource.upsert",
+        uri,
+        name: def.name,
+        description: def.description,
+        mimeType: def.mimeType,
+        payload: def.payload
+      })
+    }
+  })
+}
+
+async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
+  const handler = TOOL_HANDLERS[msg.name]
+  const port = nativePort ?? connectNativeHost()
+  if (!port) return
+  try {
+    if (!handler) {
+      port.postMessage({ type: "mcp.tool.result", id: msg.id, error: `unknown tool ${msg.name}` })
+      return
+    }
+    // M7 (ALO-250): every tool dispatch flows through the consent FSM.
+    // Read tools auto-allow; gated tools resolve from Settings flags;
+    // write/cookies tools prompt the sidepanel and time out after 60s.
+    const decision = await requestConsent({ toolName: msg.name, args: msg.args })
+    if (decision === "deny") {
+      port.postMessage({
+        type: "mcp.tool.result",
+        id: msg.id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "user denied tool call" }]
+        }
+      })
+      return
+    }
+    const result = await handler(msg.args || {})
+    port.postMessage({ type: "mcp.tool.result", id: msg.id, result })
+  } catch (err) {
+    port.postMessage({
+      type: "mcp.tool.result",
+      id: msg.id,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+}
 
 export {}

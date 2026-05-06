@@ -88,6 +88,25 @@ export interface Settings {
   cloudosNotesUrl: string
   cloudosServiceToken: string
   cloudosPruneAfterSync: boolean
+  // MCP / install gates (M7, ALO-251)
+  allowEvalJs: boolean
+  allowExtensionUninstall: boolean
+  cookiesAllowAll: boolean
+  braveSearchApiKey: string
+}
+
+/** Status reported by the native host's mcp.status RPC. */
+export interface MCPStatus {
+  port: number | null
+  sessions: number
+  registered: boolean
+  claudeJsonStatus: "registered" | "missing"
+  terminalPathStatus: "enabled" | "partial" | "disabled"
+  hasRcBlock: boolean
+  hasWrapper: boolean
+  tokenSet: boolean
+  tools: number
+  resources: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -101,7 +120,11 @@ export const DEFAULT_SETTINGS: Settings = {
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
   cloudosServiceToken: "",
-  cloudosPruneAfterSync: false
+  cloudosPruneAfterSync: false,
+  allowEvalJs: false,
+  allowExtensionUninstall: false,
+  cookiesAllowAll: false,
+  braveSearchApiKey: ""
 }
 
 // ─── Design inspector types (folded in from Alexometer) ───────────────
@@ -199,6 +222,68 @@ export interface CachedScan {
   result: ScanResult
   cachedAt: string
 }
+
+// ── Recorder (M6, ALO-248) ──────────────────────────────────────────────
+
+export type RecorderSource = "tab" | "screen" | "camera"
+
+export interface RecordingMetadata {
+  id: string
+  source: RecorderSource
+  durationMs: number
+  sizeBytes: number
+  mimeType: "video/mp4"
+  /** OS-side filename, e.g. "recording-2026-04-29T12-34-56.mp4". */
+  filename: string
+  /** ISO timestamp at stop. */
+  createdAt: string
+  /** Tab URL captured at start, only for source==="tab". */
+  originUrl?: string
+}
+
+export const RECORDER_STORAGE_KEY = "recorder.recordings"
+export const RECORDER_MIME = "video/mp4;codecs=h264"
+
+// ── Element picker (Reference capture) ──────────────────────────────────
+// Separate from the Inspector. The picker captures a single element from
+// the active tab and returns a Reference payload the Terminal section
+// attaches to its prompt.
+
+export interface ReferenceBoundingBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface PickerCapture {
+  selector: string
+  outerHTML: string
+  textContent: string
+  boundingBox: ReferenceBoundingBox
+  // Device pixel ratio for the page at capture time. Background uses this
+  // when cropping captureVisibleTab output.
+  devicePixelRatio: number
+}
+
+export interface Reference {
+  id: string
+  tabId: number
+  url: string
+  title: string
+  selector: string
+  outerHTML: string
+  textContent: string
+  boundingBox: ReferenceBoundingBox
+  screenshot: string
+  createdAt: number
+}
+
+export type PickerMessage =
+  | { type: "picker:start"; tabId?: number }
+  | { type: "picker:cancel"; tabId?: number }
+  | { type: "picker:cancelled" }
+  | { type: "picker:captured"; payload: PickerCapture }
 
 export const BACKEND_INFO: Record<CLIBackend, { name: string; command: string; color: string; description: string }> = {
   claude: {

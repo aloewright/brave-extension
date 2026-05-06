@@ -16,6 +16,39 @@ import { spawn } from "child_process"
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
+import { PTYManager } from "./pty-manager.mjs"
+import { MCPServer } from "./mcp-server.mjs"
+import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
+
+const ptyManager = new PTYManager((msg) => sendMessage(msg))
+
+const mcp = new MCPServer({
+  logger: (line) => sendMessage({ type: "stderr", data: line })
+})
+
+// Pending tool-call promises waiting for an extension reply.
+const pendingToolCalls = new Map() // id -> { resolve, reject }
+let nextToolCallId = 1
+
+mcp.setToolRequestBridge((name, args) => {
+  const id = nextToolCallId++
+  return new Promise((resolve, reject) => {
+    pendingToolCalls.set(id, { resolve, reject })
+    sendMessage({ type: "mcp.tool.call", id, name, args })
+    setTimeout(() => {
+      if (pendingToolCalls.delete(id)) {
+        reject(new Error(`tool ${name} timed out (15s)`))
+      }
+    }, 15_000)
+  }).catch((err) => ({
+    isError: true,
+    content: [{ type: "text", text: err.message }]
+  }))
+})
+
+mcp.start().catch((err) => {
+  sendMessage({ type: "stderr", data: `[mcp] failed to start: ${err.message}` })
+})
 
 /**
  * `hasSession` tracks whether each backend has an active session to continue.
@@ -64,7 +97,7 @@ const activeProcesses = new Map()
 function sendMessage(msg) {
   const json = JSON.stringify(msg)
   const buf = Buffer.alloc(4)
-  buf.writeUInt32LE(json.length, 0)
+  buf.writeUInt32LE(Buffer.byteLength(json, "utf8"), 0)
   process.stdout.write(buf)
   process.stdout.write(json)
 }
@@ -489,6 +522,144 @@ async function main() {
 
       case "ping": {
         sendMessage({ type: "pong", data: "" })
+        break
+      }
+
+      case "pty.spawn": {
+        const merged = {
+          ...msg,
+          env: { ...(msg.env || {}), ...mcp.ptyEnv() }
+        }
+        await ptyManager.spawn(merged)
+        break
+      }
+
+      case "pty.write": {
+        ptyManager.write(msg)
+        break
+      }
+
+      case "pty.resize": {
+        ptyManager.resize(msg)
+        break
+      }
+
+      case "pty.kill": {
+        ptyManager.kill(msg)
+        break
+      }
+
+      case "mcp.status": {
+        sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        break
+      }
+
+      case "mcp.rotate-token": {
+        try {
+          const r = mcp.rotateToken()
+          sendMessage({ type: "mcp.rotate-token", ok: true, rotatedAt: r.rotatedAt })
+          // Broadcast updated status so the panel can refresh.
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.rotate-token", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.register": {
+        try {
+          mcp.registerClaudeJson()
+          sendMessage({ type: "mcp.register", ok: true })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.register", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.unregister": {
+        try {
+          mcp.unregisterClaudeJson()
+          sendMessage({ type: "mcp.unregister", ok: true })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.unregister", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.terminal-path.set": {
+        try {
+          const results = mcp.setTerminalPath(!!msg.enabled)
+          sendMessage({
+            type: "mcp.terminal-path.set",
+            ok: true,
+            enabled: !!msg.enabled,
+            results
+          })
+          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        } catch (err) {
+          sendMessage({ type: "mcp.terminal-path.set", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.resource.upsert": {
+        if (msg.uri) {
+          mcp.upsertResource(msg.uri, {
+            name: msg.name,
+            description: msg.description,
+            mimeType: msg.mimeType,
+            payload: msg.payload
+          })
+        }
+        break
+      }
+
+      case "mcp.resource.remove": {
+        if (msg.uri) mcp.removeResource(msg.uri)
+        break
+      }
+
+      case "recorder.mirror.start": {
+        try {
+          const res = mirrorStart(msg.id)
+          sendMessage({ type: "recorder.mirror.ack", phase: "start", id: msg.id, ...res })
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "start", id: msg.id, error: err.message })
+        }
+        break
+      }
+
+      case "recorder.mirror.chunk": {
+        try {
+          mirrorChunk(msg.id, msg.base64)
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "chunk", id: msg.id, error: err.message })
+        }
+        break
+      }
+
+      case "recorder.mirror.finish": {
+        try {
+          const res = await mirrorFinish(msg.id)
+          sendMessage({ type: "recorder.mirror.ack", phase: "finish", id: msg.id, ...res })
+        } catch (err) {
+          sendMessage({ type: "recorder.mirror.error", phase: "finish", id: msg.id, error: err.message })
+        }
+        break
+      }
+
+      case "mcp.tool.result": {
+        const pending = pendingToolCalls.get(msg.id)
+        if (pending) {
+          pendingToolCalls.delete(msg.id)
+          if (msg.error) {
+            pending.resolve({ isError: true, content: [{ type: "text", text: msg.error }] })
+          } else {
+            pending.resolve(msg.result)
+          }
+        }
         break
       }
     }
