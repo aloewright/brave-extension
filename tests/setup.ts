@@ -1,3 +1,4 @@
+/// <reference types="chrome" />
 import { beforeEach } from "vitest"
 
 // In-memory chrome.storage.local shim. Values are deep-cloned on get/set
