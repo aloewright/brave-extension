@@ -31,7 +31,10 @@ The job is currently **non-blocking** (`continue-on-error: true`) — see
 Unit tests live in `tests/` and run on Vitest with a `happy-dom` environment.
 An in-memory `chrome.storage.local` shim is installed in `tests/setup.ts`,
 so storage-layer tests run without any browser/extension runtime.
-Dependabot opens grouped weekly PRs; see `docs/ROADMAP.md`.
+Dependabot opens grouped weekly PRs (Monday 06:00 UTC). Minor/patch
+updates auto-merge on green CI via
+`.github/workflows/dependabot-auto-merge.yml`; majors are flagged for
+human review. Triage SOP: [`docs/dependabot-triage.md`](docs/dependabot-triage.md).
 
 ### Storage / migration
 
