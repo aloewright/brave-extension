@@ -15,6 +15,7 @@ const HOST_PATH = resolve(__dirname, "..", "native-host", "ai-dev-host.mjs")
  *
  *   - send(msg)          — write a framed JSON request
  *   - waitFor(predicate) — await the next response matching predicate
+ *   - hasPending(pred)   — peek without consuming (for ordering assertions)
  *   - close()            — close stdin and wait for exit
  *
  * The decoder is robust to chunk boundaries: a single Node "data" event can
@@ -96,6 +97,13 @@ class HostClient {
         }
       })
     })
+  }
+
+  // Non-destructive peek: returns true if any already-received frame matches
+  // predicate, without consuming it from the queue. Used by the stream test
+  // to assert ordering ("exit hasn't arrived yet") without disturbing state.
+  hasPending(predicate: (m: AnyMsg) => boolean): boolean {
+    return this.queue.some(predicate)
   }
 
   close(): Promise<number | null> {
@@ -195,12 +203,14 @@ describe("native-host integration (PDX-88)", () => {
   })
 
   // ─── stream round-trip ─────────────────────────────────────────────
-  // The host has no separate "stream" message — streaming is intrinsic to
-  // exec: stdout frames are emitted as data arrives. This test proves the
-  // host does NOT buffer until exit by writing two chunks separated by a
-  // ≥25ms gap and asserting the first frame arrives before the second
-  // chunk is even written by the child. (Relative ordering, not wall time,
-  // so the assertion stays deterministic on slow CI.)
+  // Streaming is intrinsic to exec: stdout frames are emitted as data
+  // arrives. The contract under test is "the host does NOT buffer until
+  // exit". Two assertions enforce that:
+  //   1. We observe "part-one" before "part-two" arrives in a separate
+  //      frame, and
+  //   2. At the moment "part-one" lands, the queue contains NO exit frame
+  //      for this pid — proving the first chunk was delivered while the
+  //      child was still running, not flushed all-at-once at process close.
   it("stream: observes mid-flight chunks before the child exits", async () => {
     const script =
       "process.stdout.write('part-one\\n'); " +
@@ -212,28 +222,22 @@ describe("native-host integration (PDX-88)", () => {
     const started = await client.waitFor((m) => m.type === "started")
     const pid = started.pid as number
 
-    // First chunk must arrive on its own — we only ask for "part-one" and
-    // the predicate filters out exit/stderr frames. If the host buffered
-    // until exit, the next waitFor below would be the only stdout frame.
+    // First chunk lands while the child is still inside its setTimeout(50).
     const first = await client.waitFor(
       (m) => m.type === "stdout" && m.pid === pid && String(m.data).includes("part-one")
     )
     expect(first.backend).toBe("gemini")
-    const firstReceivedAt = Date.now()
+
+    // Critical ordering check: at this exact moment the child has NOT yet
+    // exited, so no `exit` frame for this pid can possibly be in the queue.
+    // If the host buffered output until process close, this assertion would
+    // fail (the exit frame would have been queued alongside both chunks).
+    expect(client.hasPending((m) => m.type === "exit" && m.pid === pid)).toBe(false)
 
     const second = await client.waitFor(
       (m) => m.type === "stdout" && m.pid === pid && String(m.data).includes("part-two")
     )
-    const secondReceivedAt = Date.now()
     expect(second.backend).toBe("gemini")
-
-    // The two chunks must be delivered as separate frames — if the host
-    // coalesced them, "part-one" and "part-two" would arrive in the same
-    // frame and the predicate above for "part-two" would have already been
-    // satisfied by the first frame, leaving the queue empty and the second
-    // waitFor would have timed out (which throws). Asserting here is just a
-    // belt-and-braces sanity check that the timestamps are monotonic.
-    expect(secondReceivedAt).toBeGreaterThanOrEqual(firstReceivedAt)
 
     const exitMsg = await client.waitFor((m) => m.type === "exit" && m.pid === pid)
     expect(exitMsg.code).toBe(0)
