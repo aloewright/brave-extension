@@ -9,8 +9,6 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
   history and write a migration test against the in-memory storage shim.
 - Settings UI polish: validate paths, surface CloudOS sync errors inline,
   keyboard navigation across backends (Claude Code, Gemini, Copilot, Codex).
-- Native-host integration tests covering `exec`, `stream`, `kill`, and
-  `session-status` round-trips against a stub child process.
 
 ## Next
 
@@ -35,6 +33,12 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
 
 ## Done
 
+- Native-host integration tests covering `exec`, `stream`, `kill`, and
+  `session-status` round-trips against a stub child process
+  (`tests/native-host.integration.test.ts`). Uses
+  `AI_DEV_SIDEBAR_EXEC_OVERRIDE` to swap real CLI binaries for inline
+  `node -e` stubs and `AI_DEV_SIDEBAR_SESSION_STATE_PATH` to keep on-disk
+  session state in a tmpdir.
 - Vitest unit-test harness landed: `tests/setup.ts` ships an in-memory
   `chrome.storage.local` shim and the storage + types layers have happy-path
   coverage.
