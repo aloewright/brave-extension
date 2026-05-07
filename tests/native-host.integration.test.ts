@@ -164,20 +164,25 @@ describe("native-host integration (PDX-88)", () => {
     expect(typeof started.pid).toBe("number")
     expect(started.backend).toBe("claude")
 
+    // Scope the predicate to frames belonging to *this* child by matching
+    // pid; otherwise the host's MCP server startup logs (emitted as pid-less
+    // {type:"stderr"} frames from `mcp.start()` and `_registerWithClaudeJson`)
+    // race in and fail the `m.pid === started.pid` assertion below.
+    const pid = started.pid
     const stdoutChunks: string[] = []
     const stderrChunks: string[] = []
     let exitMsg: AnyMsg | null = null
     while (!exitMsg) {
       const m = await client.waitFor(
-        (x) => x.type === "stdout" || x.type === "stderr" || x.type === "exit"
+        (x) =>
+          ((x.type === "stdout" || x.type === "stderr") && x.pid === pid) ||
+          (x.type === "exit" && x.pid === pid)
       )
       if (m.type === "stdout") {
         stdoutChunks.push(String(m.data))
-        expect(m.pid).toBe(started.pid)
         expect(m.backend).toBe("claude")
       } else if (m.type === "stderr") {
         stderrChunks.push(String(m.data))
-        expect(m.pid).toBe(started.pid)
       } else {
         exitMsg = m
       }
