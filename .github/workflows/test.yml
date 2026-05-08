@@ -26,3 +26,20 @@ jobs:
       # --frozen-lockfile.
       - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm test
+
+  build:
+    runs-on: ubuntu-latest
+    # Production build smoke (ALO-112). Catches Plasmo manifest / bundler
+    # regressions that vitest can't see.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
