@@ -10,10 +10,13 @@ Built with [Plasmo](https://www.plasmo.com/) for Chrome.
 
 ```sh
 pnpm install
-pnpm dev          # starts plasmo dev (loads as unpacked extension from build/)
-pnpm build        # production build
-pnpm install-host # install the native messaging host
-pnpm typecheck    # runs `tsc --noEmit -p .` (no emit, just type-checking)
+pnpm dev            # starts plasmo dev (loads as unpacked extension from build/)
+pnpm build          # production build
+pnpm install-host   # install the native messaging host
+pnpm typecheck      # tsc --noEmit -p .
+pnpm test           # vitest run
+pnpm test:coverage  # vitest + v8 coverage (60% line / 50% branch floor)
+pnpm test:e2e       # playwright e2e suite
 ```
 
 ## Typechecking

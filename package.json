@@ -12,6 +12,7 @@
     "uninstall-host": "node scripts/uninstall-native-host.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p .",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
