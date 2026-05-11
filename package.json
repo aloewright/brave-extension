@@ -18,7 +18,7 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@chenglou/pretext": "^0.0.6",
+    "@chenglou/pretext": "^0.0.7",
     "@plasmohq/storage": "^1.15.0",
     "@tanstack/react-virtual": "^3.13.24",
     "fflate": "^0.8.2",
