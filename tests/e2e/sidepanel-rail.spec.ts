@@ -4,7 +4,7 @@ import type { SectionId } from "../../src/sections/types"
 /**
  * Rail navigation smoke test (M1, ALO-253).
  *
- * Asserts the 7-icon rail renders, each icon switches to its section,
+ * Asserts the 8-icon rail renders, each icon switches to its section,
  * and the last-active section is restored after a reload via
  * `chrome.storage.local["ui.activeSection"]`.
  */
@@ -16,6 +16,7 @@ const SECTION_IDS: SectionId[] = [
   "library",
   "cookies",
   "recorder",
+  "eyedropper",
   "settings"
 ]
 
@@ -26,10 +27,11 @@ const SECTION_LABELS: Record<SectionId, string> = {
   library: "Library",
   cookies: "Cookies",
   recorder: "Recorder",
+  eyedropper: "Eyedropper",
   settings: "Settings"
 }
 
-test("rail renders all 7 section icons", async ({ openSidepanel }) => {
+test("rail renders all 8 section icons", async ({ openSidepanel }) => {
   const page = await openSidepanel()
   for (const id of SECTION_IDS) {
     const btn = page.locator(`nav button[aria-label='${SECTION_LABELS[id]}']`)

@@ -1,11 +1,11 @@
 /**
  * Recorder mirror RPC (M6, ALO-248).
  *
- * Writes recordings to ~/.config/ai-dev-sidebar/recordings/{id}.mp4 in
+ * Writes recordings to ~/.config/ai-dev-sidebar/recordings/{id}.{mp4,mov} in
  * chunks because Chrome native messaging caps each frame at ~1 MB.
  *
  * Protocol:
- *   recorder.mirror.start  { id }
+ *   recorder.mirror.start  { id, extension? }
  *   recorder.mirror.chunk  { id, base64 }      // many of these
  *   recorder.mirror.finish { id }
  */
@@ -21,7 +21,7 @@ export function ensureMirrorDir() {
   mkdirSync(MIRROR_DIR, { recursive: true })
 }
 
-export function mirrorStart(id) {
+export function mirrorStart(id, extension = "mp4") {
   if (!id || typeof id !== "string") throw new Error("recorder.mirror.start: id required")
   const safeId = sanitizeId(id)
   if (safeId !== id) {
@@ -35,11 +35,15 @@ export function mirrorStart(id) {
     sessions.delete(safeId)
   }
   ensureMirrorDir()
-  const path = join(MIRROR_DIR, `${safeId}.mp4`)
-  if (existsSync(path)) {
-    try {
-      unlinkSync(path)
-    } catch {}
+  const ext = normalizeExtension(extension)
+  const path = join(MIRROR_DIR, `${safeId}.${ext}`)
+  for (const staleExt of ["mp4", "mov"]) {
+    const stalePath = join(MIRROR_DIR, `${safeId}.${staleExt}`)
+    if (existsSync(stalePath)) {
+      try {
+        unlinkSync(stalePath)
+      } catch {}
+    }
   }
   const stream = createWriteStream(path)
   stream.on("error", (err) => {
@@ -92,4 +96,8 @@ function sanitizeId(id) {
   return String(id).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
 }
 
-export const __test = { sanitizeId, MIRROR_DIR }
+function normalizeExtension(extension) {
+  return extension === "mov" ? "mov" : "mp4"
+}
+
+export const __test = { sanitizeId, normalizeExtension, MIRROR_DIR }

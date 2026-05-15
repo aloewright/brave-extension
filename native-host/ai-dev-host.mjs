@@ -623,7 +623,7 @@ async function main() {
 
       case "recorder.mirror.start": {
         try {
-          const res = mirrorStart(msg.id)
+          const res = mirrorStart(msg.id, msg.extension)
           sendMessage({ type: "recorder.mirror.ack", phase: "start", id: msg.id, ...res })
         } catch (err) {
           sendMessage({ type: "recorder.mirror.error", phase: "start", id: msg.id, error: err.message })

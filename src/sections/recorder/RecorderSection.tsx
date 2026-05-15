@@ -7,8 +7,11 @@ import {
 
 interface RecState {
   active: boolean
+  paused: boolean
   source: RecorderSource | null
   startedAt: number | null
+  elapsedMs: number
+  lastResumedAt: number | null
   lastSaved: { id: string; filename: string; sizeBytes: number; at: number } | null
   lastError: string | null
 }
@@ -17,8 +20,11 @@ export function RecorderSection() {
   const [source, setSource] = useState<RecorderSource>("tab")
   const [state, setState] = useState<RecState>({
     active: false,
+    paused: false,
     source: null,
     startedAt: null,
+    elapsedMs: 0,
+    lastResumedAt: null,
     lastSaved: null,
     lastError: null
   })
@@ -58,10 +64,10 @@ export function RecorderSection() {
 
   // Tick for the active duration display.
   useEffect(() => {
-    if (!state.active) return
+    if (!state.active || state.paused) return
     const i = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(i)
-  }, [state.active])
+  }, [state.active, state.paused])
 
   const handleStart = () => {
     chrome.runtime.sendMessage(
@@ -78,7 +84,15 @@ export function RecorderSection() {
     chrome.runtime.sendMessage({ type: "STOP_RECORDING" })
   }
 
-  const elapsedMs = state.active && state.startedAt ? now - state.startedAt : 0
+  const handlePause = () => {
+    chrome.runtime.sendMessage({ type: "PAUSE_RECORDING" })
+  }
+
+  const handleResume = () => {
+    chrome.runtime.sendMessage({ type: "RESUME_RECORDING" })
+  }
+
+  const elapsedMs = elapsedRecordingMs(state, now)
 
   return (
     <div className="flex flex-col h-full p-4 gap-4 text-fg">
@@ -114,16 +128,24 @@ export function RecorderSection() {
             Start recording
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={handleStop}
-            className="px-3 py-2 rounded bg-fg text-bg text-sm font-medium hover:opacity-90">
-            Stop ({formatDuration(elapsedMs)})
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={state.paused ? handleResume : handlePause}
+              className="px-3 py-2 rounded border border-fg/20 text-fg text-sm font-medium hover:bg-fg/10">
+              {state.paused ? "Resume" : "Pause"}
+            </button>
+            <button
+              type="button"
+              onClick={handleStop}
+              className="px-3 py-2 rounded bg-fg text-bg text-sm font-medium hover:opacity-90">
+              Stop ({formatDuration(elapsedMs)})
+            </button>
+          </>
         )}
         {state.active && (
           <span className="text-xs text-fg/60">
-            recording {state.source}…
+            {state.paused ? "paused" : `recording ${state.source}...`}
           </span>
         )}
       </div>
@@ -165,6 +187,12 @@ export function RecorderSection() {
       </div>
     </div>
   )
+}
+
+function elapsedRecordingMs(state: RecState, now: number): number {
+  if (!state.active) return state.elapsedMs || 0
+  if (state.paused || !state.lastResumedAt) return state.elapsedMs || 0
+  return (state.elapsedMs || 0) + Math.max(0, now - state.lastResumedAt)
 }
 
 function formatDuration(ms: number): string {

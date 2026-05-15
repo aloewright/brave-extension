@@ -6,7 +6,7 @@
  * (list/get) are host-side: they read the recordings list directly off the
  * `ai-dev://recordings` resource the extension publishes, and `recorder_get`
  * enriches with a `file://` URI to the mirror copy under
- * ~/.config/ai-dev-sidebar/recordings/{id}.mp4.
+ * ~/.config/ai-dev-sidebar/recordings/{id}.{mp4,mov}.
  */
 
 import { homedir } from "os"
@@ -44,12 +44,18 @@ export const RECORDER_BRIDGED_TOOL_DEFS = [
 
 const RECORDINGS_URI = "ai-dev://recordings"
 
-export function recordingsHostFilePath(id) {
-  return join(homedir(), ".config", "ai-dev-sidebar", "recordings", `${id}.mp4`)
+function recordingExtensionForMetadata(metadata) {
+  const mimeType = String(metadata?.mimeType || "").toLowerCase()
+  return mimeType.includes("quicktime") || mimeType.includes("mov") ? "mov" : "mp4"
 }
 
-export function recordingsHostFileUri(id) {
-  return `file://${recordingsHostFilePath(id)}`
+export function recordingsHostFilePath(id, metadata) {
+  const extension = recordingExtensionForMetadata(metadata)
+  return join(homedir(), ".config", "ai-dev-sidebar", "recordings", `${id}.${extension}`)
+}
+
+export function recordingsHostFileUri(id, metadata) {
+  return `file://${recordingsHostFilePath(id, metadata)}`
 }
 
 function getRecordingsList(server) {
@@ -121,7 +127,7 @@ export function buildRecorderHostTools(server) {
         if (!meta) {
           return { isError: true, content: [{ type: "text", text: `no recording ${id}` }] }
         }
-        const fileUri = recordingsHostFileUri(id)
+        const fileUri = recordingsHostFileUri(id, meta)
         return {
           content: [
             { type: "text", text: JSON.stringify({ metadata: meta, fileUri }, null, 2) }

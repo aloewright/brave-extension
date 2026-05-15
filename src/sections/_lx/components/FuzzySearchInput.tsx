@@ -70,7 +70,7 @@ export function FuzzySearchInput({ value, onChange, suggestions, placeholder, cl
   }
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 flex-1">
       <input
         ref={inputRef}
         type="text"

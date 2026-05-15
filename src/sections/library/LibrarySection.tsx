@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { LeoTabButton } from "../../components/leo"
 import { useLinks, useSettings as useLxSettings } from "../_lx/hooks/useStorage"
 import { LinksSection as LxLinksSection } from "../_lx/components/LinksSection"
 import { CaptureSection as LxCaptureSection } from "../_lx/components/CaptureSection"
@@ -19,14 +20,12 @@ export function LibrarySection() {
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex border-b border-border px-2 gap-1">
         {TABS.map((t) => (
-          <button
+          <LeoTabButton
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-xs transition-colors ${
-              tab === t.id ? "text-fg border-b-2 border-primary -mb-px" : "text-fg/40 hover:text-fg"
-            }`}>
+            active={tab === t.id}>
             {t.label}
-          </button>
+          </LeoTabButton>
         ))}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
