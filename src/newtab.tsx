@@ -23,7 +23,7 @@ function NewTabWorkspace() {
               key={app.url}
               className="workspace-app-card"
               href={app.url}
-              aria-label={`Open ${app.name}`}
+              aria-label={app.name}
               style={{ "--workspace-app-accent": app.accent } as CSSProperties}
             >
               <span className="workspace-app-card__mark" aria-hidden="true">
@@ -33,7 +33,6 @@ function NewTabWorkspace() {
                 <span className="workspace-app-card__name">{app.name}</span>
                 <span className="workspace-app-card__domain">{companyNameForDomain(app.domain)}</span>
               </span>
-              <span className="workspace-app-card__action">Open</span>
             </a>
           ))}
         </section>
