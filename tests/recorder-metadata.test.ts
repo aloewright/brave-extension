@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import {
   chunkBase64,
   joinChunks,
@@ -15,7 +15,7 @@ import {
   mirrorFinish
 } from "../native-host/recorder-mirror.mjs"
 import { handleMirrorMessage } from "../src/background/recorder"
-import { streamBlobToMirror } from "../src/tabs/offscreen"
+import { chooseRecorderMimeType, streamBlobToMirror } from "../src/tabs/offscreen"
 
 describe("chunkBase64 / joinChunks", () => {
   it("returns [] for empty input", () => {
@@ -56,39 +56,36 @@ describe("chunkBase64 / joinChunks", () => {
   })
 })
 
-describe("recorder mp4 fail-fast check", () => {
-  beforeEach(() => {
-    // Reset MediaRecorder global per test.
-    delete (globalThis as any).MediaRecorder
+describe("recorder mime selection", () => {
+  it("prefers MP4 when MP4 and MOV are both supported", () => {
+    const selected = chooseRecorderMimeType((mimeType) =>
+      mimeType === "video/mp4" || mimeType === "video/quicktime"
+    )
+    expect(selected).toMatch(/^video\/mp4/)
   })
 
-  it("returns the right error when mp4 is unsupported", () => {
-    ;(globalThis as any).MediaRecorder = {
-      isTypeSupported: (m: string) => false
-    }
-    const errors: { type: string; error: string }[] = []
-    function check() {
-      if (!(globalThis as any).MediaRecorder.isTypeSupported("video/mp4;codecs=h264")) {
-        errors.push({
-          type: "RECORDER_ERROR",
-          error: "mp4 codec (h264) not supported by this browser"
-        })
-        return false
-      }
-      return true
-    }
-    expect(check()).toBe(false)
-    expect(errors).toHaveLength(1)
-    expect(errors[0].error).toMatch(/mp4 codec.*not supported/i)
+  it("uses MOV when MP4 is unsupported and MOV is available", () => {
+    const selected = chooseRecorderMimeType((mimeType) =>
+      mimeType === "video/quicktime"
+    )
+    expect(selected).toBe("video/quicktime")
   })
 
-  it("passes when mp4 is supported", () => {
-    ;(globalThis as any).MediaRecorder = {
-      isTypeSupported: (m: string) => m === "video/mp4;codecs=h264"
-    }
+  it("can still use MP4 when that is the supported browser format", () => {
+    const selected = chooseRecorderMimeType((mimeType) =>
+      mimeType === "video/mp4;codecs=h264"
+    )
+    expect(selected).toBe("video/mp4;codecs=h264")
+  })
+
+  it("does not fall back to WebM", () => {
     expect(
-      (globalThis as any).MediaRecorder.isTypeSupported("video/mp4;codecs=h264")
-    ).toBe(true)
+      chooseRecorderMimeType((mimeType) => mimeType === "video/webm")
+    ).toBeUndefined()
+  })
+
+  it("does not fall back to MediaRecorder defaults when no preferred MIME matches", () => {
+    expect(chooseRecorderMimeType(() => false)).toBeUndefined()
   })
 })
 
@@ -180,7 +177,10 @@ describe("chunked mirror routing (offscreen → background → native)", () => {
   it("forwards RECORDER_MIRROR_* messages to the recorder.mirror.* protocol", () => {
     const sent: any[] = []
     const ctx = { sendNative: (m: unknown) => sent.push(m) }
-    handleMirrorMessage({ type: "RECORDER_MIRROR_START", id: "abc" }, ctx)
+    handleMirrorMessage(
+      { type: "RECORDER_MIRROR_START", id: "abc", mimeType: "video/mp4" },
+      ctx
+    )
     handleMirrorMessage(
       { type: "RECORDER_MIRROR_CHUNK", id: "abc", base64: "AAAA" },
       ctx
@@ -191,11 +191,27 @@ describe("chunked mirror routing (offscreen → background → native)", () => {
     )
     handleMirrorMessage({ type: "RECORDER_MIRROR_FINISH", id: "abc" }, ctx)
     expect(sent).toEqual([
-      { type: "recorder.mirror.start", id: "abc" },
+      {
+        type: "recorder.mirror.start",
+        id: "abc",
+        mimeType: "video/mp4",
+        extension: "mp4"
+      },
       { type: "recorder.mirror.chunk", id: "abc", base64: "AAAA" },
       { type: "recorder.mirror.chunk", id: "abc", base64: "BBBB" },
       { type: "recorder.mirror.finish", id: "abc" }
     ])
+  })
+
+  it("refuses unsupported mirror containers", () => {
+    const sent: any[] = []
+    const ctx = { sendNative: (m: unknown) => sent.push(m) }
+    const handled = handleMirrorMessage(
+      { type: "RECORDER_MIRROR_START", id: "abc", mimeType: "video/webm" },
+      ctx
+    )
+    expect(handled).toBe(false)
+    expect(sent).toEqual([])
   })
 
   it("end-to-end: offscreen streams a blob in chunks, native handlers reassemble it byte-for-byte", async () => {
@@ -211,7 +227,11 @@ describe("chunked mirror routing (offscreen → background → native)", () => {
     // Offscreen → SW: streamBlobToMirror sends RECORDER_MIRROR_* messages.
     await streamBlobToMirror(blob, id, (m) => captured.push(m), 256 * 1024)
 
-    expect(captured[0]).toEqual({ type: "RECORDER_MIRROR_START", id })
+    expect(captured[0]).toEqual({
+      type: "RECORDER_MIRROR_START",
+      id,
+      mimeType: "video/mp4"
+    })
     expect(captured[captured.length - 1]).toEqual({
       type: "RECORDER_MIRROR_FINISH",
       id
@@ -224,7 +244,7 @@ describe("chunked mirror routing (offscreen → background → native)", () => {
     // SW → native: handleMirrorMessage translates each one. Pipe straight
     // into the native handlers so we test the full pipeline.
     for (const m of captured) {
-      if (m.type === "RECORDER_MIRROR_START") mirrorStart(m.id)
+      if (m.type === "RECORDER_MIRROR_START") mirrorStart(m.id, "mp4")
       else if (m.type === "RECORDER_MIRROR_CHUNK") mirrorChunk(m.id, m.base64)
       else if (m.type === "RECORDER_MIRROR_FINISH") {
         const res: any = await mirrorFinish(m.id)
@@ -276,12 +296,15 @@ describe("handleRecorderStopped — no SW-side base64 buffering", () => {
           source: "tab",
           durationMs: 1234,
           sizeBytes: 9999,
+          mimeType: "video/mp4",
           blobUrl: "blob:fake-url"
         },
         { sendNative: () => {} }
       )
 
       expect(result?.id).toBe("01HSTOPPED")
+      expect(result?.mimeType).toBe("video/mp4")
+      expect(result?.filename).toMatch(/\.mp4$/)
       expect(result?.sizeBytes).toBe(9999)
       expect(dlCalls).toHaveLength(1)
       expect(dlCalls[0].url).toBe("blob:fake-url")

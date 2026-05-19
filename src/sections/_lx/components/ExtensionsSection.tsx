@@ -1,4 +1,12 @@
 import { useState } from "react"
+import {
+  LeoBadge,
+  LeoButton,
+  LeoIcon,
+  LeoIconButton,
+  LeoSwitch,
+  cx
+} from "../../../components/leo"
 import type { ExtensionInfo, Settings } from "../types"
 import { FuzzySearchInput } from "./FuzzySearchInput"
 import { fuzzySearch } from "../utils/fuzzy"
@@ -162,9 +170,11 @@ export function ExtensionsSection({
                 key={ext.id}
                 onClick={() => ext.mayDisable && onToggle(ext.id, !ext.enabled)}
                 title={`${ext.name} — ${ext.enabled ? "enabled (click to disable)" : "disabled (click to enable)"}`}
-                className={`relative flex-shrink-0 p-1 rounded transition-opacity ${
-                  ext.enabled ? "opacity-100" : "opacity-40 hover:opacity-70"
-                } ${ext.mayDisable ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                className={cx(
+                  "relative flex-shrink-0 p-1 rounded-md transition-opacity",
+                  ext.enabled ? "opacity-100" : "opacity-40 hover:opacity-70",
+                  ext.mayDisable ? "cursor-pointer" : "cursor-not-allowed"
+                )}>
                 {iconUrl ? (
                   <img src={iconUrl} alt={ext.name} className="w-7 h-7 rounded" />
                 ) : (
@@ -194,37 +204,45 @@ export function ExtensionsSection({
 
       {/* Big quick-actions row — Enable All / Disable All / Lean (matches lean-extensions popup) */}
       <div className="flex gap-2 mb-2">
-        <button
+        <LeoButton
           onClick={() => { onToggleAll(true, settings.alwaysEnabled); onUpdateSettings({ leanMode: false }) }}
-          className="flex-1 text-xs py-2 px-3 rounded bg-accent hover:bg-accent/80 text-fg transition-colors">
+          className="flex-1"
+          size="md">
           Enable All
-        </button>
-        <button
+        </LeoButton>
+        <LeoButton
           onClick={() => onToggleAll(false, settings.alwaysEnabled)}
-          className="flex-1 text-xs py-2 px-3 rounded bg-accent hover:bg-accent/80 text-fg transition-colors">
+          className="flex-1"
+          size="md">
           Disable All
-        </button>
-        <button
+        </LeoButton>
+        <LeoButton
           onClick={() => onUpdateSettings({ leanMode: !settings.leanMode })}
           title={settings.leanMode ? "Show all extensions" : "Show only Lean list"}
-          className={`text-xs py-2 px-4 rounded whitespace-nowrap transition-colors ${
-            settings.leanMode
-              ? "bg-rose-500/30 text-rose-200 ring-1 ring-rose-400/40"
-              : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
-          }`}>
+          active={settings.leanMode}
+          className={settings.leanMode ? "" : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"}
+          size="md"
+          variant="danger">
           Lean
-        </button>
+        </LeoButton>
       </div>
 
       {/* Secondary actions — select / export */}
       <div className="flex gap-1.5 mb-3">
-        <button onClick={() => { setSelectMode(!selectMode); setSelected(new Set()) }}
-          className={`text-[11px] py-1 px-2 rounded transition-colors ${selectMode ? "bg-destructive/20 text-destructive" : "bg-accent/60 hover:bg-accent"}`}>
+        <LeoButton
+          onClick={() => { setSelectMode(!selectMode); setSelected(new Set()) }}
+          active={selectMode}
+          size="xs"
+          variant={selectMode ? "danger" : "neutral"}>
           {selectMode ? "Cancel" : "Select"}
-        </button>
+        </LeoButton>
         <div className="flex-1" />
-        <button onClick={() => exportAs("json")} title="Export as JSON" className="text-[11px] py-1 px-2 rounded bg-accent/60 hover:bg-accent transition-colors">JSON</button>
-        <button onClick={() => exportAs("csv")} title="Export as CSV" className="text-[11px] py-1 px-2 rounded bg-accent/60 hover:bg-accent transition-colors">CSV</button>
+        <LeoButton onClick={() => exportAs("json")} title="Export as JSON" size="xs">
+          JSON
+        </LeoButton>
+        <LeoButton onClick={() => exportAs("csv")} title="Export as CSV" size="xs">
+          CSV
+        </LeoButton>
       </div>
 
       <div className="flex gap-1.5 mb-2">
@@ -235,28 +253,30 @@ export function ExtensionsSection({
           placeholder="Search…"
           className="flex-1 text-xs py-1.5 px-2.5 rounded bg-card border border-border text-fg placeholder-fg/30 outline-none focus:border-primary/50 transition-colors"
         />
-        <button
+        <LeoButton
           onClick={() => {
             const q = search || ""
             chrome.tabs.create({ url: `https://chromewebstore.google.com/search/${encodeURIComponent(q)}` })
           }}
           title="Search the Chrome Web Store"
-          className="text-[11px] py-1.5 px-2 rounded bg-success/15 text-success hover:bg-success/25 transition-colors whitespace-nowrap">
-          Store ↗
-        </button>
+          size="sm"
+          variant="success">
+          Store <LeoIcon name="file-export" size={12} />
+        </LeoButton>
       </div>
 
       {/* Filter chips — horizontally scrollable */}
       <div className="flex gap-1 mb-1.5 overflow-x-auto -mx-1 px-1 pb-0.5">
         {(["all", "enabled", "disabled", "pinned", "lean", "dev"] as FilterBy[]).map((f) => (
-          <button
+          <LeoButton
             key={f}
             onClick={() => setFilterBy(f)}
-            className={`text-[11px] py-0.5 px-2 rounded capitalize whitespace-nowrap transition-colors ${
-              filterBy === f ? "bg-success/20 text-success" : "bg-accent/50 text-fg/40 hover:text-fg/60"
-            }`}>
+            active={filterBy === f}
+            className="capitalize"
+            size="xs"
+            variant={filterBy === f ? "success" : "neutral"}>
             {f}
-          </button>
+          </LeoButton>
         ))}
       </div>
 
@@ -264,14 +284,15 @@ export function ExtensionsSection({
       <div className="flex items-center gap-1 mb-3">
         <span className="text-[10px] text-fg/30">Sort:</span>
         {(["name", "enabled", "type", "recent"] as SortBy[]).map((s) => (
-          <button
+          <LeoButton
             key={s}
             onClick={() => setSortBy(s)}
-            className={`text-[11px] py-0.5 px-1.5 rounded capitalize transition-colors ${
-              sortBy === s ? "bg-accent text-fg" : "text-fg/30 hover:text-fg/50"
-            }`}>
+            active={sortBy === s}
+            className="capitalize"
+            size="xs"
+            variant="ghost">
             {s}
-          </button>
+          </LeoButton>
         ))}
       </div>
 
@@ -284,14 +305,17 @@ export function ExtensionsSection({
             onChange={(e) => e.target.checked ? selectAll() : setSelected(new Set())}
             className="accent-success"
           />
-          <span className="text-[11px] text-fg/50">{selected.size} selected</span>
+          <LeoBadge>{selected.size} selected</LeoBadge>
           <div className="flex-1" />
-          <button onClick={selectAll} className="text-[11px] py-0.5 px-2 rounded bg-accent hover:bg-accent/80 text-fg/60 transition-colors">All</button>
-          <button onClick={() => setSelected(new Set())} className="text-[11px] py-0.5 px-2 rounded bg-accent hover:bg-accent/80 text-fg/60 transition-colors">None</button>
-          <button onClick={deleteSelected} disabled={selected.size === 0 || deleting}
-            className="text-[11px] py-0.5 px-2 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 disabled:opacity-30 transition-colors">
+          <LeoButton onClick={selectAll} size="xs">All</LeoButton>
+          <LeoButton onClick={() => setSelected(new Set())} size="xs">None</LeoButton>
+          <LeoButton
+            onClick={deleteSelected}
+            disabled={selected.size === 0 || deleting}
+            size="xs"
+            variant="danger">
             {deleting ? `Uninstalling (${selected.size})…` : `Uninstall (${selected.size})`}
-          </button>
+          </LeoButton>
         </div>
       )}
 
@@ -336,7 +360,7 @@ export function ExtensionsSection({
                   <p className="text-[10px] text-fg/30 break-words">{ext.description || `v${ext.version}`}</p>
                 </div>
                 {/* Action buttons — pinned/lean stay visible if active; others reveal on hover */}
-                <button
+                <LeoIconButton
                   onClick={() => {
                     const next = isPinned
                       ? settings.alwaysEnabled.filter((id) => id !== ext.id)
@@ -344,12 +368,14 @@ export function ExtensionsSection({
                     onUpdateSettings({ alwaysEnabled: next })
                   }}
                   title={isPinned ? "Unpin app" : "Pin app (always enabled)"}
-                  className={`p-1 rounded flex-shrink-0 ${isPinned ? "text-warning" : "text-fg/30 hover:text-fg/60"}`}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                    <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2l1-7z" />
-                  </svg>
-                </button>
-                <button
+                  aria-label={isPinned ? "Unpin app" : "Pin app"}
+                  active={isPinned}
+                  className="flex-shrink-0"
+                  icon="pin"
+                  iconSize={12}
+                  variant={isPinned ? "warning" : "ghost"}
+                />
+                <LeoIconButton
                   onClick={() => {
                     const next = isLean
                       ? settings.leanExtensionIds.filter((id) => id !== ext.id)
@@ -357,34 +383,41 @@ export function ExtensionsSection({
                     onUpdateSettings({ leanExtensionIds: next })
                   }}
                   title={isLean ? "Remove from Lean list" : "Add to Lean list"}
-                  className={`p-1 rounded flex-shrink-0 ${isLean ? "text-success" : "text-fg/30 hover:text-success"}`}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill={isLean ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                  </svg>
-                </button>
-                <button
+                  aria-label={isLean ? "Remove from Lean list" : "Add to Lean list"}
+                  active={isLean}
+                  className="flex-shrink-0"
+                  icon="star-outline"
+                  iconSize={12}
+                  variant={isLean ? "success" : "ghost"}
+                />
+                <LeoIconButton
                   onClick={() => {
                     const crxUrl = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0&acceptformat=crx2,crx3&x=id%3D${ext.id}%26uc`
                     chrome.tabs.create({ url: `https://www.virustotal.com/gui/search/${encodeURIComponent(crxUrl)}` })
                   }}
                   title="Scan with VirusTotal"
-                  className="p-1 rounded flex-shrink-0 text-fg/30 hover:text-info">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                </button>
-                <button
+                  aria-label="Scan with VirusTotal"
+                  className="flex-shrink-0 text-fg/30 hover:text-info"
+                  icon="shield"
+                  iconSize={12}
+                  variant="ghost"
+                />
+                <LeoIconButton
                   onClick={() => { if (confirm(`Uninstall ${ext.name}?`)) onUninstall(ext.id) }}
                   title="Uninstall"
-                  className="p-1 rounded flex-shrink-0 text-fg/30 hover:text-destructive">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                </button>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 ml-0.5">
-                  <input type="checkbox" checked={ext.enabled} onChange={() => onToggle(ext.id, !ext.enabled)} disabled={!ext.mayDisable} className="sr-only peer" />
-                  <div className="w-10 h-[22px] bg-secondary rounded-full transition-colors peer peer-checked:bg-sky-500/70 peer-disabled:opacity-30 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-[18px] after:w-[18px] after:shadow-md after:transition-all peer-checked:after:translate-x-[18px]" />
-                </label>
+                  aria-label={`Uninstall ${ext.name}`}
+                  className="flex-shrink-0 text-fg/30 hover:bg-destructive/10 hover:text-destructive"
+                  icon="trash"
+                  iconSize={12}
+                  variant="ghost"
+                />
+                <LeoSwitch
+                  aria-label={ext.enabled ? `Disable ${ext.name}` : `Enable ${ext.name}`}
+                  checked={ext.enabled}
+                  disabled={!ext.mayDisable}
+                  onChange={() => onToggle(ext.id, !ext.enabled)}
+                  className="flex-shrink-0 ml-0.5"
+                />
               </div>
             )
           })}

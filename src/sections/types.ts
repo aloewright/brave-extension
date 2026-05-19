@@ -5,6 +5,7 @@ export type SectionId =
   | "library"
   | "cookies"
   | "recorder"
+  | "eyedropper"
   | "settings"
 
 export interface SectionDef {
@@ -20,5 +21,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "library", label: "Library" },
   { id: "cookies", label: "Cookies" },
   { id: "recorder", label: "Recorder" },
+  { id: "eyedropper", label: "Eyedropper" },
   { id: "settings", label: "Settings" }
 ]

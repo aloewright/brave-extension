@@ -11,12 +11,15 @@ import {
   recorderState,
   startRecording as startRecorderM6,
   stopRecording as stopRecorderM6,
+  pauseRecording as pauseRecorderM6,
+  resumeRecording as resumeRecorderM6,
   handleRecorderStopped,
   handleRecorderError,
   handleRecorderReady,
   handleMirrorMessage,
   notifyRecorderStarted,
-  notifyRecorderFinalized
+  notifyRecorderFinalized,
+  updateRecorderAction
 } from "./background/recorder"
 import { RECORDER_TOOL_HANDLERS } from "./background/recorder-tools"
 import {
@@ -24,6 +27,11 @@ import {
   handleConsentResponse,
   type ConsentResponseMessage
 } from "./background/consent"
+import {
+  ensureThirdPartyCookieRules,
+  handleThirdPartyCookieMessage,
+  isThirdPartyCookieMessage
+} from "./background/third-party-cookies"
 import type { PickerCapture, PickerMessage, Reference, RecorderSource } from "./types"
 
 const HOST_NAME = "com.aidev.sidebar"
@@ -35,6 +43,10 @@ const pendingCallbacks = new Map<string, (msg: any) => void>()
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(`[ai-dev-sidebar] ${message}`, err instanceof Error ? err.message : err ?? "")
 }
+
+void ensureThirdPartyCookieRules().catch((err) => {
+  safeRuntimeWarning("failed to initialize third-party cookie rules", err)
+})
 
 // PTY sessions currently live in the native host. Tracked here so the
 // heartbeat keeps the host alive (and therefore the user's shells / dev
@@ -208,6 +220,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return
   }
 
+  if (isThirdPartyCookieMessage(message)) {
+    handleThirdPartyCookieMessage(message)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err)
+      }))
+    return true
+  }
+
   if (message.type === "NATIVE_SEND") {
     sendToNative(message.payload)
     sendResponse({ ok: true })
@@ -246,7 +268,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "STOP_RECORDING") {
-    stopRecorderM6().then((result) => sendResponse(result))
+    stopRecorderM6().then((result) => {
+      broadcastRecordingState()
+      sendResponse(result)
+    })
+    return true
+  }
+
+  if (message.type === "PAUSE_RECORDING") {
+    pauseRecorderM6().then((result) => {
+      broadcastRecordingState()
+      sendResponse(result)
+    })
+    return true
+  }
+
+  if (message.type === "RESUME_RECORDING") {
+    resumeRecorderM6().then((result) => {
+      broadcastRecordingState()
+      sendResponse(result)
+    })
     return true
   }
 
@@ -263,6 +304,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "RECORDER_STARTED") {
     notifyRecorderStarted(message.id)
     broadcastRecordingState()
+  }
+
+  if (message.type === "RECORDER_PAUSED" || message.type === "RECORDER_RESUMED") {
+    broadcastRecordingState()
+  }
+
+  if (message.type === "RECORDER_TICK") {
+    updateRecorderAction()
   }
 
   if (message.type === "RECORDER_STOPPED") {
@@ -589,6 +638,9 @@ chrome.runtime.onStartup.addListener(clearActionPopup)
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
   clearActionPopup()
+  void ensureThirdPartyCookieRules().catch((err) => {
+    safeRuntimeWarning("failed to refresh third-party cookie rules", err)
+  })
   try {
     chrome.contextMenus.create({
       id: "scrape-page",

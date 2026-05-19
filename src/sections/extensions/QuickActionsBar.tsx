@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { LeoButton, LeoIconButton } from "../../components/leo"
 import {
   NetworkButton,
   NetworkPanel,
@@ -134,82 +135,78 @@ export function QuickActionsBar({ onNavigate }: Props) {
           count={info.feeds.length}
           onClick={() => info.toggle("rss")}
         />
-        <button
+        <LeoIconButton
           onClick={() => onNavigate?.("recorder")}
           title="Open recorder"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <circle cx="12" cy="12" r="3" fill="currentColor" />
-          </svg>
-        </button>
-        <button
+          aria-label="Open recorder"
+          className="text-fg/60 hover:text-fg"
+          icon="radio-checked"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoIconButton
           onClick={onPip}
           title="Picture-in-picture"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="4" width="20" height="14" rx="2" />
-            <rect x="13" y="11" width="8" height="6" rx="1" fill="currentColor" />
-          </svg>
-        </button>
-        <button
+          aria-label="Picture-in-picture"
+          className="text-fg/60 hover:text-fg"
+          icon="picture-in-picture"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoButton
           onClick={onAutoToggle}
           title="Auto Picture-in-picture when you switch tabs"
-          className={`px-1.5 py-1 text-[9px] font-mono uppercase tracking-wider rounded transition-colors ${
-            autoPip
-              ? "bg-info/20 text-info ring-1 ring-info/40"
-              : "text-fg/30 hover:text-fg/60 hover:bg-accent"
-          }`}>
+          active={autoPip}
+          className="font-mono text-[9px] uppercase"
+          size="xs"
+          variant={autoPip ? "primary" : "ghost"}>
           Auto
-        </button>
-        <button
+        </LeoButton>
+        <LeoIconButton
           onClick={onSaveLink}
           title="Save link"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-          </svg>
-        </button>
-        <button
+          aria-label="Save link"
+          className="text-fg/60 hover:text-fg"
+          icon="link-normal"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoIconButton
           onClick={onSavePage}
           title="Save page to Library"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-          </svg>
-        </button>
-        <button
+          aria-label="Save page to Library"
+          className="text-fg/60 hover:text-fg"
+          icon="product-bookmarks"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoIconButton
           onClick={onScreenshot}
           title="Screenshot visible area"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-            <circle cx="12" cy="13" r="4" />
-          </svg>
-        </button>
-        <button
+          aria-label="Screenshot visible area"
+          className="text-fg/60 hover:text-fg"
+          icon="screenshot"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoIconButton
           onClick={onPdf}
           title="Save as PDF"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-          </svg>
-        </button>
-        <button
+          aria-label="Save as PDF"
+          className="text-fg/60 hover:text-fg"
+          icon="file-export"
+          iconSize={14}
+          variant="ghost"
+        />
+        <LeoIconButton
           onClick={() => onNavigate?.("library")}
           title="Open Library"
-          className="p-1.5 rounded hover:bg-accent text-fg/60 hover:text-fg transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" />
-            <rect x="14" y="3" width="7" height="7" />
-            <rect x="14" y="14" width="7" height="7" />
-            <rect x="3" y="14" width="7" height="7" />
-          </svg>
-        </button>
+          aria-label="Open Library"
+          className="text-fg/60 hover:text-fg"
+          icon="inbox"
+          iconSize={14}
+          variant="ghost"
+        />
       </div>
 
       {info.activePanel === "network" && (

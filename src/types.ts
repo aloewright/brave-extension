@@ -226,13 +226,45 @@ export interface CachedScan {
 // ── Recorder (M6, ALO-248) ──────────────────────────────────────────────
 
 export type RecorderSource = "tab" | "screen" | "camera"
+export type RecordingMimeType = "video/mp4" | "video/quicktime"
+
+export const RECORDER_MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+  "video/mp4;codecs=avc1.64001F,mp4a.40.2",
+  "video/mp4;codecs=h264,aac",
+  "video/mp4;codecs=h264",
+  "video/mp4",
+  "video/quicktime;codecs=h264,aac",
+  "video/quicktime"
+] as const
+
+export function normalizeRecordingMimeType(mimeType?: string | null): RecordingMimeType {
+  const normalized = mimeType?.toLowerCase() ?? ""
+  return normalized.includes("quicktime") || normalized.includes("mov")
+    ? "video/quicktime"
+    : "video/mp4"
+}
+
+export function isAllowedRecordingMimeType(mimeType?: string | null): boolean {
+  const normalized = mimeType?.toLowerCase() ?? ""
+  return (
+    normalized === "" ||
+    normalized.includes("mp4") ||
+    normalized.includes("quicktime") ||
+    normalized.includes("mov")
+  )
+}
+
+export function recordingExtensionForMimeType(mimeType?: string | null): "mp4" | "mov" {
+  return normalizeRecordingMimeType(mimeType) === "video/quicktime" ? "mov" : "mp4"
+}
 
 export interface RecordingMetadata {
   id: string
   source: RecorderSource
   durationMs: number
   sizeBytes: number
-  mimeType: "video/mp4"
+  mimeType: RecordingMimeType
   /** OS-side filename, e.g. "recording-2026-04-29T12-34-56.mp4". */
   filename: string
   /** ISO timestamp at stop. */
@@ -242,7 +274,6 @@ export interface RecordingMetadata {
 }
 
 export const RECORDER_STORAGE_KEY = "recorder.recordings"
-export const RECORDER_MIME = "video/mp4;codecs=h264"
 
 // ── Element picker (Reference capture) ──────────────────────────────────
 // Separate from the Inspector. The picker captures a single element from

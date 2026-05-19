@@ -8,6 +8,7 @@ import { ExtensionsSection } from "./sections/extensions/ExtensionsSection"
 import { LibrarySection } from "./sections/library/LibrarySection"
 import { CookiesSection } from "./sections/cookies/CookiesSection"
 import { RecorderSection } from "./sections/recorder/RecorderSection"
+import { EyedropperSection } from "./sections/eyedropper/EyedropperSection"
 import { SettingsSection } from "./sections/settings/SettingsSection"
 import { ConsentBanner } from "./components/ConsentBanner"
 
@@ -58,6 +59,7 @@ function SidePanel() {
           {active === "library" && <LibrarySection />}
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}
+          {active === "eyedropper" && <EyedropperSection />}
           {active === "settings" && <SettingsSection />}
         </main>
       </div>

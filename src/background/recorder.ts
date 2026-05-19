@@ -5,7 +5,11 @@
  */
 import {
   RECORDER_STORAGE_KEY,
+  isAllowedRecordingMimeType,
+  normalizeRecordingMimeType,
+  recordingExtensionForMimeType,
   type RecorderSource,
+  type RecordingMimeType,
   type RecordingMetadata
 } from "../types"
 import { ulid } from "../lib/ulid"
@@ -14,8 +18,11 @@ const OFFSCREEN_URL = "tabs/offscreen.html"
 
 export interface RecorderState {
   active: boolean
+  paused: boolean
   source: RecorderSource | null
   startedAt: number | null
+  elapsedMs: number
+  lastResumedAt: number | null
   tabId: number | null
   originUrl: string | null
   lastSaved: { id: string; filename: string; sizeBytes: number; at: number } | null
@@ -24,8 +31,11 @@ export interface RecorderState {
 
 export const recorderState: RecorderState = {
   active: false,
+  paused: false,
   source: null,
   startedAt: null,
+  elapsedMs: 0,
+  lastResumedAt: null,
   tabId: null,
   originUrl: null,
   lastSaved: null,
@@ -43,6 +53,7 @@ type StartWaiter = (id: string) => void
 type StopWaiter = (meta: RecordingMetadata | null) => void
 let startWaiters: StartWaiter[] = []
 let stopWaiters: StopWaiter[] = []
+let actionTicker: ReturnType<typeof setInterval> | null = null
 
 export function registerStartWaiter(w: StartWaiter): () => void {
   startWaiters.push(w)
@@ -100,7 +111,7 @@ async function ensureOffscreen() {
   await (chrome.offscreen as any).createDocument({
     url: OFFSCREEN_URL,
     reasons: ["USER_MEDIA", "DISPLAY_MEDIA"],
-    justification: "Record tab/screen/camera as mp4 video"
+    justification: "Record tab/screen/camera video"
   })
 }
 
@@ -114,14 +125,62 @@ async function closeOffscreen() {
   }
 }
 
-function setBadge(on: boolean) {
-  if (on) {
-    chrome.action.setBadgeText({ text: "●" })
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" })
-    chrome.action.setTitle({ title: "Recording — click to stop" })
-  } else {
-    chrome.action.setBadgeText({ text: "" })
-    chrome.action.setTitle({ title: "AI Dev Sidebar" })
+export function getRecordingElapsedMs(now = Date.now()): number {
+  if (!recorderState.active) return recorderState.elapsedMs
+  if (recorderState.paused || !recorderState.lastResumedAt) {
+    return recorderState.elapsedMs
+  }
+  return (
+    recorderState.elapsedMs +
+    Math.max(0, now - recorderState.lastResumedAt)
+  )
+}
+
+function formatActionDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
+}
+
+function stopActionTicker() {
+  if (!actionTicker) return
+  clearInterval(actionTicker)
+  actionTicker = null
+}
+
+function ensureActionTicker() {
+  if (actionTicker || !recorderState.active) return
+  actionTicker = setInterval(() => updateRecorderAction(), 1000)
+}
+
+export function updateRecorderAction() {
+  try {
+    if (recorderState.active) {
+      const duration = formatActionDuration(getRecordingElapsedMs())
+      const status = recorderState.paused ? "Recording paused" : "Recording"
+      const source = recorderState.source ? ` ${recorderState.source}` : ""
+      chrome.action.setBadgeText({ text: recorderState.paused ? "Ⅱ" : "●" })
+      chrome.action.setBadgeBackgroundColor({
+        color: recorderState.paused ? "#f59e0b" : "#ef4444"
+      })
+      chrome.action.setTitle({
+        title: `${status}${source} • ${duration} • Click for controls`
+      })
+      chrome.action?.setPopup?.({ popup: "popup.html" })
+      ensureActionTicker()
+    } else {
+      stopActionTicker()
+      chrome.action.setBadgeText({ text: "" })
+      chrome.action.setTitle({ title: "AI Dev Sidebar" })
+      chrome.action?.setPopup?.({ popup: "" })
+    }
+  } catch {
+    // Action APIs are unavailable in a few test/browser contexts.
   }
 }
 
@@ -188,23 +247,53 @@ export async function startRecording(opts: {
 
     recorderState.source = opts.source
     recorderState.startedAt = Date.now()
+    recorderState.paused = false
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = recorderState.startedAt
     recorderState.tabId = tabId
     recorderState.originUrl = originUrl
     recorderState.lastError = null
-    setBadge(true)
+    updateRecorderAction()
     return { ok: true, id }
   } catch (err) {
     recorderState.lastError = (err as Error).message
     recorderState.active = false
+    recorderState.paused = false
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = null
     pendingStart = null
-    setBadge(false)
+    updateRecorderAction()
     return { ok: false, error: recorderState.lastError }
   }
 }
 
 export async function stopRecording(): Promise<{ ok: boolean }> {
   if (!recorderState.active) return { ok: false }
+  recorderState.elapsedMs = getRecordingElapsedMs()
+  recorderState.lastResumedAt = null
   chrome.runtime.sendMessage({ type: "RECORDER_STOP" }).catch(() => {})
+  updateRecorderAction()
+  return { ok: true }
+}
+
+export async function pauseRecording(): Promise<{ ok: boolean; error?: string }> {
+  if (!recorderState.active) return { ok: false, error: "Not recording" }
+  if (recorderState.paused) return { ok: true }
+  recorderState.elapsedMs = getRecordingElapsedMs()
+  recorderState.lastResumedAt = null
+  recorderState.paused = true
+  chrome.runtime.sendMessage({ type: "RECORDER_PAUSE" }).catch(() => {})
+  updateRecorderAction()
+  return { ok: true }
+}
+
+export async function resumeRecording(): Promise<{ ok: boolean; error?: string }> {
+  if (!recorderState.active) return { ok: false, error: "Not recording" }
+  if (!recorderState.paused) return { ok: true }
+  recorderState.paused = false
+  recorderState.lastResumedAt = Date.now()
+  chrome.runtime.sendMessage({ type: "RECORDER_RESUME" }).catch(() => {})
+  updateRecorderAction()
   return { ok: true }
 }
 
@@ -254,11 +343,18 @@ async function downloadBlobUrl(url: string, filename: string): Promise<void> {
  * protocol.
  */
 export function handleMirrorMessage(
-  msg: { type: string; id: string; base64?: string },
+  msg: { type: string; id: string; base64?: string; mimeType?: string },
   ctx: { sendNative: (m: unknown) => void }
 ): boolean {
   if (msg.type === "RECORDER_MIRROR_START") {
-    ctx.sendNative({ type: "recorder.mirror.start", id: msg.id })
+    if (!isAllowedRecordingMimeType(msg.mimeType)) return false
+    const mimeType = normalizeRecordingMimeType(msg.mimeType)
+    ctx.sendNative({
+      type: "recorder.mirror.start",
+      id: msg.id,
+      mimeType,
+      extension: recordingExtensionForMimeType(mimeType)
+    })
     return true
   }
   if (msg.type === "RECORDER_MIRROR_CHUNK") {
@@ -287,22 +383,32 @@ export async function handleRecorderStopped(
     source: RecorderSource
     durationMs: number
     sizeBytes: number
+    mimeType?: RecordingMimeType | string
     blobUrl: string
   },
   _ctx: { sendNative: (msg: unknown) => void }
 ): Promise<RecordingMetadata | null> {
   try {
+    if (!isAllowedRecordingMimeType(msg.mimeType)) {
+      throw new Error("Unsupported recording container; expected MP4 or MOV")
+    }
     const createdAt = new Date()
-    const filename = `recording-${isoForFilename(createdAt)}.mp4`
+    const mimeType = normalizeRecordingMimeType(msg.mimeType)
+    const extension = recordingExtensionForMimeType(mimeType)
+    const filename = `recording-${isoForFilename(createdAt)}.${extension}`
 
     await downloadBlobUrl(msg.blobUrl, filename)
+
+    const durationMs = Math.max(0, Math.round(
+      recorderState.active ? getRecordingElapsedMs() : msg.durationMs
+    ))
 
     const meta: RecordingMetadata = {
       id: msg.id,
       source: msg.source,
-      durationMs: msg.durationMs,
+      durationMs,
       sizeBytes: msg.sizeBytes,
-      mimeType: "video/mp4",
+      mimeType,
       filename,
       createdAt: createdAt.toISOString(),
       originUrl: recorderState.originUrl ?? undefined
@@ -328,12 +434,15 @@ export async function handleRecorderStopped(
 
 function resetState() {
   recorderState.active = false
+  recorderState.paused = false
   recorderState.source = null
   recorderState.startedAt = null
+  recorderState.elapsedMs = 0
+  recorderState.lastResumedAt = null
   recorderState.tabId = null
   recorderState.originUrl = null
   recorderState.lastError = null
-  setBadge(false)
+  updateRecorderAction()
   closeOffscreen()
 }
 
@@ -352,4 +461,3 @@ export function handleRecorderReady(sendStart: (msg: unknown) => void) {
   })
   pendingStart = null
 }
-

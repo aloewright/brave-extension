@@ -14,8 +14,8 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
 
 - Playwright end-to-end smoke for the sidepanel (load extension, send a
   message, assert streamed reply).
-- Coverage gate (`@vitest/coverage-v8`) wired into the test script once the
-  suite expands beyond the storage layer.
+- Ratchet the 60%/50% coverage floor onto more of `src/lib/**` and the
+  `_lx` sections as their suites land (ALO-111).
 - MCP transport hardening: reconnect/backoff for HTTP+SSE, auth-refresh
   hooks, per-server health surfacing in the UI.
 - Page-inspection / scraping context cards in the sidepanel so the active
@@ -33,14 +33,13 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
 
 ## Done
 
-- Native-host integration tests covering `exec`, `stream`, `kill`, and
-  `session-status` round-trips against a stub child process
-  (`tests/native-host.integration.test.ts`). Uses
-  `AI_DEV_SIDEBAR_EXEC_OVERRIDE` to swap real CLI binaries for inline
-  `node -e` stubs and `AI_DEV_SIDEBAR_SESSION_STATE_PATH` to keep on-disk
-  session state in a tmpdir.
+- CI hardening (ALO-110 / ALO-111 / ALO-112): the `tests` workflow gained a
+  non-blocking `build` job that runs the full Plasmo production build to
+  catch manifest / bundler regressions; `vitest.config.ts` now enforces a
+  60% line / 50% branch coverage floor (scoped to `src/lib/**` initially),
+  and `pnpm test:coverage` runs the v8 reporter.
 - Vitest unit-test harness landed: `tests/setup.ts` ships an in-memory
   `chrome.storage.local` shim and the storage + types layers have happy-path
   coverage.
-- GitHub Actions `tests` workflow gates `npm test` on every PR and push to
+- GitHub Actions `tests` workflow gates `pnpm test` on every PR and push to
   `main` (Node 22, deps installed with `--ignore-scripts`).

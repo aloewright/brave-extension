@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { LeoIcon, LeoIconButton } from "../../../components/leo"
 
 interface TechInfo {
   name: string
@@ -100,40 +101,48 @@ export function useInfoPanels() {
 
 export function NetworkButton({ active, hasData, onClick }: { active: boolean; hasData: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Network info"
-      className={`p-1.5 rounded transition-colors relative ${active ? "bg-chart-3/20 text-chart-3" : "text-fg/60 hover:text-fg hover:bg-accent"}`}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-    </button>
+    <LeoIconButton
+      active={active}
+      aria-label="Network info"
+      className={active ? "relative text-chart-3" : "relative text-fg/60 hover:text-fg"}
+      icon="globe"
+      iconSize={14}
+      onClick={onClick}
+      title="Network info"
+      variant="ghost"
+    />
   )
 }
 
 export function TechButton({ active, count, onClick }: { active: boolean; count: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Detect technologies"
-      className={`p-1.5 rounded transition-colors relative ${active ? "bg-chart-5/20 text-chart-5" : count > 0 ? "text-chart-5/60 hover:text-chart-5 hover:bg-accent" : "text-fg/60 hover:text-fg hover:bg-accent"}`}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="10" rx="2" />
-        <circle cx="9" cy="16" r="1" fill="currentColor" /><circle cx="15" cy="16" r="1" fill="currentColor" />
-        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-      </svg>
+    <LeoIconButton
+      active={active}
+      aria-label="Detect technologies"
+      className={`relative ${active ? "text-chart-5" : count > 0 ? "text-chart-5/60 hover:text-chart-5" : "text-fg/60 hover:text-fg"}`}
+      icon="browser-extensions"
+      iconSize={14}
+      onClick={onClick}
+      title="Detect technologies"
+      variant="ghost">
       {count > 0 && !active && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-chart-5" />}
-    </button>
+    </LeoIconButton>
   )
 }
 
 export function RssButton({ active, count, onClick }: { active: boolean; count: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} title="RSS feeds"
-      className={`p-1.5 rounded transition-colors relative ${active ? "bg-orange-500/20 text-orange-400" : count > 0 ? "text-orange-400/60 hover:text-orange-400 hover:bg-accent" : "text-fg/60 hover:text-fg hover:bg-accent"}`}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" />
-        <circle cx="5" cy="19" r="1" fill="currentColor" />
-      </svg>
+    <LeoIconButton
+      active={active}
+      aria-label="RSS feeds"
+      className={`relative ${active ? "text-orange-400" : count > 0 ? "text-orange-400/60 hover:text-orange-400" : "text-fg/60 hover:text-fg"}`}
+      icon="rss"
+      iconSize={14}
+      onClick={onClick}
+      title="RSS feeds"
+      variant="ghost">
       {count > 0 && !active && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-orange-400" />}
-    </button>
+    </LeoIconButton>
   )
 }
 
@@ -259,9 +268,7 @@ export function RssPanel({ feeds, onCopy, onSaveFeed }: { feeds: FeedInfo[]; onC
 function CopyBtn({ onClick }: { onClick: () => void }) {
   return (
     <button onClick={onClick} className="text-fg/20 hover:text-fg/50 transition-colors flex-shrink-0">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-      </svg>
+      <LeoIcon name="link-normal" size={10} />
     </button>
   )
 }
