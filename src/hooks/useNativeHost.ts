@@ -18,6 +18,17 @@ interface UseNativeHostOptions {
   onPtyError?: (sessionId: string | undefined, error: string) => void
 }
 
+function parseMcpListPayload(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) return data
+  if (typeof data !== "string") return null
+  try {
+    const parsed = JSON.parse(data || "[]")
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export function useNativeHost(opts: UseNativeHostOptions = {}) {
   const [connected, setConnected] = useState(false)
   const portRef = useRef<chrome.runtime.Port | null>(null)
@@ -89,12 +100,8 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
 
         // mcp responses come back with type "mcp" — payload.data is JSON
         if ((payload as any).type === "mcp") {
-          try {
-            const parsed = JSON.parse((payload as any).data || "[]")
-            if (Array.isArray(parsed)) {
-              optsRef.current.onMcpList?.(parsed)
-            }
-          } catch {}
+          const parsed = parseMcpListPayload((payload as any).data)
+          if (parsed) optsRef.current.onMcpList?.(parsed)
         }
       }
 

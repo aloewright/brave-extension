@@ -222,10 +222,10 @@ export async function deleteBookmark(env: Env, id: string): Promise<void> {
 /** Used by snapshot diff — returns just the columns we need to detect changes. */
 export async function listAllBookmarksDiffShape(
   env: Env
-): Promise<{ id: string; url: string; title: string; chunk_count: number }[]> {
+): Promise<{ id: string; url: string; title: string; category: string; chunk_count: number }[]> {
   const { results } = await env.DB
-    .prepare("SELECT id, url, title, chunk_count FROM bookmarks")
-    .all<{ id: string; url: string; title: string; chunk_count: number }>()
+    .prepare("SELECT id, url, title, category, chunk_count FROM bookmarks")
+    .all<{ id: string; url: string; title: string; category: string; chunk_count: number }>()
   return results ?? []
 }
 
