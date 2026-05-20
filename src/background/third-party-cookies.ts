@@ -27,10 +27,23 @@ function settingPatternForDomain(domain: string) {
   return `*://*.${normalizeHostname(domain)}/*`
 }
 
-function chromeSettingSet<T>(
-  setting: chrome.types.ChromeSetting<T>,
-  details: chrome.types.ChromeSettingSetDetails<T>
-) {
+type ChromeSettingCompat = {
+  set(details: unknown, callback?: () => void): void
+}
+
+type ContentSettingClearable = {
+  clear(details: { scope?: "regular" | "incognito_session_only" }, callback?: () => void): void
+}
+
+type CookieContentSettingDetails = {
+  primaryPattern: string
+  secondaryPattern?: string
+  resourceIdentifier?: unknown
+  scope?: "regular" | "incognito_session_only"
+  setting: "allow" | "block" | "session_only"
+}
+
+function chromeSettingSet(setting: ChromeSettingCompat, details: unknown) {
   return new Promise<void>((resolve, reject) => {
     setting.set(details, () => {
       const err = chrome.runtime.lastError
@@ -40,7 +53,7 @@ function chromeSettingSet<T>(
   })
 }
 
-function contentSettingsClear(setting: chrome.contentSettings.ContentSetting<string>) {
+function contentSettingsClear(setting: ContentSettingClearable) {
   return new Promise<void>((resolve, reject) => {
     setting.clear({}, () => {
       const err = chrome.runtime.lastError
@@ -50,13 +63,13 @@ function contentSettingsClear(setting: chrome.contentSettings.ContentSetting<str
   })
 }
 
-type CookieContentSetting = `${chrome.contentSettings.CookiesContentSetting}`
-
-function contentSettingsSetCookies(
-  details: chrome.contentSettings.ContentSettingSetParams<CookieContentSetting>
-) {
+function contentSettingsSetCookies(details: CookieContentSettingDetails) {
   return new Promise<void>((resolve, reject) => {
-    chrome.contentSettings.cookies.set(details, () => {
+    const setCookies = chrome.contentSettings.cookies.set as (
+      value: CookieContentSettingDetails,
+      callback?: () => void
+    ) => void
+    setCookies(details, () => {
       const err = chrome.runtime.lastError
       if (err) reject(new Error(err.message))
       else resolve()
@@ -139,14 +152,14 @@ export async function ensureThirdPartyCookieRules() {
   const grants = await getThirdPartyCookieGrants()
 
   if (chrome.privacy?.websites?.thirdPartyCookiesAllowed?.set) {
-    await chromeSettingSet(chrome.privacy.websites.thirdPartyCookiesAllowed, {
+    await chromeSettingSet(chrome.privacy.websites.thirdPartyCookiesAllowed as ChromeSettingCompat, {
       value: false,
       scope: "regular"
     })
   }
 
   if (chrome.contentSettings?.cookies?.set) {
-    await contentSettingsClear(chrome.contentSettings.cookies)
+    await contentSettingsClear(chrome.contentSettings.cookies as ContentSettingClearable)
     await Promise.all(grants.slice(0, MAX_ALLOW_RULES).map((grant) =>
       contentSettingsSetCookies({
         primaryPattern: settingPatternForDomain(grant.embeddedDomain),

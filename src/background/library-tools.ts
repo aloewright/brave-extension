@@ -120,7 +120,7 @@ async function bookmarks_remove(args: any): Promise<ToolResult> {
 async function bookmarks_move(args: any): Promise<ToolResult> {
   const id = normalizeBookmarkId(args?.id)
   if (!id) return err("invalid id")
-  const dest: chrome.bookmarks.MoveDestination = {}
+  const dest: { parentId?: string; index?: number } = {}
   if (args?.parentId !== undefined && args?.parentId !== null) {
     const parentId = normalizeBookmarkId(args.parentId)
     if (!parentId) return err("invalid parentId")
