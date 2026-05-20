@@ -6,6 +6,7 @@ import {
 } from "../db"
 import { deleteFor } from "../vectors"
 import { deleteBlob, getBlob, keyFor, putBlob } from "../r2"
+import { kickIngest } from "../workflows/ingest"
 
 const pdfs = new Hono<{ Bindings: Env }>()
 
@@ -69,8 +70,14 @@ pdfs.post("/", async (c) => {
     updated_at: now
   }
   await insertPdf(c.env, row)
+  const workflowId = await kickIngest(c.env, "pdf", meta.id)
+  if (workflowId) {
+    await c.env.DB.prepare("UPDATE pdfs SET workflow_id = ?, updated_at = ? WHERE id = ?")
+      .bind(workflowId, Date.now(), meta.id)
+      .run()
+  }
 
-  return c.json({ id: meta.id, status: "pending" as PdfStatus, r2_key: r2Key }, 201)
+  return c.json({ id: meta.id, status: "pending" as PdfStatus, r2_key: r2Key, workflow_id: workflowId }, 201)
 })
 
 pdfs.get("/", async (c) => {

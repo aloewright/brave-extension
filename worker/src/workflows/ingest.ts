@@ -1,3 +1,4 @@
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import type { Env } from "../env"
 import { transcribeAudio } from "../ai"
 import { extractPdfText } from "../pdf"
@@ -9,6 +10,11 @@ import {
 import { deleteFor, upsertFor } from "../vectors"
 
 export type IngestType = "recording" | "pdf"
+
+export interface IngestParams {
+  type: IngestType
+  id: string
+}
 
 export interface IngestResult {
   status: "ready" | "failed"
@@ -131,4 +137,32 @@ async function extractFor(
   }
   const r = await extractPdfText(env, bytes)
   return { text: r.text, pageCount: r.pageCount }
+}
+
+/**
+ * Cloudflare Workflows entrypoint. Wraps {@link runIngest} in a single
+ * `step.do` so the run is durable and replayable. The Worker exports this
+ * class so the runtime can instantiate it via the [[workflows]] binding.
+ */
+export class IngestWorkflow extends WorkflowEntrypoint<Env, IngestParams> {
+  async run(event: WorkflowEvent<IngestParams>, step: WorkflowStep): Promise<IngestResult> {
+    const { type, id } = event.payload
+    return await step.do(`ingest-${type}-${id}`, async () => {
+      return await runIngest(this.env, type, id)
+    })
+  }
+}
+
+/**
+ * Kick off the ingest workflow if the binding is available. Returns the
+ * workflow instance id, or null when no Workflows binding is present.
+ *
+ * When INGEST is missing (tests, local-dev without the binding), the row
+ * stays `status='pending'` and the caller can trigger work explicitly via
+ * `POST /api/{recordings,pdfs}/:id/reingest`.
+ */
+export async function kickIngest(env: Env, type: IngestType, id: string): Promise<string | null> {
+  if (!env.INGEST) return null
+  const instance = await env.INGEST.create({ params: { type, id } })
+  return instance.id
 }

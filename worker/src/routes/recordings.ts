@@ -6,6 +6,7 @@ import {
 } from "../db"
 import { deleteFor } from "../vectors"
 import { deleteBlob, getBlob, keyFor, putBlob } from "../r2"
+import { kickIngest } from "../workflows/ingest"
 
 const recordings = new Hono<{ Bindings: Env }>()
 
@@ -82,8 +83,14 @@ recordings.post("/", async (c) => {
     updated_at: now
   }
   await insertRecording(c.env, row)
+  const workflowId = await kickIngest(c.env, "recording", meta.id)
+  if (workflowId) {
+    await c.env.DB.prepare("UPDATE recordings SET workflow_id = ?, updated_at = ? WHERE id = ?")
+      .bind(workflowId, Date.now(), meta.id)
+      .run()
+  }
 
-  return c.json({ id: meta.id, status: "pending" as RecordingStatus, r2_key: r2Key }, 201)
+  return c.json({ id: meta.id, status: "pending" as RecordingStatus, r2_key: r2Key, workflow_id: workflowId }, 201)
 })
 
 recordings.get("/", async (c) => {

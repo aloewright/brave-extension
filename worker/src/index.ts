@@ -8,6 +8,9 @@ import pdfs from "./routes/pdfs"
 import search from "./routes/search"
 import type { Env } from "./env"
 
+// Re-exported so the [[workflows]] binding can resolve the class.
+export { IngestWorkflow } from "./workflows/ingest"
+
 const app = new Hono<{ Bindings: Env }>()
 
 app.use("/api/*", requireToken())

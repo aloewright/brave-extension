@@ -33,8 +33,11 @@ describe("/api/pdfs", () => {
     )
     const res = await authed(env, "/api/pdfs", { method: "POST", body })
     expect(res.status).toBe(201)
-    const json = (await res.json()) as { id: string; status: string; r2_key: string }
-    expect(json).toEqual({ id: "pdf1", status: "pending", r2_key: "pdfs/pdf1.pdf" })
+    const json = (await res.json()) as { id: string; status: string; r2_key: string; workflow_id: string | null }
+    expect(json.id).toBe("pdf1")
+    expect(json.status).toBe("pending")
+    expect(json.r2_key).toBe("pdfs/pdf1.pdf")
+    expect(json.workflow_id === null || typeof json.workflow_id === "string").toBe(true)
 
     const row = await getPdf(env, "pdf1")
     expect(row?.status).toBe("pending")
