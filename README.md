@@ -1,6 +1,6 @@
-![brave dev extension](assets/readme-banner.svg)
+![Brave Dev Extension](assets/readme-banner.svg)
 
-# AI Dev Sidebar
+# Brave Dev Extension
 
 [![Tests](https://github.com/aloewright/brave-extension/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/brave-extension/actions/workflows/test.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -8,9 +8,52 @@
 [![Brave](https://img.shields.io/badge/Brave-FB542B?logo=brave&logoColor=white)](https://brave.com/)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/allosaurus)
 
-Sidebar AI chat connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.
+Brave Dev Extension turns Brave's side panel and new tab page into a compact
+developer console. It connects browser context to local AI CLI tools, page
+inspection, recording, bookmarks, history, cookies, and synced resource storage.
 
-Built with [Plasmo](https://www.plasmo.com/) for Chrome.
+Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
+
+## Extension Functionality
+
+- **Sidebar rail:** persistent sections for Terminal, Inspector, Extensions,
+  Library, Bookmarks, Data, Recorder, Eyedropper, and Settings.
+- **Local AI terminal:** native-host backed PTY sessions for CLI tools such as
+  Claude Code, Gemini, Copilot, and Codex. Terminal tabs stay alive while moving
+  around the sidebar.
+- **Page inspection and capture:** scrape the active page, capture selected
+  references, crop screenshots, inspect technologies, discover feeds, and send
+  selections into the side panel.
+- **Cookies and browser data:** inspect site-scoped cookies/cache, use compact
+  expand/collapse controls, apply cookie actions, and manage third-party cookie
+  prompts without exposing extension data to pages.
+- **Recorder:** start browser recording through Brave's native capture prompt,
+  pause/resume/stop recordings, keep recent recording metadata, and mirror
+  completed clips for MCP access.
+- **Bookmarks and history:** pull a local bookmark snapshot into the extension,
+  browse bookmarks alphabetically, by favorites, or by category, and show recent
+  history on the new tab page.
+- **New tab workspace:** Brave Search, ordered app cards for Cloudflare, App
+  Store Connect, Email, daily planner, chat, blog editor, link shortener, and
+  compact utility links, plus open tabs and scrollable history panels.
+- **Resource library:** save links, references, bookmarks, recordings, and PDFs
+  as structured resources that can be searched locally or synced through the
+  worker backend.
+- **Auto picture-in-picture:** detects playable media across tabs and can move
+  eligible video into picture-in-picture based on extension settings.
+
+## Architecture
+
+- **Extension UI:** React + TypeScript side panel, popup, content scripts, and
+  new tab page packaged by Plasmo as a Manifest V3 extension.
+- **Native host:** a Node native-messaging host bridges Brave to local shells,
+  the MCP HTTP/SSE server, recorder mirrors, and local config files.
+- **Worker backend:** the optional `worker/` service stores conversations,
+  links, bookmarks, recordings, PDFs, and vector search metadata using
+  Cloudflare Workers infrastructure.
+- **Privacy boundary:** web pages talk to content scripts only through explicit
+  extension messages. Extension resources, native-host tokens, and stored data
+  stay in extension or native-host storage rather than being exposed to sites.
 
 ## Development
 

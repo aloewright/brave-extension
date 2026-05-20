@@ -9,6 +9,15 @@ beforeAll(() => {
 })
 
 describe("README.md badges", () => {
+  describe("README branding", () => {
+    it("uses the Brave Dev Extension title and intro", () => {
+      expect(readme).toContain("# Brave Dev Extension")
+      expect(readme).toContain(
+        "Brave Dev Extension turns Brave's side panel and new tab page into a compact"
+      )
+    })
+  })
+
   describe("Tests badge (updated in PR)", () => {
     it("badge image points to aloewright/brave-extension", () => {
       expect(readme).toContain(
@@ -119,7 +128,7 @@ describe("README.md badges", () => {
         "[![Tests](https://github.com/aloewright/brave-extension"
       )
       const descriptionIdx = readme.indexOf(
-        "Sidebar AI chat connected to local CLI tools"
+        "Brave Dev Extension turns Brave's side panel and new tab page into a compact"
       )
       expect(testsIdx).toBeGreaterThan(-1)
       expect(testsIdx).toBeLessThan(descriptionIdx)

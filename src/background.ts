@@ -732,12 +732,12 @@ chrome.runtime.onInstalled.addListener(() => {
   try {
     chrome.contextMenus.create({
       id: "scrape-page",
-      title: "Scrape page to AI Dev Sidebar",
+      title: "Scrape page to Brave Dev Extension",
       contexts: ["page"],
     });
     chrome.contextMenus.create({
       id: "send-selection",
-      title: "Send selection to AI Dev",
+      title: "Send selection to Brave Dev",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
