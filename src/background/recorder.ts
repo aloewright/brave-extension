@@ -47,12 +47,9 @@ export const recorderState: RecorderState = {
   lastError: null,
 };
 
-let pendingStart: {
-  source: RecorderSource;
-  streamId?: string;
-  desktopAudio?: boolean;
-  id: string;
-} | null = null;
+let pendingStart:
+  | { source: RecorderSource; streamId?: string; desktopAudio?: boolean; id: string }
+  | null = null
 
 // Awaitable hooks driven by offscreen RECORDER_STARTED / RECORDER_STOPPED
 // messages, so MCP `recorder_start` / `recorder_stop` can resolve only when
@@ -192,48 +189,48 @@ export function updateRecorderAction() {
 }
 
 function shouldFallbackToDisplayCapture(error: unknown): boolean {
-  const message = (error as Error | undefined)?.message ?? "";
+  const message = (error as Error | undefined)?.message ?? ""
   return /activeTab|not been invoked|Chrome pages cannot be captured/i.test(
-    message,
-  );
+    message
+  )
 }
 
 function getTabMediaStreamId(tabId: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (sid) => {
       if (chrome.runtime.lastError || !sid) {
-        reject(new Error(chrome.runtime.lastError?.message || "No stream id"));
+        reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
       } else {
-        resolve(sid);
+        resolve(sid)
       }
-    });
-  });
+    })
+  })
 }
 
 function chooseDesktopMediaStream(): Promise<{
-  streamId: string;
-  canRequestAudioTrack: boolean;
+  streamId: string
+  canRequestAudioTrack: boolean
 }> {
   return new Promise((resolve, reject) => {
     if (!chrome.desktopCapture?.chooseDesktopMedia) {
-      reject(new Error("Desktop capture is unavailable"));
-      return;
+      reject(new Error("Desktop capture is unavailable"))
+      return
     }
 
     chrome.desktopCapture.chooseDesktopMedia(
       ["tab", "window", "screen", "audio"],
       (streamId, options) => {
         if (!streamId) {
-          reject(new Error("Recording cancelled"));
-          return;
+          reject(new Error("Recording cancelled"))
+          return
         }
         resolve({
           streamId,
-          canRequestAudioTrack: !!options?.canRequestAudioTrack,
-        });
-      },
-    );
-  });
+          canRequestAudioTrack: !!options?.canRequestAudioTrack
+        })
+      }
+    )
+  })
 }
 
 export async function startRecording(opts: {
@@ -249,14 +246,14 @@ export async function startRecording(opts: {
   recorderState.active = true;
   pendingStart = { source: opts.source, id };
   try {
-    let source = opts.source;
-    let streamId: string | undefined;
-    let desktopAudio = false;
-    let originUrl: string | null = null;
-    let tabId: number | null = null;
+    let source = opts.source
+    let streamId: string | undefined
+    let desktopAudio = false
+    let originUrl: string | null = null
+    let tabId: number | null = null
 
     if (source === "tab") {
-      let tid = opts.tabId;
+      let tid = opts.tabId
       if (!tid) {
         const [tab] = await chrome.tabs.query({
           active: true,
@@ -278,51 +275,48 @@ export async function startRecording(opts: {
         }
       }
       try {
-        streamId = await getTabMediaStreamId(tid);
-        tabId = tid;
+        streamId = await getTabMediaStreamId(tid)
+        tabId = tid
       } catch (err) {
-        if (!shouldFallbackToDisplayCapture(err)) throw err;
-        // Starting from the side panel does not always carry the transient
-        // activeTab grant needed by chrome.tabCapture. Fall back to Brave's
-        // native picker for tabs, windows, and screens.
-        const selected = await chooseDesktopMediaStream();
-        source = "screen";
-        streamId = selected.streamId;
-        desktopAudio = selected.canRequestAudioTrack;
-        tabId = null;
+        if (!shouldFallbackToDisplayCapture(err)) throw err
+        const selected = await chooseDesktopMediaStream()
+        source = "screen"
+        streamId = selected.streamId
+        desktopAudio = selected.canRequestAudioTrack
+        tabId = null
       }
     }
 
     if (source === "screen" && !streamId) {
-      const selected = await chooseDesktopMediaStream();
-      streamId = selected.streamId;
-      desktopAudio = selected.canRequestAudioTrack;
+      const selected = await chooseDesktopMediaStream()
+      streamId = selected.streamId
+      desktopAudio = selected.canRequestAudioTrack
     }
 
-    pendingStart = { source, streamId, desktopAudio, id };
-    await ensureOffscreen();
+    pendingStart = { source, streamId, desktopAudio, id }
+    await ensureOffscreen()
     chrome.runtime
       .sendMessage({
         type: "RECORDER_START",
         id,
         source,
         streamId,
-        desktopAudio,
+        desktopAudio
       })
       .catch(() => {
         // Offscreen not yet listening; RECORDER_READY handler will retry.
-      });
+      })
 
-    recorderState.source = source;
-    recorderState.startedAt = Date.now();
-    recorderState.paused = false;
-    recorderState.elapsedMs = 0;
-    recorderState.lastResumedAt = recorderState.startedAt;
-    recorderState.tabId = tabId;
-    recorderState.originUrl = originUrl;
-    recorderState.lastError = null;
-    updateRecorderAction();
-    return { ok: true, id };
+    recorderState.source = source
+    recorderState.startedAt = Date.now()
+    recorderState.paused = false
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = recorderState.startedAt
+    recorderState.tabId = tabId
+    recorderState.originUrl = originUrl
+    recorderState.lastError = null
+    updateRecorderAction()
+    return { ok: true, id }
   } catch (err) {
     recorderState.lastError = (err as Error).message;
     recorderState.active = false;
@@ -541,7 +535,7 @@ export function handleRecorderReady(sendStart: (msg: unknown) => void) {
     id: pendingStart.id,
     source: pendingStart.source,
     streamId: pendingStart.streamId,
-    desktopAudio: pendingStart.desktopAudio,
-  });
-  pendingStart = null;
+    desktopAudio: pendingStart.desktopAudio
+  })
+  pendingStart = null
 }

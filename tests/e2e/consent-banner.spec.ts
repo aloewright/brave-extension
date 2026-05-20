@@ -6,7 +6,8 @@ import { test, expect } from "./_fixtures"
  * The real consent FSM lives in the background service worker. This test
  * exercises the sidepanel-side React component (`ConsentBanner` +
  * `useConsentRequests`) by dispatching synthetic `consent:request`
- * messages directly into `chrome.runtime.onMessage`'s listener registry.
+ * messages from the extension service worker, matching the production
+ * background-to-sidepanel path.
  *
  * Allow / Deny click handlers call `chrome.runtime.sendMessage` — that
  * call is best-effort and silently swallowed when the background hasn't
@@ -15,10 +16,12 @@ import { test, expect } from "./_fixtures"
  */
 
 async function dispatchConsentRequest(page: import("@playwright/test").Page, req: object) {
-  await page.evaluate((r) => {
-    // chrome.runtime.onMessage is implemented by Chromium; calling
-    // sendMessage from the page itself fans the message out to all
-    // extension contexts, including the sidepanel React listener.
+  const worker =
+    page.context().serviceWorkers()[0] ??
+    await page.context().waitForEvent("serviceworker", { timeout: 10_000 })
+  await worker.evaluate((r) => {
+    // The real consent request is broadcast by the background service worker;
+    // dispatch from that context so the sidepanel listener receives it.
     chrome.runtime.sendMessage(r)
   }, req)
 }

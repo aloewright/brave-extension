@@ -30,12 +30,12 @@ import {
 import { DEFAULT_CHUNK_BYTES } from "../lib/recorder-chunks";
 
 type StartMsg = {
-  type: "RECORDER_START";
-  id: string;
-  source: RecorderSource;
-  streamId?: string;
-  desktopAudio?: boolean;
-};
+  type: "RECORDER_START"
+  id: string
+  source: RecorderSource
+  streamId?: string
+  desktopAudio?: boolean
+}
 
 type StopMsg = { type: "RECORDER_STOP" };
 type PauseMsg = { type: "RECORDER_PAUSE" };
@@ -111,33 +111,33 @@ async function acquireStream(msg: StartMsg): Promise<MediaStream> {
       const video = {
         mandatory: {
           chromeMediaSource: "desktop",
-          chromeMediaSourceId: msg.streamId,
-        },
-      } as unknown as MediaTrackConstraints;
+          chromeMediaSourceId: msg.streamId
+        }
+      } as unknown as MediaTrackConstraints
       const audio = {
         mandatory: {
           chromeMediaSource: "desktop",
-          chromeMediaSourceId: msg.streamId,
-        },
-      } as unknown as MediaTrackConstraints;
+          chromeMediaSourceId: msg.streamId
+        }
+      } as unknown as MediaTrackConstraints
       if (!msg.desktopAudio) {
         return (await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video,
-        })) as MediaStream;
+          video
+        })) as MediaStream
       }
       return await withOptionalAudio(
         () =>
           navigator.mediaDevices.getUserMedia({
             audio,
-            video,
+            video
           }) as Promise<MediaStream>,
         () =>
           navigator.mediaDevices.getUserMedia({
             audio: false,
-            video,
-          }) as Promise<MediaStream>,
-      );
+            video
+          }) as Promise<MediaStream>
+      )
     }
     return await withOptionalAudio(
       () =>

@@ -179,6 +179,86 @@ describe("native recorder mirror — id sanitization", () => {
   });
 });
 
+describe("recorder start fallback", () => {
+  it("falls back to display capture when tab capture lacks activeTab", async () => {
+    const c: any = (globalThis as any).chrome
+    const sent: any[] = []
+
+    c.tabs = {
+      query: vi.fn(async () => [
+        { id: 42, url: "https://example.com/", windowId: 1 }
+      ])
+    }
+    c.runtime = {
+      ...(c.runtime || {}),
+      lastError: null,
+      getContexts: async () => [],
+      getURL: (path: string) => path,
+      sendMessage: vi.fn(async (message: unknown) => {
+        sent.push(message)
+      })
+    }
+    c.offscreen = {
+      createDocument: vi.fn(async () => {}),
+      closeDocument: vi.fn(async () => {})
+    }
+    c.action = {
+      setBadgeText: vi.fn(),
+      setBadgeBackgroundColor: vi.fn(),
+      setTitle: vi.fn()
+    }
+    c.tabCapture = {
+      getMediaStreamId: vi.fn((_opts: unknown, cb: (sid?: string) => void) => {
+        c.runtime.lastError = {
+          message:
+            "Extension has not been invoked for the current page (see activeTab permission). Chrome pages cannot be captured."
+        }
+        cb()
+        c.runtime.lastError = null
+      })
+    }
+    c.desktopCapture = {
+      chooseDesktopMedia: vi.fn(
+        (
+          sources: string[],
+          cb: (
+            streamId: string,
+            options: { canRequestAudioTrack: boolean }
+          ) => void
+        ) => {
+          cb("desktop-stream-id", { canRequestAudioTrack: true })
+          return 1
+        }
+      )
+    }
+
+    const { handleRecorderError, recorderState, startRecording } =
+      await import("../src/background/recorder")
+
+    try {
+      const result = await startRecording({ source: "tab" })
+
+      expect(result.ok).toBe(true)
+      expect(recorderState.source).toBe("screen")
+      expect(c.desktopCapture.chooseDesktopMedia).toHaveBeenCalledWith(
+        ["tab", "window", "screen", "audio"],
+        expect.any(Function)
+      )
+      expect(c.offscreen.createDocument).toHaveBeenCalled()
+      expect(sent).toContainEqual(
+        expect.objectContaining({
+          type: "RECORDER_START",
+          source: "screen",
+          streamId: "desktop-stream-id",
+          desktopAudio: true
+        })
+      )
+    } finally {
+      handleRecorderError("")
+    }
+  })
+})
+
 describe("chunked mirror routing (offscreen → background → native)", () => {
   it("forwards RECORDER_MIRROR_* messages to the recorder.mirror.* protocol", () => {
     const sent: any[] = [];
