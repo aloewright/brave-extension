@@ -1,9 +1,10 @@
 // Bindings declared in wrangler.toml + the SIDEBAR_TOKEN secret.
-// INGEST + BLOBS + ASSETS are reserved for later phases.
+// INGEST + ASSETS are reserved for later phases.
 export interface Env {
   DB: D1Database
   VECTORS: VectorizeIndex
   AI: Ai
+  BLOBS: R2Bucket
   SIDEBAR_TOKEN: string
 }
 

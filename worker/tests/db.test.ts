@@ -17,7 +17,13 @@ import {
   updateBookmark,
   deleteBookmark,
   listAllBookmarksDiffShape,
-  type BookmarkRow
+  type BookmarkRow,
+  insertRecording,
+  getRecording,
+  listRecordings,
+  updateRecording,
+  deleteRecording,
+  type RecordingRow
 } from "../src/db"
 
 describe("db", () => {
@@ -204,5 +210,77 @@ describe("db - bookmarks", () => {
       category: "Unfiled",
       chunk_count: 2
     })
+  })
+})
+
+describe("db - recordings", () => {
+  let env: Env
+
+  beforeEach(() => {
+    env = makeEnv()
+  })
+
+  function row(id: string, overrides: Partial<RecordingRow> = {}): RecordingRow {
+    return {
+      id,
+      filename: `${id}.mp4`,
+      mime_type: "video/mp4",
+      duration_ms: 1000,
+      size_bytes: 100,
+      source: "screen",
+      origin_url: null,
+      r2_key: `recordings/${id}.mp4`,
+      transcript: null,
+      status: "pending",
+      status_message: null,
+      workflow_id: null,
+      chunk_count: 0,
+      created_at: 1,
+      updated_at: 1,
+      ...overrides
+    }
+  }
+
+  it("inserts and reads a recording", async () => {
+    await insertRecording(env, row("r1"))
+    const got = await getRecording(env, "r1")
+    expect(got?.filename).toBe("r1.mp4")
+    expect(got?.status).toBe("pending")
+  })
+
+  it("lists recordings newest-first", async () => {
+    await insertRecording(env, row("r1", { created_at: 1 }))
+    await insertRecording(env, row("r2", { created_at: 2 }))
+    await insertRecording(env, row("r3", { created_at: 3 }))
+    const rows = await listRecordings(env)
+    expect(rows.map((r) => r.id)).toEqual(["r3", "r2", "r1"])
+  })
+
+  it("filters by status", async () => {
+    await insertRecording(env, row("r1", { status: "pending" }))
+    await insertRecording(env, row("r2", { status: "ready" }))
+    const pending = await listRecordings(env, { status: "pending" })
+    expect(pending.map((r) => r.id)).toEqual(["r1"])
+  })
+
+  it("updates patch fields and bumps updated_at", async () => {
+    await insertRecording(env, row("r1"))
+    await updateRecording(env, "r1", {
+      status: "ready",
+      transcript: "hello",
+      chunk_count: 3,
+      updated_at: 99
+    })
+    const got = await getRecording(env, "r1")
+    expect(got?.status).toBe("ready")
+    expect(got?.transcript).toBe("hello")
+    expect(got?.chunk_count).toBe(3)
+    expect(got?.updated_at).toBe(99)
+  })
+
+  it("deletes a recording", async () => {
+    await insertRecording(env, row("r1"))
+    await deleteRecording(env, "r1")
+    expect(await getRecording(env, "r1")).toBeNull()
   })
 })

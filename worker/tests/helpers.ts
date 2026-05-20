@@ -46,10 +46,12 @@ export function makeEnv(overrides?: Partial<Env>): Env {
   })
 
   const vectorsStore = new Map<string, { values: number[]; metadata: Record<string, unknown> }>()
+  const blobs = makeFakeR2()
 
   return {
     DB: db,
     AI: { run: aiRun } as unknown as Ai,
+    BLOBS: blobs,
     VECTORS: {
       upsert: vi.fn(async (vectors: VectorizeVector[]) => {
         for (const v of vectors)
@@ -77,6 +79,111 @@ export function makeEnv(overrides?: Partial<Env>): Env {
     SIDEBAR_TOKEN: "test-token",
     ...overrides
   }
+}
+
+// ── fake R2 bucket ─────────────────────────────────────────────────────────
+function makeFakeR2(): R2Bucket {
+  const store = new Map<string, { body: Uint8Array; contentType: string; etag: string }>()
+  let counter = 0
+
+  return {
+    async put(
+      key: string,
+      body: ReadableStream<Uint8Array> | ArrayBuffer | ArrayBufferView | Blob | string | null,
+      opts?: R2PutOptions
+    ) {
+      const bytes = await toUint8(body)
+      const etag = `etag-${++counter}`
+      const contentType = opts?.httpMetadata && "contentType" in opts.httpMetadata
+        ? (opts.httpMetadata.contentType ?? "application/octet-stream")
+        : "application/octet-stream"
+      store.set(key, { body: bytes, contentType, etag })
+      return {
+        key,
+        version: "1",
+        size: bytes.byteLength,
+        etag,
+        httpEtag: `"${etag}"`,
+        uploaded: new Date(),
+        httpMetadata: { contentType }
+      } as unknown as R2Object
+    },
+    async get(key: string): Promise<R2ObjectBody | null> {
+      const entry = store.get(key)
+      if (!entry) return null
+      const arr = entry.body
+      return {
+        key,
+        size: arr.byteLength,
+        etag: entry.etag,
+        httpEtag: `"${entry.etag}"`,
+        uploaded: new Date(),
+        httpMetadata: { contentType: entry.contentType },
+        body: new ReadableStream({
+          start(ctrl) {
+            ctrl.enqueue(arr)
+            ctrl.close()
+          }
+        }),
+        async arrayBuffer() {
+          const buf = new ArrayBuffer(arr.byteLength)
+          new Uint8Array(buf).set(arr)
+          return buf
+        },
+        async text() {
+          return new TextDecoder().decode(arr)
+        },
+        async json<T>() {
+          return JSON.parse(new TextDecoder().decode(arr)) as T
+        },
+        async blob() {
+          return new Blob(
+            [arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer],
+            { type: entry.contentType }
+          )
+        },
+        writeHttpMetadata() {},
+        bodyUsed: false
+      } as unknown as R2ObjectBody
+    },
+    async delete(key: string) {
+      store.delete(key)
+    },
+    async head(key: string) {
+      const e = store.get(key)
+      return e ? ({ key, size: e.body.byteLength, etag: e.etag } as unknown as R2Object) : null
+    }
+  } as unknown as R2Bucket
+}
+
+async function toUint8(
+  body: ReadableStream<Uint8Array> | ArrayBuffer | ArrayBufferView | Blob | string | null
+): Promise<Uint8Array> {
+  if (!body) return new Uint8Array(0)
+  if (typeof body === "string") return new TextEncoder().encode(body)
+  if (body instanceof Uint8Array) return body
+  if (body instanceof ArrayBuffer) return new Uint8Array(body)
+  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer())
+  // ReadableStream
+  const reader = (body as ReadableStream<Uint8Array>).getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    if (value) {
+      chunks.push(value)
+      total += value.byteLength
+    }
+  }
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) {
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return out
 }
 
 /** Kept for plan compatibility — makeEnv applies migrations itself. */

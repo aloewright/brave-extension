@@ -228,3 +228,190 @@ export async function listAllBookmarksDiffShape(
     .all<{ id: string; url: string; title: string; category: string; chunk_count: number }>()
   return results ?? []
 }
+
+// ── Recording queries ──────────────────────────────────────────────────────
+export type RecordingStatus = "pending" | "transcribing" | "embedding" | "ready" | "failed"
+
+export interface RecordingRow {
+  id: string
+  filename: string
+  mime_type: string
+  duration_ms: number
+  size_bytes: number
+  source: string                // 'tab'|'screen'|'camera'
+  origin_url: string | null
+  r2_key: string
+  transcript: string | null
+  status: RecordingStatus
+  status_message: string | null
+  workflow_id: string | null
+  chunk_count: number
+  created_at: number
+  updated_at: number
+}
+
+export async function insertRecording(env: Env, row: RecordingRow): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO recordings
+       (id, filename, mime_type, duration_ms, size_bytes, source, origin_url,
+        r2_key, transcript, status, status_message, workflow_id, chunk_count,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      row.id, row.filename, row.mime_type, row.duration_ms, row.size_bytes,
+      row.source, row.origin_url, row.r2_key, row.transcript, row.status,
+      row.status_message, row.workflow_id, row.chunk_count,
+      row.created_at, row.updated_at
+    )
+    .run()
+}
+
+export async function getRecording(env: Env, id: string): Promise<RecordingRow | null> {
+  return (await env.DB.prepare("SELECT * FROM recordings WHERE id = ?").bind(id).first<RecordingRow>()) ?? null
+}
+
+export async function listRecordings(
+  env: Env,
+  opts: { status?: RecordingStatus; limit?: number; before?: number } = {}
+): Promise<RecordingRow[]> {
+  const limit = Math.min(opts.limit ?? 50, 200)
+  const where: string[] = []
+  const binds: (string | number)[] = []
+  if (opts.status) {
+    where.push("status = ?")
+    binds.push(opts.status)
+  }
+  if (opts.before) {
+    where.push("created_at < ?")
+    binds.push(opts.before)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const stmt = env.DB.prepare(
+    `SELECT * FROM recordings ${whereSql} ORDER BY created_at DESC LIMIT ?`
+  ).bind(...binds, limit)
+  const { results } = await stmt.all<RecordingRow>()
+  return results ?? []
+}
+
+export async function updateRecording(
+  env: Env,
+  id: string,
+  patch: {
+    transcript?: string | null
+    status?: RecordingStatus
+    status_message?: string | null
+    workflow_id?: string | null
+    chunk_count?: number
+    updated_at: number
+  }
+): Promise<void> {
+  const sets: string[] = []
+  const binds: (string | number | null)[] = []
+  if (patch.transcript !== undefined) { sets.push("transcript = ?"); binds.push(patch.transcript) }
+  if (patch.status !== undefined) { sets.push("status = ?"); binds.push(patch.status) }
+  if (patch.status_message !== undefined) { sets.push("status_message = ?"); binds.push(patch.status_message) }
+  if (patch.workflow_id !== undefined) { sets.push("workflow_id = ?"); binds.push(patch.workflow_id) }
+  if (patch.chunk_count !== undefined) { sets.push("chunk_count = ?"); binds.push(patch.chunk_count) }
+  sets.push("updated_at = ?"); binds.push(patch.updated_at)
+  binds.push(id)
+  await env.DB.prepare(`UPDATE recordings SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run()
+}
+
+export async function deleteRecording(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM recordings WHERE id = ?").bind(id).run()
+}
+
+// ── PDF queries ────────────────────────────────────────────────────────────
+export type PdfStatus = "pending" | "extracting" | "embedding" | "ready" | "failed"
+
+export interface PdfRow {
+  id: string
+  filename: string
+  title: string | null
+  source_url: string | null
+  size_bytes: number
+  page_count: number | null
+  r2_key: string
+  text_content: string | null
+  status: PdfStatus
+  status_message: string | null
+  workflow_id: string | null
+  chunk_count: number
+  created_at: number
+  updated_at: number
+}
+
+export async function insertPdf(env: Env, row: PdfRow): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO pdfs
+       (id, filename, title, source_url, size_bytes, page_count, r2_key,
+        text_content, status, status_message, workflow_id, chunk_count,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      row.id, row.filename, row.title, row.source_url, row.size_bytes,
+      row.page_count, row.r2_key, row.text_content, row.status,
+      row.status_message, row.workflow_id, row.chunk_count,
+      row.created_at, row.updated_at
+    )
+    .run()
+}
+
+export async function getPdf(env: Env, id: string): Promise<PdfRow | null> {
+  return (await env.DB.prepare("SELECT * FROM pdfs WHERE id = ?").bind(id).first<PdfRow>()) ?? null
+}
+
+export async function listPdfs(
+  env: Env,
+  opts: { status?: PdfStatus; limit?: number; before?: number } = {}
+): Promise<PdfRow[]> {
+  const limit = Math.min(opts.limit ?? 50, 200)
+  const where: string[] = []
+  const binds: (string | number)[] = []
+  if (opts.status) {
+    where.push("status = ?")
+    binds.push(opts.status)
+  }
+  if (opts.before) {
+    where.push("created_at < ?")
+    binds.push(opts.before)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const stmt = env.DB.prepare(
+    `SELECT * FROM pdfs ${whereSql} ORDER BY created_at DESC LIMIT ?`
+  ).bind(...binds, limit)
+  const { results } = await stmt.all<PdfRow>()
+  return results ?? []
+}
+
+export async function updatePdf(
+  env: Env,
+  id: string,
+  patch: {
+    text_content?: string | null
+    page_count?: number | null
+    status?: PdfStatus
+    status_message?: string | null
+    workflow_id?: string | null
+    chunk_count?: number
+    updated_at: number
+  }
+): Promise<void> {
+  const sets: string[] = []
+  const binds: (string | number | null)[] = []
+  if (patch.text_content !== undefined) { sets.push("text_content = ?"); binds.push(patch.text_content) }
+  if (patch.page_count !== undefined) { sets.push("page_count = ?"); binds.push(patch.page_count) }
+  if (patch.status !== undefined) { sets.push("status = ?"); binds.push(patch.status) }
+  if (patch.status_message !== undefined) { sets.push("status_message = ?"); binds.push(patch.status_message) }
+  if (patch.workflow_id !== undefined) { sets.push("workflow_id = ?"); binds.push(patch.workflow_id) }
+  if (patch.chunk_count !== undefined) { sets.push("chunk_count = ?"); binds.push(patch.chunk_count) }
+  sets.push("updated_at = ?"); binds.push(patch.updated_at)
+  binds.push(id)
+  await env.DB.prepare(`UPDATE pdfs SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run()
+}
+
+export async function deletePdf(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM pdfs WHERE id = ?").bind(id).run()
+}
