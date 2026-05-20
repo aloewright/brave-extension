@@ -61,9 +61,6 @@ function connectNativeHost() {
     nativePort = chrome.runtime.connectNative(HOST_NAME)
 
     nativePort.onMessage.addListener((msg: any) => {
-      // Drop pongs — they're keepalive noise the sidebar doesn't need.
-      if (msg?.type === "pong") return
-
       // Tool-call bridge from MCP server → background. Currently only a tiny
       // surface (tabs_list) lands here; M4/M5 expand it. Replies are sent
       // back over the same native port using mcp.tool.result.

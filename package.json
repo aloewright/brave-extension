@@ -57,6 +57,7 @@
       "scripting",
       "contextMenus",
       "tabCapture",
+      "desktopCapture",
       "offscreen",
       "alarms",
       "management",

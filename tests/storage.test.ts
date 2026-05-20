@@ -65,6 +65,23 @@ describe("getSettings / setSettings", () => {
     expect(s.theme).toBe("light") // preserved
     expect(s.backend).toBe("gemini")
   })
+
+  it("mirrors tool-gate settings to the consent FSM keys", async () => {
+    await setSettings({
+      allowEvalJs: true,
+      allowExtensionUninstall: true,
+      cookiesAllowAll: true
+    })
+
+    const r = await chrome.storage.local.get([
+      "settings.allowEvalJs",
+      "settings.allowExtensionUninstall",
+      "settings.cookies.allowAll"
+    ])
+    expect(r["settings.allowEvalJs"]).toBe(true)
+    expect(r["settings.allowExtensionUninstall"]).toBe(true)
+    expect(r["settings.cookies.allowAll"]).toBe(true)
+  })
 })
 
 describe("messages — per-backend sharding", () => {

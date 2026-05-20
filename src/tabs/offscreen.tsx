@@ -34,6 +34,7 @@ type StartMsg = {
   id: string
   source: RecorderSource
   streamId?: string
+  desktopAudio?: boolean
 }
 
 type StopMsg = { type: "RECORDER_STOP" }
@@ -100,6 +101,38 @@ async function acquireStream(msg: StartMsg): Promise<MediaStream> {
     })) as MediaStream
   }
   if (msg.source === "screen") {
+    if (msg.streamId) {
+      const video = {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: msg.streamId
+        }
+      } as unknown as MediaTrackConstraints
+      const audio = {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: msg.streamId
+        }
+      } as unknown as MediaTrackConstraints
+      if (!msg.desktopAudio) {
+        return (await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video
+        })) as MediaStream
+      }
+      return await withOptionalAudio(
+        () =>
+          navigator.mediaDevices.getUserMedia({
+            audio,
+            video
+          }) as Promise<MediaStream>,
+        () =>
+          navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video
+          }) as Promise<MediaStream>
+      )
+    }
     return await withOptionalAudio(
       () => navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }),
       () => navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })

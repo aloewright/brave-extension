@@ -2,7 +2,22 @@ import { Storage } from "@plasmohq/storage"
 import type { CollectedLink, Group, Profile, Settings, StorageSchema } from "./types"
 import { DEFAULT_STORAGE } from "./types"
 
-const storage = new Storage({ area: "local" })
+function deserializeStoredValue<T>(rawValue: unknown): T {
+  if (typeof rawValue !== "string") return rawValue as T
+  try {
+    return JSON.parse(rawValue) as T
+  } catch {
+    return undefined as T
+  }
+}
+
+const storage = new Storage({
+  area: "local",
+  serde: {
+    serializer: JSON.stringify,
+    deserializer: deserializeStoredValue
+  }
+})
 
 const KEYS = {
   profiles: "lx_profiles",
