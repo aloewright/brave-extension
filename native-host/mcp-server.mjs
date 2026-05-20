@@ -218,8 +218,8 @@ export class MCPServer {
   // ── HTTP handling ──────────────────────────────────────────────────────
   _authOk(req) {
     const hdr = req.headers["authorization"] || ""
-    const m = /^Bearer\s+(.+)$/.exec(hdr)
-    return m && m[1] === this.token
+    const prefix = "Bearer "
+    return hdr.startsWith(prefix) && hdr.slice(prefix.length) === this.token
   }
 
   _onRequest(req, res) {

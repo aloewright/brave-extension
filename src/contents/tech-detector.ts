@@ -12,12 +12,31 @@ interface TechDetection {
   confidence: "high" | "medium" | "low"
 }
 
+function hostMatches(hostname: string, domain: string): boolean {
+  const host = hostname.toLowerCase()
+  const target = domain.toLowerCase()
+  return host === target || host.endsWith(`.${target}`)
+}
+
 function detectTechnologies(): TechDetection[] {
   const techs: TechDetection[] = []
   const w = window as any
   const html = document.documentElement.outerHTML
   const scriptEls = Array.from(document.querySelectorAll("script[src], link[href]"))
-  const srcs = scriptEls.map((s) => s.getAttribute("src") || s.getAttribute("href") || "").join(" ").toLowerCase()
+  const assetUrls = scriptEls.flatMap((el) => {
+    const raw = el.getAttribute("src") || el.getAttribute("href")
+    if (!raw) return []
+    try {
+      return [new URL(raw, window.location.href)]
+    } catch {
+      return []
+    }
+  })
+  const srcs = assetUrls.map((url) => `${url.hostname} ${url.pathname}`).join(" ").toLowerCase()
+  const hasAssetHost = (...domains: string[]) =>
+    assetUrls.some((url) => domains.some((domain) => hostMatches(url.hostname, domain)))
+  const hasAssetPath = (...needles: string[]) =>
+    assetUrls.some((url) => needles.some((needle) => url.pathname.toLowerCase().includes(needle)))
 
   // Frameworks
   if (w.__NEXT_DATA__ || document.querySelector("#__next")) {
@@ -199,7 +218,7 @@ function detectTechnologies(): TechDetection[] {
   if (srcs.includes("cloudflare") || srcs.includes("cdnjs.cloudflare")) {
     techs.push({ name: "Cloudflare CDN", category: "CDN", confidence: "medium" })
   }
-  if (srcs.includes("unpkg.com")) {
+  if (hasAssetHost("unpkg.com")) {
     techs.push({ name: "unpkg", category: "CDN", confidence: "high" })
   }
   if (srcs.includes("jsdelivr")) {
@@ -250,10 +269,10 @@ function detectTechnologies(): TechDetection[] {
   if (w.axios) {
     techs.push({ name: "Axios", category: "Library", confidence: "medium" })
   }
-  if (w.io || srcs.includes("socket.io")) {
+  if (w.io || hasAssetHost("socket.io") || hasAssetPath("/socket.io")) {
     techs.push({ name: "Socket.IO", category: "Realtime", confidence: "medium" })
   }
-  if (w.Stripe || srcs.includes("stripe.com")) {
+  if (w.Stripe || hasAssetHost("stripe.com")) {
     techs.push({ name: "Stripe", category: "Payments", confidence: "high" })
   }
   if (srcs.includes("paypal")) {
@@ -354,7 +373,7 @@ function detectFeeds(): { url: string; title: string; type: "rss" | "atom" | "js
   const pathname = window.location.pathname
 
   // Substack: always has /feed
-  if (hostname.includes("substack.com") || document.querySelector('meta[property="article:publisher"][content*="substack"]') || document.querySelector('script[src*="substack"]')) {
+  if (hostMatches(hostname, "substack.com") || document.querySelector('meta[property="article:publisher"][content*="substack"]') || document.querySelector('script[src*="substack"]')) {
     const feedUrl = `${origin}/feed`
     if (!seen.has(feedUrl)) {
       seen.add(feedUrl)
@@ -364,7 +383,7 @@ function detectFeeds(): { url: string; title: string; type: "rss" | "atom" | "js
   }
 
   // Medium: /feed path or medium.com/feed/@user
-  if (hostname.includes("medium.com") || document.querySelector('meta[property="al:android:package"][content="com.medium.reader"]')) {
+  if (hostMatches(hostname, "medium.com") || document.querySelector('meta[property="al:android:package"][content="com.medium.reader"]')) {
     const ogUrl = document.querySelector('meta[property="og:url"]')?.getAttribute("content") || ""
     if (hostname === "medium.com") {
       // medium.com/@user or medium.com/publication
@@ -393,13 +412,13 @@ function detectFeeds(): { url: string; title: string; type: "rss" | "atom" | "js
   }
 
   // Blogger/Blogspot
-  if (hostname.includes("blogspot.com") || hostname.includes("blogger.com")) {
+  if (hostMatches(hostname, "blogspot.com") || hostMatches(hostname, "blogger.com")) {
     const feedUrl = `${origin}/feeds/posts/default`
     if (!seen.has(feedUrl)) { seen.add(feedUrl); feeds.push({ url: feedUrl, title: `${hostname} (Blogger)`, type: "atom" }) }
   }
 
   // YouTube: channel/playlist feeds
-  if (hostname.includes("youtube.com")) {
+  if (hostMatches(hostname, "youtube.com")) {
     const channelId = document.querySelector('meta[itemprop="channelId"]')?.getAttribute("content")
       || document.querySelector('link[rel="canonical"]')?.getAttribute("href")?.match(/channel\/(UC[a-zA-Z0-9_-]+)/)?.[1]
     if (channelId) {
@@ -426,7 +445,7 @@ function detectFeeds(): { url: string; title: string; type: "rss" | "atom" | "js
   }
 
   // Reddit: append .rss to any reddit URL
-  if (hostname.includes("reddit.com")) {
+  if (hostMatches(hostname, "reddit.com")) {
     const subredditMatch = pathname.match(/^\/r\/([^/]+)/)
     if (subredditMatch) {
       const feedUrl = `https://www.reddit.com/r/${subredditMatch[1]}/.rss`

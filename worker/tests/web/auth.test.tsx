@@ -1,6 +1,4 @@
-/**
- * @vitest-environment happy-dom
- */
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { TokenGate, useAuth, readStoredToken, storeToken } from "../../web/src/auth"
