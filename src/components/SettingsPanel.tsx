@@ -223,7 +223,7 @@ export function SettingsPanel({
         {mcp && (
           <div>
             <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
-              ai-dev-sidebar MCP server
+              Brave Extension MCP server
             </label>
             <div className="bg-card/20 rounded p-2 space-y-2">
               <StatusRow

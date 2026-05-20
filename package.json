@@ -1,8 +1,8 @@
 {
-  "name": "ai-dev-sidebar",
-  "displayName": "AI Dev Sidebar",
+  "name": "brave-extension",
+  "displayName": "Brave Dev Extension",
   "version": "0.1.0",
-  "description": "Sidebar AI chat connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
+  "description": "Brave sidebar extension connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
   "author": "aloe",
   "scripts": {
     "dev": "plasmo dev",
@@ -101,7 +101,7 @@
         "suggested_key": {
           "default": "Alt+Shift+A"
         },
-        "description": "Toggle AI Dev Sidebar"
+        "description": "Toggle Brave Dev Extension"
       }
     }
   }

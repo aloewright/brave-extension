@@ -31,7 +31,7 @@ export function SettingsSection() {
           showToast("Token rotated; reconnect any external `claude` sessions.")
           break
         case "mcp.register":
-          showToast("Registered ai-dev-sidebar in ~/.claude.json.")
+          showToast("Registered Brave Extension MCP server in ~/.claude.json.")
           break
         case "mcp.unregister":
           showToast("Unregistered from ~/.claude.json.")
