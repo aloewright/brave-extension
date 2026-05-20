@@ -6,3 +6,5 @@ tsconfig.tsbuildinfo
 .omx/
 test-results/
 coverage/
+# Build outputs (Worker SPA in worker/dist/web/, future bundles).
+dist/
