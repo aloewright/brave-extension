@@ -55,6 +55,58 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
   extension messages. Extension resources, native-host tokens, and stored data
   stay in extension or native-host storage rather than being exposed to sites.
 
+## New tab page
+
+![New tab screenshot](assets/newtab-screenshot.png)
+
+The extension replaces the new tab page with a Brave-style search bar, a row
+of icon-only Quick Links (chat / email / calendar / tasks / link shortener),
+and a draggable grid of Workspace App tiles.
+
+### Customizing the Quick Links row
+
+The five icon-only links above the app grid are hardcoded in
+[`src/newtab.tsx`](src/newtab.tsx) as the `QUICK_LINKS` constant
+(around line 304). Each entry has a `label`, a `url`, and an inline SVG
+`icon`. To point them at your own chat, email, calendar, task tracker,
+and shortlink service, edit the `url` fields in place:
+
+```ts
+const QUICK_LINKS: { label: string; url: string; icon: ReactNode }[] = [
+  { label: "Chat",           url: "https://chat.example.com",     icon: (/* ... */) },
+  { label: "Email",          url: "https://mail.example.com",     icon: (/* ... */) },
+  { label: "Calendar",       url: "https://calendar.example.com", icon: (/* ... */) },
+  { label: "Tasks",          url: "https://tasks.example.com",    icon: (/* ... */) },
+  { label: "Link Shortener", url: "https://s.example.com",        icon: (/* ... */) },
+];
+```
+
+- **Change destination only**: edit `url`. The `label` is read aloud by
+  screen readers and shown as the hover tooltip, so update it to match
+  if you repurpose a slot (e.g. swap "Tasks" for "Notes").
+- **Add or remove a link**: add/remove an object in the array. The row
+  renders whatever is in `QUICK_LINKS`, in order. There's no upper limit,
+  but the layout is tuned for ~5 items.
+- **Use your own icon**: each `icon` is a fragment of SVG `<path>` /
+  `<rect>` elements that get drawn inside a shared 24×24 stroked
+  viewBox (`fill="none"`, `stroke="currentColor"`,
+  `strokeWidth="1.8"`). Drop in any path data from
+  [Lucide](https://lucide.dev/), [Tabler](https://tabler.io/icons), or
+  Hero­icons (outline set) and it will inherit the row's styling.
+
+After editing, run `pnpm dev` to hot-reload the unpacked extension or
+`pnpm build` to produce a fresh `build/` for packaging.
+
+### Customizing the Workspace App grid
+
+The larger tile grid below the Quick Links is sourced from the
+`WORKSPACE_APPS` array in [`src/newtab-apps.ts`](src/newtab-apps.ts).
+Each tile has `name`, `domain`, `url`, `icon` (one of the named icon
+slugs at the top of that file), and an `accent` color. Add, remove, or
+re-order entries to change which apps appear; per-tab ordering can also
+be rearranged by drag-and-drop and is persisted in
+`chrome.storage.local`.
+
 ## Development
 
 ```sh
