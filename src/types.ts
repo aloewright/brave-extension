@@ -82,11 +82,21 @@ export interface Settings {
   captureConsole: boolean
   captureNetwork: boolean
   theme: "dark" | "light"
-  // CloudOS sync — pushes conversations to the cloudos-notes worker
-  // (auto-embeds into Vectorize for cross-cloudos semantic search)
+  // Sidebar-api Worker sync (Phases 1–4). Replaces the cloudos integration.
+  // The Worker owns /api/conversations, /api/links, /api/bookmarks/snapshot,
+  // /api/recordings, /api/pdfs, /api/search; uploads also write embeddings
+  // into a shared Vectorize index keyed by `${type}:${id}:${chunkIndex}`.
+  sidebarSyncEnabled: boolean
+  sidebarApiUrl: string
+  sidebarApiToken: string
+  sidebarPruneAfterSync: boolean
+  /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosSyncEnabled: boolean
+  /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosNotesUrl: string
+  /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosServiceToken: string
+  /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosPruneAfterSync: boolean
   // MCP / install gates (M7, ALO-251)
   allowEvalJs: boolean
@@ -117,6 +127,10 @@ export const DEFAULT_SETTINGS: Settings = {
   captureConsole: true,
   captureNetwork: false,
   theme: "dark",
+  sidebarSyncEnabled: false,
+  sidebarApiUrl: "https://sidebar.pdx.software",
+  sidebarApiToken: "",
+  sidebarPruneAfterSync: false,
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
   cloudosServiceToken: "",

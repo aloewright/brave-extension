@@ -8,7 +8,7 @@ export function SettingsPanel({
   onClose,
   nativeHost,
   mcpServers,
-  cloudosSync,
+  sidebarSync,
   mcp
 }: {
   settings: Settings
@@ -20,7 +20,7 @@ export function SettingsPanel({
     addMCPServer: (server: any, path?: string) => void
   }
   mcpServers: MCPServer[]
-  cloudosSync: { lastSyncAt: number | null; lastError: string | null; pending: boolean; flush: () => void }
+  sidebarSync: { lastSyncAt: number | null; lastError: string | null; pending: boolean; flush: () => void }
   mcp?: {
     status: MCPStatus | null
     refresh: () => void
@@ -311,56 +311,62 @@ export function SettingsPanel({
           </div>
         </div>
 
-        {/* CloudOS Sync */}
+        {/* Sidebar Sync (Phase 5 cutover from CloudOS) */}
         <div className="space-y-2">
-          <label className="text-[11px] text-fg/50 uppercase tracking-wider block">CloudOS Sync</label>
+          <label className="text-[11px] text-fg/50 uppercase tracking-wider block">Sidebar Sync</label>
           <div className="bg-card/20 rounded p-2 space-y-2">
             <Toggle
-              label="Sync conversations to CloudOS"
-              description="Auto-saves chats to your notes worker (D1 + Vectorize embedding)"
-              checked={settings.cloudosSyncEnabled}
-              onChange={(v) => onUpdate({ cloudosSyncEnabled: v })}
+              label="Sync conversations to sidebar-api"
+              description="Auto-saves chats to your Cloudflare Worker (D1 + Vectorize embedding)"
+              checked={settings.sidebarSyncEnabled}
+              onChange={(v) => onUpdate({ sidebarSyncEnabled: v })}
             />
-            {settings.cloudosSyncEnabled && (
+            {settings.sidebarSyncEnabled && (
               <>
                 <input
                   type="text"
-                  value={settings.cloudosNotesUrl}
-                  onChange={(e) => onUpdate({ cloudosNotesUrl: e.target.value })}
+                  value={settings.sidebarApiUrl}
+                  onChange={(e) => onUpdate({ sidebarApiUrl: e.target.value })}
                   className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
-                  placeholder="https://notes.pdx.software/api/notes"
+                  placeholder="https://sidebar.pdx.software"
                 />
                 <input
                   type="password"
-                  value={settings.cloudosServiceToken}
-                  onChange={(e) => onUpdate({ cloudosServiceToken: e.target.value })}
+                  value={settings.sidebarApiToken}
+                  onChange={(e) => onUpdate({ sidebarApiToken: e.target.value })}
                   className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
-                  placeholder="X-CloudOS-Service-Token (optional)"
+                  placeholder="X-Sidebar-Token (required)"
                 />
                 <Toggle
                   label="Prune local after sync"
                   description="Drop synced messages from chrome.storage to keep space low"
-                  checked={settings.cloudosPruneAfterSync}
-                  onChange={(v) => onUpdate({ cloudosPruneAfterSync: v })}
+                  checked={settings.sidebarPruneAfterSync}
+                  onChange={(v) => onUpdate({ sidebarPruneAfterSync: v })}
                 />
                 <div className="flex items-center justify-between text-[9px] pt-1">
                   <div className="text-fg/40">
-                    {cloudosSync.pending
+                    {sidebarSync.pending
                       ? "Syncing…"
-                      : cloudosSync.lastError
-                      ? <span className="text-error">Error: {cloudosSync.lastError.slice(0, 60)}</span>
-                      : cloudosSync.lastSyncAt
-                      ? `Last sync: ${new Date(cloudosSync.lastSyncAt).toLocaleTimeString()}`
+                      : sidebarSync.lastError
+                      ? <span className="text-error">Error: {sidebarSync.lastError.slice(0, 60)}</span>
+                      : sidebarSync.lastSyncAt
+                      ? `Last sync: ${new Date(sidebarSync.lastSyncAt).toLocaleTimeString()}`
                       : "Not synced yet"}
                   </div>
                   <button
-                    onClick={cloudosSync.flush}
+                    onClick={sidebarSync.flush}
                     className="text-primary hover:text-primary/80"
                   >
                     Sync now
                   </button>
                 </div>
               </>
+            )}
+            {settings.cloudosSyncEnabled && !settings.sidebarSyncEnabled && (
+              <div className="text-[9px] text-fg/40 pt-1">
+                Legacy CloudOS sync is still on. Migrate by toggling "Sync conversations to sidebar-api"
+                above; the CloudOS settings will be removed in a follow-up release.
+              </div>
             )}
           </div>
         </div>

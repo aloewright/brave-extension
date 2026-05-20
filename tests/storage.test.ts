@@ -39,7 +39,50 @@ describe("getSettings / setSettings", () => {
     expect(s.autoScrape).toBe(false)
     expect(s.captureConsole).toBe(true)
     expect(s.captureNetwork).toBe(false)
+    // Cloudos defaults still present until users explicitly clear them.
     expect(s.cloudosSyncEnabled).toBe(false)
+    // New sidebar defaults from Phase 5.
+    expect(s.sidebarSyncEnabled).toBe(false)
+    expect(s.sidebarApiUrl).toBe("https://sidebar.pdx.software")
+    expect(s.sidebarApiToken).toBe("")
+    expect(s.sidebarPruneAfterSync).toBe(false)
+  })
+
+  it("migrates cloudos* settings into sidebar* slots on first read", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        cloudosSyncEnabled: true,
+        cloudosNotesUrl: "https://custom.example/api/notes",
+        cloudosServiceToken: "secret-abc",
+        cloudosPruneAfterSync: true
+      }
+    })
+    const s = await getSettings()
+    expect(s.sidebarSyncEnabled).toBe(true)
+    expect(s.sidebarApiToken).toBe("secret-abc")
+    expect(s.sidebarApiUrl).toBe("https://custom.example")  // /api/notes stripped
+    expect(s.sidebarPruneAfterSync).toBe(true)
+    // Cloudos values preserved for one release.
+    expect(s.cloudosSyncEnabled).toBe(true)
+    expect(s.cloudosServiceToken).toBe("secret-abc")
+  })
+
+  it("migration is idempotent — second read returns same shape without re-copying", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        cloudosSyncEnabled: true,
+        cloudosNotesUrl: "https://custom.example/api/notes",
+        cloudosServiceToken: "tok"
+      }
+    })
+    const first = await getSettings()
+
+    // Pretend the user then changed sidebarApiUrl — the second read must not
+    // overwrite their value with the cloudos migration source again.
+    await setSettings({ sidebarApiUrl: "https://other.example" })
+    const second = await getSettings()
+    expect(second.sidebarApiUrl).toBe("https://other.example")
+    expect(second.sidebarApiToken).toBe(first.sidebarApiToken)
   })
 
   it("merges defaults with persisted partials", async () => {

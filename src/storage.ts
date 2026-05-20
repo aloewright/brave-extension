@@ -19,7 +19,11 @@ const KEYS = {
   scanCache: "ai-dev-scan-cache",
   // Top-level marker that signals every backend shard has been hydrated from
   // the legacy key and the legacy key is safe to drop.
-  legacyMigrationComplete: "migration:ai-dev-messages-complete"
+  legacyMigrationComplete: "migration:ai-dev-messages-complete",
+  // Phase 5 — one-shot migration that copies any non-empty cloudos* settings
+  // into the matching sidebar* slot so users don't have to re-enter the URL
+  // and token after upgrading.
+  cloudosToSidebarMigration: "migration:cloudos-to-sidebar"
 }
 
 const GATE_KEYS = {
@@ -47,11 +51,23 @@ function objectValue(value: unknown): Record<string, unknown> {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const result = await chrome.storage.local.get(KEYS.settings)
-  return {
+  const result = await chrome.storage.local.get([KEYS.settings, KEYS.cloudosToSidebarMigration])
+  const merged: Settings = {
     ...defaultSettings(),
     ...(objectValue(result[KEYS.settings]) as Partial<Settings>)
   }
+  if (result[KEYS.cloudosToSidebarMigration]) return merged
+
+  const migrated = migrateCloudosToSidebar(merged)
+  if (migrated !== merged) {
+    await chrome.storage.local.set({
+      [KEYS.settings]: migrated,
+      [KEYS.cloudosToSidebarMigration]: true
+    })
+  } else {
+    await chrome.storage.local.set({ [KEYS.cloudosToSidebarMigration]: true })
+  }
+  return migrated
 }
 
 export async function setSettings(settings: Partial<Settings>): Promise<void> {
@@ -62,6 +78,39 @@ export async function setSettings(settings: Partial<Settings>): Promise<void> {
     if (key in settings) writes[GATE_KEYS[key]] = next[key]
   }
   await chrome.storage.local.set(writes)
+}
+
+/**
+ * Copy any non-empty cloudos* values into the matching sidebar* slot when
+ * the sidebar slot is still at its default. Idempotent — never overwrites
+ * a sidebar value the user already set, and returns the same reference when
+ * no copy happened (so callers can short-circuit a write).
+ */
+export function migrateCloudosToSidebar(settings: Settings): Settings {
+  const defaults = defaultSettings()
+  const next = { ...settings }
+  let changed = false
+
+  if (next.sidebarApiUrl === defaults.sidebarApiUrl
+      && settings.cloudosNotesUrl
+      && settings.cloudosNotesUrl !== defaults.cloudosNotesUrl) {
+    next.sidebarApiUrl = settings.cloudosNotesUrl.replace(/\/api\/notes\/?$/, "")
+    changed = true
+  }
+  if (!next.sidebarApiToken && settings.cloudosServiceToken) {
+    next.sidebarApiToken = settings.cloudosServiceToken
+    changed = true
+  }
+  if (!next.sidebarSyncEnabled && settings.cloudosSyncEnabled) {
+    next.sidebarSyncEnabled = true
+    changed = true
+  }
+  if (!next.sidebarPruneAfterSync && settings.cloudosPruneAfterSync) {
+    next.sidebarPruneAfterSync = true
+    changed = true
+  }
+
+  return changed ? next : settings
 }
 
 /**
@@ -329,6 +378,10 @@ function defaultSettings(): Settings {
     captureConsole: true,
     captureNetwork: false,
     theme: "dark",
+    sidebarSyncEnabled: false,
+    sidebarApiUrl: "https://sidebar.pdx.software",
+    sidebarApiToken: "",
+    sidebarPruneAfterSync: false,
     cloudosSyncEnabled: false,
     cloudosNotesUrl: "https://notes.pdx.software/api/notes",
     cloudosServiceToken: "",
