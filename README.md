@@ -2,7 +2,11 @@
 
 # AI Dev Sidebar
 
-[![Tests](https://github.com/aloewright/ai-dev-sidebar/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/ai-dev-sidebar/actions/workflows/test.yml)
+[![Tests](https://github.com/aloewright/brave-extension/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/brave-extension/actions/workflows/test.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![Brave](https://img.shields.io/badge/Brave-FB542B?logo=brave&logoColor=white)](https://brave.com/)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/allosaurus)
 
 Sidebar AI chat connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.
 
