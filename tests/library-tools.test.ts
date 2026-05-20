@@ -187,4 +187,65 @@ describe("library tool handlers (background side)", () => {
     expect(body.html.length).toBe(256 * 1024)
     expect(body.originalByteSize).toBe(300 * 1024)
   })
+
+  // bookmarks_move tests — the PR changed the `dest` type to
+  // chrome.bookmarks.BookmarkDestinationArg (was an inline object type).
+  // These tests cover the function's runtime behaviour.
+
+  it("bookmarks_move calls chrome.bookmarks.move with valid id and parentId", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "5", parentId: "2" })
+    expect(r.isError).toBeFalsy()
+    expect((chrome as any).bookmarks.move).toHaveBeenCalledWith("5", { parentId: "2" })
+    const result = JSON.parse(r.content[0].text!)
+    expect(result.id).toBe("5")
+    expect(result.parentId).toBe("2")
+  })
+
+  it("bookmarks_move calls chrome.bookmarks.move with valid id and index", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "7", index: 3 })
+    expect(r.isError).toBeFalsy()
+    expect((chrome as any).bookmarks.move).toHaveBeenCalledWith("7", { index: 3 })
+  })
+
+  it("bookmarks_move passes both parentId and index when both provided", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "9", parentId: "1", index: 0 })
+    expect(r.isError).toBeFalsy()
+    expect((chrome as any).bookmarks.move).toHaveBeenCalledWith("9", { parentId: "1", index: 0 })
+  })
+
+  it("bookmarks_move rejects a non-numeric id", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "not-a-number", parentId: "2" })
+    expect(r.isError).toBe(true)
+    expect(r.content[0].text).toMatch(/invalid id/i)
+    expect((chrome as any).bookmarks.move).not.toHaveBeenCalled()
+  })
+
+  it("bookmarks_move rejects a non-numeric parentId", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "5", parentId: "abc" })
+    expect(r.isError).toBe(true)
+    expect(r.content[0].text).toMatch(/invalid parentId/i)
+    expect((chrome as any).bookmarks.move).not.toHaveBeenCalled()
+  })
+
+  it("bookmarks_move with no dest fields still calls chrome.bookmarks.move with empty dest", async () => {
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "3" })
+    expect(r.isError).toBeFalsy()
+    expect((chrome as any).bookmarks.move).toHaveBeenCalledWith("3", {})
+  })
+
+  it("bookmarks_move surfaces chrome.bookmarks.move errors as isError results", async () => {
+    ;(globalThis as any).chrome.bookmarks.move = vi.fn(async () => {
+      throw new Error("Cannot move to that location")
+    })
+    const { LIBRARY_TOOL_HANDLERS } = await import("../src/background/library-tools")
+    const r = await LIBRARY_TOOL_HANDLERS.bookmarks_move({ id: "5", parentId: "2" })
+    expect(r.isError).toBe(true)
+    expect(r.content[0].text).toMatch(/cannot move/i)
+  })
 })
