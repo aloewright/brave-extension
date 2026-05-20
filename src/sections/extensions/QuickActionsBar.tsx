@@ -16,11 +16,105 @@ import {
   captureErrorMessage,
   captureVisibleOrPromptedScreenshot
 } from "../../lib/screenshot-capture"
+import { getSettings } from "../../storage"
+import {
+  describeCaptureDestination,
+  resolveCaptureDestination,
+  type CaptureKind
+} from "../../lib/capture-destination"
+import {
+  CaptureUploadError,
+  dataUrlToBlob,
+  uploadCapture
+} from "../../lib/capture-upload"
 
 type SectionId = "library" | "recorder"
 
 interface Props {
   onNavigate?: (section: SectionId) => void
+}
+
+interface DispatchCaptureArgs {
+  kind: CaptureKind
+  baseFilename: string
+  dataUrl?: string
+  blob?: Blob
+  pageUrl?: string
+  pageTitle?: string
+  sourceLabel?: string | null
+  flash: (msg: string) => void
+}
+
+/**
+ * Honor the user's capture save-location preference (ALO-467). For
+ * "downloads" / "downloads-subfolder" we hand off to chrome.downloads with
+ * the resolver's filename. For "cloud" we POST to the sidebar-api Worker;
+ * if the upload fails or the cloud destination isn't fully configured the
+ * resolver already routed us back to downloads with a `fallbackReason`.
+ *
+ * Errors surface via `flash()` so the user knows when a configured
+ * destination is unavailable.
+ */
+async function dispatchCapture(args: DispatchCaptureArgs): Promise<void> {
+  const { kind, baseFilename, dataUrl, blob, pageUrl, pageTitle, flash } = args
+  const settings = await getSettings()
+  const { destination, fallbackReason } = resolveCaptureDestination(baseFilename, settings)
+  if (fallbackReason === "cloud-disabled") {
+    flash("Cloud captures disabled — saving to Downloads")
+  } else if (fallbackReason === "cloud-not-configured") {
+    flash("Sidebar API not configured — saving to Downloads")
+  }
+
+  if (destination.kind === "cloud") {
+    try {
+      let body: Blob | ArrayBuffer
+      if (blob) {
+        body = blob
+      } else if (dataUrl) {
+        body = await dataUrlToBlob(dataUrl)
+      } else {
+        throw new Error("no capture body")
+      }
+      const uploaded = await uploadCapture({
+        apiUrl: destination.apiUrl,
+        apiToken: destination.apiToken,
+        filename: destination.filename,
+        kind,
+        pageUrl,
+        pageTitle,
+        body
+      })
+      flash(args.sourceLabel ?? `Uploaded ${uploaded.filename}`)
+      return
+    } catch (err) {
+      const msg =
+        err instanceof CaptureUploadError
+          ? `Cloud upload failed (${err.status}); saving locally instead`
+          : `Cloud upload failed: ${err instanceof Error ? err.message : String(err)}`
+      flash(msg)
+      // Fall through to local downloads as a graceful recovery.
+    }
+  }
+
+  // Downloads path — works for both "downloads" and "downloads-subfolder",
+  // and for cloud failures above.
+  const filename =
+    destination.kind === "downloads"
+      ? destination.filename
+      : destination.filename
+  if (dataUrl) {
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false })
+  } else if (blob) {
+    const url = URL.createObjectURL(blob)
+    try {
+      await chrome.downloads.download({ url, filename, saveAs: false })
+    } finally {
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+      }, 60_000)
+    }
+  }
+  flash(args.sourceLabel ?? describeCaptureDestination(destination))
 }
 
 /**
@@ -78,9 +172,17 @@ export function QuickActionsBar({ onNavigate }: Props) {
       const result = await captureVisibleOrPromptedScreenshot(win.id, {
         onFallback: () => flash("Choose tab/window to capture")
       })
-      const filename = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`
-      await chrome.downloads.download({ url: result.dataUrl, filename, saveAs: false })
-      flash(result.source === "display-picker" ? "Screenshot saved from picker" : "Screenshot saved")
+      const baseName = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`
+      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
+      await dispatchCapture({
+        kind: "screenshot",
+        baseFilename: baseName,
+        dataUrl: result.dataUrl,
+        pageUrl: tab?.url,
+        pageTitle: tab?.title,
+        sourceLabel: result.source === "display-picker" ? "Screenshot saved from picker" : null,
+        flash
+      })
     } catch (err) {
       flash(`Screenshot failed: ${captureErrorMessage(err)}`)
     }
@@ -102,11 +204,15 @@ export function QuickActionsBar({ onNavigate }: Props) {
     flash("Generating PDF…")
     printToPDF.call(chrome.tabs, { tabId: tab.id }, async (data: ArrayBuffer) => {
       const blob = new Blob([data], { type: "application/pdf" })
-      const url = URL.createObjectURL(blob)
-      const filename = `${(tab.title || "page").replace(/[^\w.-]+/g, "_")}.pdf`
-      await chrome.downloads.download({ url, filename, saveAs: false })
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      flash("PDF saved")
+      const baseName = `${(tab.title || "page").replace(/[^\w.-]+/g, "_")}.pdf`
+      await dispatchCapture({
+        kind: "pdf",
+        baseFilename: baseName,
+        blob,
+        pageUrl: tab.url,
+        pageTitle: tab.title,
+        flash
+      })
     })
   }
 
