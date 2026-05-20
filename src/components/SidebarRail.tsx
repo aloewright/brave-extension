@@ -1,10 +1,10 @@
-import type { SectionId } from "../sections/types"
-import { SECTIONS } from "../sections/types"
-import { LeoIcon, type LeoIconName } from "./leo"
+import type { SectionId } from "../sections/types";
+import { SECTIONS } from "../sections/types";
+import { LeoIcon, type LeoIconName } from "./leo";
 
 interface Props {
-  active: SectionId
-  onChange: (id: SectionId) => void
+  active: SectionId;
+  onChange: (id: SectionId) => void;
 }
 
 const ICONS: Record<SectionId, LeoIconName> = {
@@ -12,17 +12,18 @@ const ICONS: Record<SectionId, LeoIconName> = {
   inspector: "search",
   extensions: "puzzle-piece",
   library: "inbox",
+  bookmarks: "product-bookmarks",
   cookies: "cookie",
   recorder: "radio-checked",
   eyedropper: "paint-brush",
-  settings: "settings"
-}
+  settings: "settings",
+};
 
 export function SidebarRail({ active, onChange }: Props) {
   return (
     <nav className="flex flex-col items-center gap-1 px-1.5 py-2 border-r border-border bg-bg/50">
       {SECTIONS.map((s) => {
-        const isActive = s.id === active
+        const isActive = s.id === active;
         return (
           <button
             key={s.id}
@@ -38,8 +39,8 @@ export function SidebarRail({ active, onChange }: Props) {
           >
             <LeoIcon name={ICONS[s.id]} size={16} />
           </button>
-        )
+        );
       })}
     </nav>
-  )
+  );
 }
