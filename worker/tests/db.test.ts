@@ -10,7 +10,14 @@ import {
   upsertLink,
   getLink,
   listLinks,
-  deleteLink
+  deleteLink,
+  insertBookmark,
+  getBookmark,
+  listBookmarks,
+  updateBookmark,
+  deleteBookmark,
+  listAllBookmarksDiffShape,
+  type BookmarkRow
 } from "../src/db"
 
 describe("db", () => {
@@ -121,5 +128,80 @@ describe("db", () => {
     })
     await deleteLink(env, "l1")
     expect(await getLink(env, "l1")).toBeNull()
+  })
+})
+
+describe("db - bookmarks", () => {
+  let env: Env
+
+  beforeEach(() => {
+    env = makeEnv()
+  })
+
+  function row(id: string, overrides: Partial<BookmarkRow> = {}): BookmarkRow {
+    return {
+      id,
+      url: `https://${id}.example`,
+      title: `t-${id}`,
+      parent_id: null,
+      path: "[]",
+      category: "Unfiled",
+      is_favorite: 0,
+      date_added: null,
+      position: 0,
+      chunk_count: 0,
+      synced_at: 1,
+      ...overrides
+    }
+  }
+
+  it("inserts and reads a bookmark", async () => {
+    await insertBookmark(env, row("b1"))
+    const got = await getBookmark(env, "b1")
+    expect(got?.title).toBe("t-b1")
+    expect(got?.url).toBe("https://b1.example")
+  })
+
+  it("filters by category", async () => {
+    await insertBookmark(env, row("b1", { category: "Work" }))
+    await insertBookmark(env, row("b2", { category: "Personal" }))
+    const rows = await listBookmarks(env, { category: "Work" })
+    expect(rows.map((r) => r.id)).toEqual(["b1"])
+  })
+
+  it("filters favorites", async () => {
+    await insertBookmark(env, row("b1", { is_favorite: 1 }))
+    await insertBookmark(env, row("b2", { is_favorite: 0 }))
+    const favs = await listBookmarks(env, { favorite: true })
+    expect(favs.map((r) => r.id)).toEqual(["b1"])
+    const non = await listBookmarks(env, { favorite: false })
+    expect(non.map((r) => r.id)).toEqual(["b2"])
+  })
+
+  it("updates a bookmark", async () => {
+    await insertBookmark(env, row("b1", { title: "old" }))
+    await updateBookmark(env, row("b1", { title: "new", synced_at: 5 }))
+    const got = await getBookmark(env, "b1")
+    expect(got?.title).toBe("new")
+    expect(got?.synced_at).toBe(5)
+  })
+
+  it("deletes a bookmark", async () => {
+    await insertBookmark(env, row("b1"))
+    await deleteBookmark(env, "b1")
+    expect(await getBookmark(env, "b1")).toBeNull()
+  })
+
+  it("listAllBookmarksDiffShape returns id/url/title/chunk_count for every row", async () => {
+    await insertBookmark(env, row("b1", { chunk_count: 2 }))
+    await insertBookmark(env, row("b2", { chunk_count: 1 }))
+    const all = await listAllBookmarksDiffShape(env)
+    expect(all).toHaveLength(2)
+    expect(all.find((r) => r.id === "b1")).toEqual({
+      id: "b1",
+      url: "https://b1.example",
+      title: "t-b1",
+      chunk_count: 2
+    })
   })
 })
