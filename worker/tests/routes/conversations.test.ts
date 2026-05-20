@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 import app from "../../src/index"
 import type { Env } from "../../src/env"
 import { makeEnv } from "../helpers"
@@ -14,7 +14,14 @@ describe("/api/conversations", () => {
   let env: Env
 
   beforeEach(() => {
+    // Fake timers so vi.advanceTimersByTime() between inserts gives each
+    // row a distinct updated_at without needing real-clock sleeps.
+    vi.useFakeTimers({ now: 1_000_000 })
     env = makeEnv()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("POST creates a conversation, embeds it, and returns the id", async () => {

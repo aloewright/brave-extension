@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import app from "../../src/index"
 import type { Env } from "../../src/env"
 import { makeEnv } from "../helpers"
@@ -14,7 +14,14 @@ describe("/api/links", () => {
   let env: Env
 
   beforeEach(() => {
+    // Fake timers so vi.advanceTimersByTime() between inserts gives each
+    // row a distinct created_at without needing real-clock sleeps.
+    vi.useFakeTimers({ now: 1_000_000 })
     env = makeEnv()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("POST creates a link and embeds title+description", async () => {
