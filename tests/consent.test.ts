@@ -182,6 +182,21 @@ describe("consent FSM", () => {
     expect(b.sent.length).toBe(before2)
   })
 
+  it("cookies allow-all also honors the app settings object", async () => {
+    const b = makeBroadcast()
+    await chrome.storage.local.set({
+      "ai-dev-settings": { cookiesAllowAll: true }
+    })
+
+    const decision = await requestConsent(
+      { toolName: "cookies_get" },
+      { broadcast: b.fn }
+    )
+
+    expect(decision).toBe("allow")
+    expect(b.sent).toHaveLength(0)
+  })
+
   it("times out and denies if no response arrives", async () => {
     vi.useFakeTimers()
     const b = makeBroadcast()

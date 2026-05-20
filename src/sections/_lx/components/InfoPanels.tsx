@@ -207,6 +207,17 @@ export function NetworkPanel({ userIp, siteIp, onCopy }: { userIp: IpInfo | null
   )
 }
 
+function confidenceClass(confidence: string) {
+  switch (confidence.toLowerCase()) {
+    case "high":
+      return "bg-red-500/15 text-red-400"
+    case "medium":
+      return "bg-warning/15 text-warning"
+    default:
+      return "bg-accent text-fg/40"
+  }
+}
+
 export function TechPanel({ techs }: { techs: TechInfo[] }) {
   return (
     <div className="border-b border-border">
@@ -219,7 +230,12 @@ export function TechPanel({ techs }: { techs: TechInfo[] }) {
                 <span className="text-xs text-fg">{t.name}</span>
                 {t.version && <span className="text-[10px] text-fg/30">v{t.version}</span>}
               </div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent text-fg/40">{t.category}</span>
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent text-fg/40">{t.category}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-medium ${confidenceClass(t.confidence)}`}>
+                  {t.confidence}
+                </span>
+              </div>
             </div>
           ))}
         </div>

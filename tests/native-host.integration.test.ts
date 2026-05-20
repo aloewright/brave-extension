@@ -15,6 +15,7 @@ const HOST_PATH = resolve(__dirname, "..", "native-host", "ai-dev-host.mjs")
  *
  *   - send(msg)          — write a framed JSON request
  *   - waitFor(predicate) — await the next response matching predicate
+ *   - hasPending(pred)   — peek without consuming (for ordering assertions)
  *   - close()            — close stdin and wait for exit
  *
  * The decoder is robust to chunk boundaries: a single Node "data" event can
@@ -98,6 +99,13 @@ class HostClient {
     })
   }
 
+  // Non-destructive peek: returns true if any already-received frame matches
+  // predicate, without consuming it from the queue. Used by the stream test
+  // to assert ordering ("exit hasn't arrived yet") without disturbing state.
+  hasPending(predicate: (m: AnyMsg) => boolean): boolean {
+    return this.queue.some(predicate)
+  }
+
   close(): Promise<number | null> {
     return new Promise((resolve) => {
       this.child.once("close", (code) => resolve(code))
@@ -146,12 +154,16 @@ describe("native-host integration (PDX-88)", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it("exec: streams stdout chunks and emits started + exit frames", async () => {
-    // Stub child: print two distinct chunks (with a flush gap), then exit 0.
-    // The host appends the prompt as the final argv — we just ignore it here.
+  // ─── exec round-trip ───────────────────────────────────────────────
+  // Sends a command and asserts the host collects stdout, stderr, and the
+  // final exit frame for a single short-lived child process.
+  it("exec: collects stdout, stderr, and the exit code from a stub child", async () => {
+    // Stub child writes to both streams and exits with a non-zero code so we
+    // can verify the host faithfully forwards each channel and the exit code.
     const script =
-      "process.stdout.write('part-one\\n'); " +
-      "setTimeout(() => { process.stdout.write('part-two\\n'); process.exit(0); }, 25);"
+      "process.stdout.write('out-line\\n'); " +
+      "process.stderr.write('err-line\\n'); " +
+      "process.exit(7);"
     client = spawnHost({ cmd: process.execPath, args: ["-e", script] }, sessionStatePath)
 
     client.send({ type: "exec", backend: "claude", command: "hello-prompt", cwd: tmpDir })
@@ -160,29 +172,81 @@ describe("native-host integration (PDX-88)", () => {
     expect(typeof started.pid).toBe("number")
     expect(started.backend).toBe("claude")
 
-    // Collect stdout frames until the process exits. We don't assert on the
-    // chunk count (Node may coalesce writes) — we assert the concatenated
-    // payload contains both halves, proving streaming works end to end.
-    const chunks: string[] = []
+    // Scope the predicate to frames belonging to *this* child by matching
+    // pid; otherwise the host's MCP server startup logs (emitted as pid-less
+    // {type:"stderr"} frames from `mcp.start()` and `_registerWithClaudeJson`)
+    // race in and fail the `m.pid === started.pid` assertion below.
+    const pid = started.pid
+    const stdoutChunks: string[] = []
+    const stderrChunks: string[] = []
     let exitMsg: AnyMsg | null = null
     while (!exitMsg) {
-      const m = await client.waitFor((x) => x.type === "stdout" || x.type === "exit")
+      const m = await client.waitFor(
+        (x) =>
+          ((x.type === "stdout" || x.type === "stderr") && x.pid === pid) ||
+          (x.type === "exit" && x.pid === pid)
+      )
       if (m.type === "stdout") {
-        chunks.push(String(m.data))
-        expect(m.pid).toBe(started.pid)
+        stdoutChunks.push(String(m.data))
         expect(m.backend).toBe("claude")
+      } else if (m.type === "stderr") {
+        stderrChunks.push(String(m.data))
       } else {
         exitMsg = m
       }
     }
-    const joined = chunks.join("")
-    expect(joined).toContain("part-one")
-    expect(joined).toContain("part-two")
-    expect(exitMsg!.code).toBe(0)
+    expect(stdoutChunks.join("")).toContain("out-line")
+    expect(stderrChunks.join("")).toContain("err-line")
+    expect(exitMsg!.code).toBe(7)
     expect(exitMsg!.backend).toBe("claude")
     expect(exitMsg!.pid).toBe(started.pid)
   })
 
+  // ─── stream round-trip ─────────────────────────────────────────────
+  // Streaming is intrinsic to exec: stdout frames are emitted as data
+  // arrives. The contract under test is "the host does NOT buffer until
+  // exit". Two assertions enforce that:
+  //   1. We observe "part-one" before "part-two" arrives in a separate
+  //      frame, and
+  //   2. At the moment "part-one" lands, the queue contains NO exit frame
+  //      for this pid — proving the first chunk was delivered while the
+  //      child was still running, not flushed all-at-once at process close.
+  it("stream: observes mid-flight chunks before the child exits", async () => {
+    const script =
+      "process.stdout.write('part-one\\n'); " +
+      "setTimeout(() => { process.stdout.write('part-two\\n'); process.exit(0); }, 50);"
+    client = spawnHost({ cmd: process.execPath, args: ["-e", script] }, sessionStatePath)
+
+    client.send({ type: "exec", backend: "gemini", command: "stream-prompt", cwd: tmpDir })
+
+    const started = await client.waitFor((m) => m.type === "started")
+    const pid = started.pid as number
+
+    // First chunk lands while the child is still inside its setTimeout(50).
+    const first = await client.waitFor(
+      (m) => m.type === "stdout" && m.pid === pid && String(m.data).includes("part-one")
+    )
+    expect(first.backend).toBe("gemini")
+
+    // Critical ordering check: at this exact moment the child has NOT yet
+    // exited, so no `exit` frame for this pid can possibly be in the queue.
+    // If the host buffered output until process close, this assertion would
+    // fail (the exit frame would have been queued alongside both chunks).
+    expect(client.hasPending((m) => m.type === "exit" && m.pid === pid)).toBe(false)
+
+    const second = await client.waitFor(
+      (m) => m.type === "stdout" && m.pid === pid && String(m.data).includes("part-two")
+    )
+    expect(second.backend).toBe("gemini")
+
+    const exitMsg = await client.waitFor((m) => m.type === "exit" && m.pid === pid)
+    expect(exitMsg.code).toBe(0)
+  })
+
+  // ─── kill round-trip ───────────────────────────────────────────────
+  // Starts a long-running child, then sends "kill" and asserts the host
+  // emits a "killed" frame, drops the child from its activeProcesses map,
+  // and lets the process exit cleanly.
   it("kill: terminates a long-running child and emits a killed frame", async () => {
     // Stub child: sleep effectively forever so we can reliably kill it.
     const script =
@@ -205,6 +269,7 @@ describe("native-host integration (PDX-88)", () => {
     await client.waitFor((m) => m.type === "exit" && m.pid === pid)
   })
 
+  // ─── session-status round-trip (cold read) ─────────────────────────
   it("session-status: returns the persisted hasSession map as JSON", async () => {
     // Pre-seed a session-state file on disk; the host reads it at startup.
     const seeded = { claude: true, gemini: false, codex: true, copilot: false }
@@ -220,6 +285,9 @@ describe("native-host integration (PDX-88)", () => {
     expect(parsed).toMatchObject(seeded)
   })
 
+  // ─── session-status round-trip (state transitions) ─────────────────
+  // Verifies status before, during, and after a successful exec — proving
+  // the flag flips on success and can be cleared via reset-backend.
   it("session-status: reflects flag flip after a successful exec, then resets", async () => {
     // Successful exec with stdout output flips hasSession[backend] = true.
     const script = "process.stdout.write('ok\\n'); process.exit(0);"

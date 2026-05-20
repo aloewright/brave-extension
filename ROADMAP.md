@@ -9,8 +9,6 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
   history and write a migration test against the in-memory storage shim.
 - Settings UI polish: validate paths, surface CloudOS sync errors inline,
   keyboard navigation across backends (Claude Code, Gemini, Copilot, Codex).
-- Native-host integration tests covering `exec`, `stream`, `kill`, and
-  `session-status` round-trips against a stub child process.
 
 ## Next
 

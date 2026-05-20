@@ -77,7 +77,20 @@ export interface ConsentDeps {
 async function defaultReadFlag(key: string): Promise<boolean> {
   try {
     const r = await chrome.storage.local.get(key)
-    return !!r?.[key]
+    if (r?.[key]) return true
+
+    const settings = await chrome.storage.local.get("ai-dev-settings")
+    const rawSettings = settings?.["ai-dev-settings"]
+    const appSettings =
+      rawSettings && typeof rawSettings === "object"
+        ? (rawSettings as Record<string, unknown>)
+        : {}
+    if (key === EVAL_GATE_KEY) return appSettings.allowEvalJs === true
+    if (key === UNINSTALL_GATE_KEY) {
+      return appSettings.allowExtensionUninstall === true
+    }
+    if (key === COOKIES_ALLOW_ALL_KEY) return appSettings.cookiesAllowAll === true
+    return false
   } catch {
     return false
   }
