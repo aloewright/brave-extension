@@ -182,21 +182,6 @@ describe("consent FSM", () => {
     expect(b.sent.length).toBe(before2)
   })
 
-  it("cookies allow-all also honors the app settings object", async () => {
-    const b = makeBroadcast()
-    await chrome.storage.local.set({
-      "ai-dev-settings": { cookiesAllowAll: true }
-    })
-
-    const decision = await requestConsent(
-      { toolName: "cookies_get" },
-      { broadcast: b.fn }
-    )
-
-    expect(decision).toBe("allow")
-    expect(b.sent).toHaveLength(0)
-  })
-
   it("times out and denies if no response arrives", async () => {
     vi.useFakeTimers()
     const b = makeBroadcast()
@@ -303,5 +288,81 @@ describe("consent FSM", () => {
     )
     expect(b.sent).toHaveLength(1)
     expect(b.sent[0].toolClass).toBe("write")
+  })
+})
+
+// Tests for the defaultReadFlag simplification (PR change: removed fallback to
+// ai-dev-settings object; now only reads the direct storage key).
+describe("consent defaultReadFlag — direct storage key only", () => {
+  beforeEach(() => {
+    __test.reset()
+  })
+
+  it("grants eval_js when EVAL_GATE_KEY is set directly in storage", async () => {
+    // New behavior: only checks the direct key, not ai-dev-settings.allowEvalJs
+    await chrome.storage.local.set({ [EVAL_GATE_KEY]: true })
+    const decision = await requestConsent({ toolName: "eval_js" })
+    expect(decision).toBe("allow")
+  })
+
+  it("denies eval_js when EVAL_GATE_KEY is absent from storage", async () => {
+    // Key not set at all → deny
+    const decision = await requestConsent({ toolName: "eval_js" })
+    expect(decision).toBe("deny")
+  })
+
+  it("denies eval_js even when legacy ai-dev-settings.allowEvalJs is true", async () => {
+    // Old code checked ai-dev-settings.allowEvalJs; new code does NOT
+    await chrome.storage.local.set({
+      "ai-dev-settings": { allowEvalJs: true }
+    })
+    const decision = await requestConsent({ toolName: "eval_js" })
+    // Should be "deny" because EVAL_GATE_KEY itself is not set
+    expect(decision).toBe("deny")
+  })
+
+  it("grants extensions_uninstall when UNINSTALL_GATE_KEY is set directly", async () => {
+    await chrome.storage.local.set({ [UNINSTALL_GATE_KEY]: true })
+    const decision = await requestConsent({ toolName: "extensions_uninstall" })
+    expect(decision).toBe("allow")
+  })
+
+  it("denies extensions_uninstall when legacy ai-dev-settings.allowExtensionUninstall is true but direct key absent", async () => {
+    await chrome.storage.local.set({
+      "ai-dev-settings": { allowExtensionUninstall: true }
+    })
+    const decision = await requestConsent({ toolName: "extensions_uninstall" })
+    expect(decision).toBe("deny")
+  })
+
+  it("skips cookies prompt when COOKIES_ALLOW_ALL_KEY is set directly", async () => {
+    await chrome.storage.local.set({ [COOKIES_ALLOW_ALL_KEY]: true })
+    const b = makeBroadcast()
+    const decision = await requestConsent(
+      { toolName: "cookies_get" },
+      { broadcast: b.fn }
+    )
+    expect(decision).toBe("allow")
+    expect(b.sent).toHaveLength(0)
+  })
+
+  it("denies cookies allow-all when only legacy ai-dev-settings.cookiesAllowAll is set", async () => {
+    // Old code checked ai-dev-settings.cookiesAllowAll; new code does NOT
+    await chrome.storage.local.set({
+      "ai-dev-settings": { cookiesAllowAll: true }
+    })
+    const b = makeBroadcast()
+    // Should prompt (not auto-allow), so we immediately deny via timeout
+    vi.useFakeTimers()
+    const p = requestConsent(
+      { toolName: "cookies_get" },
+      { broadcast: b.fn, timeoutMs: 100 }
+    )
+    await vi.advanceTimersByTimeAsync(200)
+    const decision = await p
+    vi.useRealTimers()
+    // With old behavior this would have been "allow"; new behavior prompts → timeout → deny
+    expect(decision).toBe("deny")
+    expect(b.sent.length).toBeGreaterThan(0)
   })
 })

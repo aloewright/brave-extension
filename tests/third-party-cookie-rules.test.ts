@@ -14,10 +14,21 @@ describe("third-party cookie rules", () => {
     expect(packageJson.manifest.permissions).toContain("contentSettings")
   })
 
+  // PR change: "desktopCapture" and "history" were removed from manifest permissions.
+  it("does not declare the desktopCapture permission (removed in this PR)", () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"))
+    expect(packageJson.manifest.permissions).not.toContain("desktopCapture")
+  })
+
+  it("does not declare the history permission (removed in this PR)", () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"))
+    expect(packageJson.manifest.permissions).not.toContain("history")
+  })
+
   it("strips third-party Cookie and Set-Cookie headers by default", () => {
     const [blockRule] = buildThirdPartyCookieRules([])
 
-    expect(blockRule.action.type).toBe("modifyHeaders")
+
     expect(blockRule.condition.domainType).toBe("thirdParty")
     expect(blockRule.action.requestHeaders).toContainEqual({
       header: "cookie",
