@@ -143,3 +143,88 @@ export async function listLinks(
 export async function deleteLink(env: Env, id: string): Promise<void> {
   await env.DB.prepare("DELETE FROM links WHERE id = ?").bind(id).run()
 }
+
+// ── Bookmark queries ───────────────────────────────────────────────────────
+export interface BookmarkRow {
+  id: string
+  url: string
+  title: string
+  parent_id: string | null
+  path: string                 // JSON array stored as TEXT
+  category: string
+  is_favorite: number          // 0 | 1
+  date_added: number | null
+  position: number | null
+  chunk_count: number
+  synced_at: number
+}
+
+export async function getBookmark(env: Env, id: string): Promise<BookmarkRow | null> {
+  return (await env.DB.prepare("SELECT * FROM bookmarks WHERE id = ?").bind(id).first<BookmarkRow>()) ?? null
+}
+
+export async function listBookmarks(
+  env: Env,
+  opts: { category?: string; favorite?: boolean; limit?: number } = {}
+): Promise<BookmarkRow[]> {
+  const limit = Math.min(opts.limit ?? 500, 2000)
+  const where: string[] = []
+  const binds: (string | number)[] = []
+  if (opts.category) {
+    where.push("category = ?")
+    binds.push(opts.category)
+  }
+  if (opts.favorite !== undefined) {
+    where.push("is_favorite = ?")
+    binds.push(opts.favorite ? 1 : 0)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const stmt = env.DB.prepare(
+    `SELECT * FROM bookmarks ${whereSql} ORDER BY category, position LIMIT ?`
+  ).bind(...binds, limit)
+  const { results } = await stmt.all<BookmarkRow>()
+  return results ?? []
+}
+
+export async function insertBookmark(env: Env, row: BookmarkRow): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO bookmarks
+       (id, url, title, parent_id, path, category, is_favorite,
+        date_added, position, chunk_count, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      row.id, row.url, row.title, row.parent_id, row.path, row.category,
+      row.is_favorite, row.date_added, row.position, row.chunk_count, row.synced_at
+    )
+    .run()
+}
+
+export async function updateBookmark(env: Env, row: BookmarkRow): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE bookmarks SET
+       url = ?, title = ?, parent_id = ?, path = ?, category = ?,
+       is_favorite = ?, date_added = ?, position = ?, chunk_count = ?, synced_at = ?
+     WHERE id = ?`
+  )
+    .bind(
+      row.url, row.title, row.parent_id, row.path, row.category,
+      row.is_favorite, row.date_added, row.position, row.chunk_count, row.synced_at,
+      row.id
+    )
+    .run()
+}
+
+export async function deleteBookmark(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM bookmarks WHERE id = ?").bind(id).run()
+}
+
+/** Used by snapshot diff — returns just the columns we need to detect changes. */
+export async function listAllBookmarksDiffShape(
+  env: Env
+): Promise<{ id: string; url: string; title: string; category: string; chunk_count: number }[]> {
+  const { results } = await env.DB
+    .prepare("SELECT id, url, title, category, chunk_count FROM bookmarks")
+    .all<{ id: string; url: string; title: string; category: string; chunk_count: number }>()
+  return results ?? []
+}

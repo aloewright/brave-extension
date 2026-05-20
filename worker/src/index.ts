@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { requireToken } from "./auth"
 import conversations from "./routes/conversations"
 import links from "./routes/links"
+import bookmarks from "./routes/bookmarks"
 import search from "./routes/search"
 import type { Env } from "./env"
 
@@ -15,6 +16,7 @@ app.get("/api/health", (c) =>
 
 app.route("/api/conversations", conversations)
 app.route("/api/links", links)
+app.route("/api/bookmarks", bookmarks)
 app.route("/api/search", search)
 
 app.notFound((c) => c.json({ error: { code: "not_found", message: "no such route" } }, 404))
