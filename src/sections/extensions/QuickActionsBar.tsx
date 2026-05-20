@@ -12,6 +12,10 @@ import {
 import { triggerPipInTab } from "../../lib/pip/coord"
 import { getAutoPipEnabled, setAutoPipEnabled } from "../../lib/pip/auto"
 import { PIP_NO_CONTENT_SCRIPT_REASON } from "../../lib/pip/protocol"
+import {
+  captureErrorMessage,
+  captureVisibleOrPromptedScreenshot
+} from "../../lib/screenshot-capture"
 
 type SectionId = "library" | "recorder"
 
@@ -71,12 +75,14 @@ export function QuickActionsBar({ onNavigate }: Props) {
   const onScreenshot = async () => {
     const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: "png" })
+      const result = await captureVisibleOrPromptedScreenshot(win.id, {
+        onFallback: () => flash("Choose tab/window to capture")
+      })
       const filename = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`
-      await chrome.downloads.download({ url: dataUrl, filename, saveAs: false })
-      flash("Screenshot saved")
+      await chrome.downloads.download({ url: result.dataUrl, filename, saveAs: false })
+      flash(result.source === "display-picker" ? "Screenshot saved from picker" : "Screenshot saved")
     } catch (err) {
-      flash(`Screenshot failed: ${err instanceof Error ? err.message : String(err)}`)
+      flash(`Screenshot failed: ${captureErrorMessage(err)}`)
     }
   }
 
