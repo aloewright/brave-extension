@@ -1,23 +1,27 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState } from "react";
 import {
   RECORDER_STORAGE_KEY,
   type RecorderSource,
-  type RecordingMetadata
-} from "../../types"
+  type RecordingMetadata,
+} from "../../types";
 
 interface RecState {
-  active: boolean
-  paused: boolean
-  source: RecorderSource | null
-  startedAt: number | null
-  elapsedMs: number
-  lastResumedAt: number | null
-  lastSaved: { id: string; filename: string; sizeBytes: number; at: number } | null
-  lastError: string | null
+  active: boolean;
+  paused: boolean;
+  source: RecorderSource | null;
+  startedAt: number | null;
+  elapsedMs: number;
+  lastResumedAt: number | null;
+  lastSaved: {
+    id: string;
+    filename: string;
+    sizeBytes: number;
+    at: number;
+  } | null;
+  lastError: string | null;
 }
 
 export function RecorderSection() {
-  const [source, setSource] = useState<RecorderSource>("tab")
   const [state, setState] = useState<RecState>({
     active: false,
     paused: false,
@@ -26,105 +30,90 @@ export function RecorderSection() {
     elapsedMs: 0,
     lastResumedAt: null,
     lastSaved: null,
-    lastError: null
-  })
-  const [history, setHistory] = useState<RecordingMetadata[]>([])
-  const [now, setNow] = useState(Date.now())
+    lastError: null,
+  });
+  const [history, setHistory] = useState<RecordingMetadata[]>([]);
+  const [now, setNow] = useState(Date.now());
 
   // Initial state pull + storage subscription.
   useEffect(() => {
-    chrome.runtime.sendMessage({ type: "GET_RECORDING_STATE" }, (res: { state: RecState }) => {
-      if (res?.state) setState(res.state)
-    })
+    chrome.runtime.sendMessage(
+      { type: "GET_RECORDING_STATE" },
+      (res: { state: RecState }) => {
+        if (res?.state) setState(res.state);
+      },
+    );
     chrome.storage.local.get(RECORDER_STORAGE_KEY).then((got) => {
-      const list = (got[RECORDER_STORAGE_KEY] as RecordingMetadata[] | undefined) ?? []
-      setHistory(list)
-    })
+      const list =
+        (got[RECORDER_STORAGE_KEY] as RecordingMetadata[] | undefined) ?? [];
+      setHistory(list);
+    });
     const onMsg = (msg: any) => {
-      if (msg?.type === "recording-state" && msg.state) setState(msg.state)
-    }
-    chrome.runtime.onMessage.addListener(onMsg)
+      if (msg?.type === "recording-state" && msg.state) setState(msg.state);
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
     const onChange = (
       changes: Record<string, chrome.storage.StorageChange>,
-      area: string
+      area: string,
     ) => {
       if (area === "local" && RECORDER_STORAGE_KEY in changes) {
-        const list = (changes[RECORDER_STORAGE_KEY].newValue as
-          | RecordingMetadata[]
-          | undefined) ?? []
-        setHistory(list)
+        const list =
+          (changes[RECORDER_STORAGE_KEY].newValue as
+            | RecordingMetadata[]
+            | undefined) ?? [];
+        setHistory(list);
       }
-    }
-    chrome.storage.onChanged.addListener(onChange)
+    };
+    chrome.storage.onChanged.addListener(onChange);
     return () => {
-      chrome.runtime.onMessage.removeListener(onMsg)
-      chrome.storage.onChanged.removeListener(onChange)
-    }
-  }, [])
+      chrome.runtime.onMessage.removeListener(onMsg);
+      chrome.storage.onChanged.removeListener(onChange);
+    };
+  }, []);
 
   // Tick for the active duration display.
   useEffect(() => {
-    if (!state.active || state.paused) return
-    const i = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(i)
-  }, [state.active, state.paused])
+    if (!state.active || state.paused) return;
+    const i = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(i);
+  }, [state.active, state.paused]);
 
   const handleStart = () => {
     chrome.runtime.sendMessage(
-      { type: "START_RECORDING", source },
+      { type: "START_RECORDING", source: "screen" },
       (res: { ok: boolean; error?: string }) => {
         if (!res?.ok) {
-          setState((s) => ({ ...s, lastError: res?.error || "Start failed" }))
+          setState((s) => ({ ...s, lastError: res?.error || "Start failed" }));
         }
-      }
-    )
-  }
+      },
+    );
+  };
 
   const handleStop = () => {
-    chrome.runtime.sendMessage({ type: "STOP_RECORDING" })
-  }
+    chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
+  };
 
   const handlePause = () => {
-    chrome.runtime.sendMessage({ type: "PAUSE_RECORDING" })
-  }
+    chrome.runtime.sendMessage({ type: "PAUSE_RECORDING" });
+  };
 
   const handleResume = () => {
-    chrome.runtime.sendMessage({ type: "RESUME_RECORDING" })
-  }
+    chrome.runtime.sendMessage({ type: "RESUME_RECORDING" });
+  };
 
-  const elapsedMs = elapsedRecordingMs(state, now)
+  const elapsedMs = elapsedRecordingMs(state, now);
 
   return (
     <div className="flex flex-col h-full p-4 gap-4 text-fg">
       <div className="text-sm font-medium">Recorder</div>
-
-      <div className="flex flex-col gap-2">
-        <label className="text-xs uppercase tracking-wide text-fg/50">Source</label>
-        <div className="flex gap-2">
-          {(["tab", "screen", "camera"] as RecorderSource[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              disabled={state.active}
-              onClick={() => setSource(s)}
-              className={
-                "px-3 py-1.5 rounded text-xs border transition-colors " +
-                (source === s
-                  ? "bg-fg text-bg border-fg"
-                  : "border-fg/20 text-fg/70 hover:bg-fg/10")
-              }>
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <div className="flex items-center gap-3">
         {!state.active ? (
           <button
             type="button"
             onClick={handleStart}
-            className="px-3 py-2 rounded bg-red-500 text-white text-sm font-medium hover:bg-red-600">
+            className="px-3 py-2 rounded bg-red-500 text-white text-sm font-medium hover:bg-red-600"
+          >
             Start recording
           </button>
         ) : (
@@ -132,13 +121,15 @@ export function RecorderSection() {
             <button
               type="button"
               onClick={state.paused ? handleResume : handlePause}
-              className="px-3 py-2 rounded border border-fg/20 text-fg text-sm font-medium hover:bg-fg/10">
+              className="px-3 py-2 rounded border border-fg/20 text-fg text-sm font-medium hover:bg-fg/10"
+            >
               {state.paused ? "Resume" : "Pause"}
             </button>
             <button
               type="button"
               onClick={handleStop}
-              className="px-3 py-2 rounded bg-fg text-bg text-sm font-medium hover:opacity-90">
+              className="px-3 py-2 rounded bg-fg text-bg text-sm font-medium hover:opacity-90"
+            >
               Stop ({formatDuration(elapsedMs)})
             </button>
           </>
@@ -174,7 +165,8 @@ export function RecorderSection() {
             {history.slice(0, 10).map((r) => (
               <li
                 key={r.id}
-                className="flex justify-between gap-2 text-fg/70 font-mono">
+                className="flex justify-between gap-2 text-fg/70 font-mono"
+              >
                 <span className="truncate">{r.filename}</span>
                 <span className="shrink-0">
                   {r.source} · {formatDuration(r.durationMs)} ·{" "}
@@ -186,26 +178,26 @@ export function RecorderSection() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function elapsedRecordingMs(state: RecState, now: number): number {
-  if (!state.active) return state.elapsedMs || 0
-  if (state.paused || !state.lastResumedAt) return state.elapsedMs || 0
-  return (state.elapsedMs || 0) + Math.max(0, now - state.lastResumedAt)
+  if (!state.active) return state.elapsedMs || 0;
+  if (state.paused || !state.lastResumedAt) return state.elapsedMs || 0;
+  return (state.elapsedMs || 0) + Math.max(0, now - state.lastResumedAt);
 }
 
 function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000)
+  const s = Math.floor(ms / 1000);
   const mm = Math.floor(s / 60)
     .toString()
-    .padStart(2, "0")
-  const ss = (s % 60).toString().padStart(2, "0")
-  return `${mm}:${ss}`
+    .padStart(2, "0");
+  const ss = (s % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
 }
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

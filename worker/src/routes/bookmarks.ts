@@ -4,7 +4,7 @@ import {
   deleteBookmark, getBookmark, insertBookmark, listAllBookmarksDiffShape,
   listBookmarks, updateBookmark, type BookmarkRow
 } from "../db"
-import { deleteFor, upsertFor } from "../vectors"
+import { deleteFor, upsertFor, vectorIdFor } from "../vectors"
 
 const bookmarks = new Hono<{ Bindings: Env }>()
 
@@ -73,7 +73,7 @@ bookmarks.post("/snapshot", async (c) => {
   for (const b of incoming) {
     const prev = existing.get(b.id)
     if (prev) {
-      const needsEmbed = prev.url !== b.url || prev.title !== b.title
+      const needsEmbed = prev.url !== b.url || prev.title !== b.title || prev.category !== b.category
       let chunkCount = prev.chunk_count
       if (needsEmbed) {
         const r = await upsertFor(c.env, "bookmark", b.id, embedTextFor(b), {

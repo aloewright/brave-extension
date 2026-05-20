@@ -3,15 +3,16 @@ export type SectionId =
   | "inspector"
   | "extensions"
   | "library"
+  | "bookmarks"
   | "cookies"
   | "recorder"
   | "eyedropper"
-  | "settings"
+  | "settings";
 
 export interface SectionDef {
-  id: SectionId
-  label: string
-  shortcut?: string
+  id: SectionId;
+  label: string;
+  shortcut?: string;
 }
 
 export const SECTIONS: SectionDef[] = [
@@ -19,8 +20,9 @@ export const SECTIONS: SectionDef[] = [
   { id: "inspector", label: "Inspector" },
   { id: "extensions", label: "Extensions" },
   { id: "library", label: "Library" },
+  { id: "bookmarks", label: "Bookmarks" },
   { id: "cookies", label: "Cookies" },
   { id: "recorder", label: "Recorder" },
   { id: "eyedropper", label: "Eyedropper" },
-  { id: "settings", label: "Settings" }
-]
+  { id: "settings", label: "Settings" },
+];
