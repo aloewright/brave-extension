@@ -192,7 +192,7 @@ describe("db - bookmarks", () => {
     expect(await getBookmark(env, "b1")).toBeNull()
   })
 
-  it("listAllBookmarksDiffShape returns id/url/title/chunk_count for every row", async () => {
+  it("listAllBookmarksDiffShape returns id/url/title/category/chunk_count for every row", async () => {
     await insertBookmark(env, row("b1", { chunk_count: 2 }))
     await insertBookmark(env, row("b2", { chunk_count: 1 }))
     const all = await listAllBookmarksDiffShape(env)
@@ -201,6 +201,7 @@ describe("db - bookmarks", () => {
       id: "b1",
       url: "https://b1.example",
       title: "t-b1",
+      category: "Unfiled",
       chunk_count: 2
     })
   })

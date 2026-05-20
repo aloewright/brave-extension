@@ -225,6 +225,6 @@ export async function listAllBookmarksDiffShape(
 ): Promise<{ id: string; url: string; title: string; category: string; chunk_count: number }[]> {
   const { results } = await env.DB
     .prepare("SELECT id, url, title, category, chunk_count FROM bookmarks")
-    .all<{ id: string; url: string; title: string; chunk_count: number }>()
+    .all<{ id: string; url: string; title: string; category: string; chunk_count: number }>()
   return results ?? []
 }

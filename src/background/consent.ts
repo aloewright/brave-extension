@@ -75,22 +75,13 @@ export interface ConsentDeps {
 }
 
 async function defaultReadFlag(key: string): Promise<boolean> {
+  // Direct-key only — the legacy ai-dev-settings.{allowEvalJs,
+  // allowExtensionUninstall, cookiesAllowAll} fallback was removed so
+  // dangerous tools require an explicit, scoped storage flag instead of
+  // inheriting from the broad settings object.
   try {
     const r = await chrome.storage.local.get(key)
-    if (r?.[key]) return true
-
-    const settings = await chrome.storage.local.get("ai-dev-settings")
-    const rawSettings = settings?.["ai-dev-settings"]
-    const appSettings =
-      rawSettings && typeof rawSettings === "object"
-        ? (rawSettings as Record<string, unknown>)
-        : {}
-    if (key === EVAL_GATE_KEY) return appSettings.allowEvalJs === true
-    if (key === UNINSTALL_GATE_KEY) {
-      return appSettings.allowExtensionUninstall === true
-    }
-    if (key === COOKIES_ALLOW_ALL_KEY) return appSettings.cookiesAllowAll === true
-    return false
+    return r?.[key] === true
   } catch {
     return false
   }
