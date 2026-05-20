@@ -4,7 +4,7 @@ import {
   deleteBookmark, getBookmark, insertBookmark, listAllBookmarksDiffShape,
   listBookmarks, updateBookmark, type BookmarkRow
 } from "../db"
-import { deleteFor, upsertFor } from "../vectors"
+import { deleteFor, upsertFor, vectorIdFor } from "../vectors"
 
 const bookmarks = new Hono<{ Bindings: Env }>()
 
