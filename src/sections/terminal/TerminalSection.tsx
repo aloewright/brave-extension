@@ -13,10 +13,15 @@ interface Tab {
 }
 
 function newSessionId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID()
+  const webCrypto = globalThis.crypto
+  if (webCrypto?.randomUUID) {
+    return webCrypto.randomUUID()
   }
-  return `pty_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+  const bytes = new Uint8Array(6)
+  webCrypto?.getRandomValues(bytes)
+  const suffix = Array.from(bytes, (byte) => byte.toString(36).padStart(2, "0")).join("")
+  return `pty_${Date.now()}_${suffix}`
 }
 
 interface TerminalSectionProps {

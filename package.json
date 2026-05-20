@@ -22,7 +22,6 @@
     "@plasmohq/storage": "^1.15.0",
     "@tanstack/react-virtual": "^3.13.24",
     "fflate": "^0.8.3",
-    "plasmo": "0.90.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xterm": "^5.3.0",
@@ -36,14 +35,30 @@
     "@types/node": "^22.19.17",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^4.1.7",
     "autoprefixer": "^10.5.0",
-    "happy-dom": "^15.11.7",
+    "happy-dom": "^20.9.0",
     "postcss": "^8.5.14",
+    "plasmo": "0.90.5",
     "prettier": "3.8.3",
     "tailwindcss": "^3.4.19",
     "typescript": "6.0.3",
-    "vitest": "^2.1.9"
+    "vite": "6.4.2",
+    "vitest": "^4.1.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "@babel/traverse": "7.29.0",
+      "@plasmohq/parcel-resolver-post": "0.4.6",
+      "@plasmohq/parcel-transformer-manifest": "0.21.1",
+      "@plasmohq/parcel-transformer-svelte": "0.6.1",
+      "content-security-policy-parser": "0.6.0",
+      "esbuild": "0.25.12",
+      "msgpackr": "1.11.9",
+      "svelte": "5.55.9",
+      "tsup": "8.5.1",
+      "vite": "6.4.2"
+    }
   },
   "manifest": {
     "permissions": [
