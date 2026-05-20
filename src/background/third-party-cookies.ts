@@ -28,8 +28,8 @@ function settingPatternForDomain(domain: string) {
 }
 
 function chromeSettingSet<T>(
-  setting: chrome.types.ChromeSetting<T>,
-  details: chrome.types.ChromeSettingSetDetails<T>
+  setting: chrome.types.ChromeSetting,
+  details: chrome.types.ChromeSettingSetDetails
 ) {
   return new Promise<void>((resolve, reject) => {
     setting.set(details, () => {
@@ -40,7 +40,7 @@ function chromeSettingSet<T>(
   })
 }
 
-function contentSettingsClear(setting: chrome.contentSettings.ContentSetting<string>) {
+function contentSettingsClear(setting: chrome.contentSettings.ContentSetting) {
   return new Promise<void>((resolve, reject) => {
     setting.clear({}, () => {
       const err = chrome.runtime.lastError
@@ -50,10 +50,10 @@ function contentSettingsClear(setting: chrome.contentSettings.ContentSetting<str
   })
 }
 
-type CookieContentSetting = `${chrome.contentSettings.CookiesContentSetting}`
+type CookieContentSetting = chrome.contentSettings.CookieSetDetails["setting"]
 
 function contentSettingsSetCookies(
-  details: chrome.contentSettings.ContentSettingSetParams<CookieContentSetting>
+  details: chrome.contentSettings.CookieSetDetails & { setting: CookieContentSetting }
 ) {
   return new Promise<void>((resolve, reject) => {
     chrome.contentSettings.cookies.set(details, () => {
