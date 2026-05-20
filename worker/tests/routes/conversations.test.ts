@@ -64,7 +64,7 @@ describe("/api/conversations", () => {
         body: JSON.stringify({ backend: "claude", title: `t${i}`, content_text: "x", started_at: i, message_count: 1 })
       })
       // ensure updated_at differs
-      vi.advanceTimersByTime(2);
+      await new Promise((r) => setTimeout(r, 2))
     }
     const res = await authed(env, "/api/conversations")
     expect(res.status).toBe(200)

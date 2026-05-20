@@ -59,7 +59,7 @@ describe("/api/links", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: u, title: u })
       })
-      vi.advanceTimersByTime(2);
+      await new Promise((r) => setTimeout(r, 2))
     }
     const res = await authed(env, "/api/links")
     const body = (await res.json()) as { links: { url: string }[] }
