@@ -15,6 +15,11 @@ migrations_dir = "./migrations"
 binding = "VECTORS"
 index_name = "sidebar-search"
 
+# R2 bucket for recordings + PDFs. Created via `wrangler r2 bucket create sidebar-blobs`.
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "sidebar-blobs"
+
 # Workers AI binding. Tests don't read this file (they use plain vitest
 # with stubbed env.AI), so it's safe to keep enabled here for production.
 [ai]
