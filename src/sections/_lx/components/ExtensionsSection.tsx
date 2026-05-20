@@ -10,6 +10,7 @@ import {
 import type { ExtensionInfo, Settings } from "../types"
 import { FuzzySearchInput } from "./FuzzySearchInput"
 import { fuzzySearch } from "../utils/fuzzy"
+import { enabledExtensionsFirst } from "../utils/extensions"
 
 interface Props {
   extensions: ExtensionInfo[]
@@ -157,13 +158,14 @@ export function ExtensionsSection({
   const pinnedExtensions = (settings.alwaysEnabled || [])
     .map((id) => extensions.find((e) => e.id === id))
     .filter((e): e is ExtensionInfo => !!e)
+  const orderedPinnedExtensions = enabledExtensionsFirst(pinnedExtensions)
 
   return (
     <div>
       {/* Pinned-extensions bar — quick toggle icons for pinned apps */}
-      {pinnedExtensions.length > 0 && (
+      {orderedPinnedExtensions.length > 0 && (
         <div className="mb-3 -mx-1 px-1 pb-2 flex gap-1.5 overflow-x-auto border-b border-border">
-          {pinnedExtensions.map((ext) => {
+          {orderedPinnedExtensions.map((ext) => {
             const iconUrl = ext.icons?.length ? ext.icons[ext.icons.length - 1].url : undefined
             return (
               <button
