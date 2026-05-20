@@ -1,7 +1,7 @@
 import { SettingsPanel } from "../../components/SettingsPanel"
 import { useSettings } from "../../hooks/useSettings"
 import { useNativeHost } from "../../hooks/useNativeHost"
-import { useCloudosSync } from "../../hooks/useCloudosSync"
+import { useSidebarSync } from "../../hooks/useSidebarSync"
 import { useEffect, useRef, useState } from "react"
 import type { MCPServer, MCPStatus } from "../../types"
 
@@ -45,7 +45,7 @@ export function SettingsSection() {
       }
     }
   } as any)
-  const cloudosSync = useCloudosSync({ settings, messages: [] })
+  const sidebarSync = useSidebarSync({ settings, messages: [] })
 
   useEffect(() => {
     if (settings && nativeHost.connected) {
@@ -76,7 +76,7 @@ export function SettingsSection() {
       onClose={() => {}}
       nativeHost={nativeHost}
       mcpServers={mcpServers}
-      cloudosSync={cloudosSync}
+      sidebarSync={sidebarSync}
       mcp={{
         status: mcpStatus,
         refresh: () => nativeHost.mcpStatus(),
