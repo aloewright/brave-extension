@@ -1,0 +1,21 @@
+name = "sidebar-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 — filled in after `wrangler d1 create sidebar` in Task 9
+[[d1_databases]]
+binding = "DB"
+database_name = "sidebar"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "./migrations"
+
+# Vectorize — filled in after `wrangler vectorize create sidebar-search` in Task 9
+[[vectorize]]
+binding = "VECTORS"
+index_name = "sidebar-search"
+
+# Workers AI binding. Tests don't read this file (they use plain vitest
+# with stubbed env.AI), so it's safe to keep enabled here for production.
+[ai]
+binding = "AI"
