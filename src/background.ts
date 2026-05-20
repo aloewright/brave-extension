@@ -481,11 +481,30 @@ async function saveLinkToLibrary(url: string, title: string): Promise<void> {
   const cur = await chrome.storage.local.get(key);
   const links: any[] = Array.isArray(cur[key]) ? cur[key] : [];
   const tags: string[] = [];
-  const u = (url || "").toLowerCase();
-  if (u.includes("youtube.com") || u.includes("youtu.be")) tags.push("youtube");
-  if (u.includes("github.com")) tags.push("github");
-  if (u.includes("arxiv.org")) tags.push("research");
-  if (u.includes("stackoverflow.com")) tags.push("stackoverflow");
+
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    host = "";
+  }
+
+  if (
+    host === "youtube.com" ||
+    host.endsWith(".youtube.com") ||
+    host === "youtu.be"
+  ) {
+    tags.push("youtube");
+  }
+  if (host === "github.com" || host.endsWith(".github.com")) tags.push("github");
+  if (host === "arxiv.org" || host.endsWith(".arxiv.org")) tags.push("research");
+  if (
+    host === "stackoverflow.com" ||
+    host.endsWith(".stackoverflow.com")
+  ) {
+    tags.push("stackoverflow");
+  }
+
   links.unshift({
     id:
       typeof crypto !== "undefined" && "randomUUID" in crypto
