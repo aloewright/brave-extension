@@ -3,6 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2024-12-30"
 compatibility_flags = ["nodejs_compat"]
 
+# Static SPA served from the same Worker. /api/* still hits Hono via the
+# main script; everything else falls through to the asset bundle, with
+# SPA-style fallback to index.html so client-side routes resolve.
+[assets]
+directory = "./dist/web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
 # D1 — filled in after `wrangler d1 create sidebar` in Task 9
 [[d1_databases]]
 binding = "DB"
