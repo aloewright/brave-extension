@@ -19,7 +19,11 @@ const KEYS = {
   scanCache: "ai-dev-scan-cache",
   // Top-level marker that signals every backend shard has been hydrated from
   // the legacy key and the legacy key is safe to drop.
-  legacyMigrationComplete: "migration:ai-dev-messages-complete"
+  legacyMigrationComplete: "migration:ai-dev-messages-complete",
+  // Phase 5 — one-shot migration that copies any non-empty cloudos* settings
+  // into the matching sidebar* slot so users don't have to re-enter the URL
+  // and token after upgrading.
+  cloudosToSidebarMigration: "migration:cloudos-to-sidebar"
 }
 
 const SCAN_CACHE_LIMIT = 50
@@ -35,13 +39,63 @@ function migrationMarkerKey(backend: CLIBackend): string {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const result = await chrome.storage.local.get(KEYS.settings)
-  return { ...defaultSettings(), ...result[KEYS.settings] }
+  const result = await chrome.storage.local.get([KEYS.settings, KEYS.cloudosToSidebarMigration])
+  const stored = (result[KEYS.settings] as Partial<Settings> | undefined) ?? {}
+  const merged: Settings = { ...defaultSettings(), ...stored }
+  if (result[KEYS.cloudosToSidebarMigration]) return merged
+
+  const migrated = migrateCloudosToSidebar(merged)
+  if (migrated !== merged) {
+    await chrome.storage.local.set({
+      [KEYS.settings]: migrated,
+      [KEYS.cloudosToSidebarMigration]: true
+    })
+  } else {
+    await chrome.storage.local.set({ [KEYS.cloudosToSidebarMigration]: true })
+  }
+  return migrated
 }
 
 export async function setSettings(settings: Partial<Settings>): Promise<void> {
   const current = await getSettings()
   await chrome.storage.local.set({ [KEYS.settings]: { ...current, ...settings } })
+}
+
+/**
+ * Copy any non-empty cloudos* values into the matching sidebar* slot when
+ * the sidebar slot is still at its default. Idempotent — never overwrites
+ * a sidebar value the user already set, and returns the same reference when
+ * no copy happened (so callers can short-circuit a write).
+ */
+export function migrateCloudosToSidebar(settings: Settings): Settings {
+  const defaults = defaultSettings()
+  const next = { ...settings }
+  let changed = false
+
+  // URL: if sidebar URL is still the default AND cloudos URL has been changed
+  // from its placeholder default (i.e. the user actually configured it), copy.
+  if (next.sidebarApiUrl === defaults.sidebarApiUrl
+      && settings.cloudosNotesUrl
+      && settings.cloudosNotesUrl !== defaults.cloudosNotesUrl) {
+    // Cloudos URL pointed at /api/notes; strip the path so we get the bare
+    // origin and let the sidebar client append /api/...
+    next.sidebarApiUrl = settings.cloudosNotesUrl.replace(/\/api\/notes\/?$/, "")
+    changed = true
+  }
+  if (!next.sidebarApiToken && settings.cloudosServiceToken) {
+    next.sidebarApiToken = settings.cloudosServiceToken
+    changed = true
+  }
+  if (!next.sidebarSyncEnabled && settings.cloudosSyncEnabled) {
+    next.sidebarSyncEnabled = true
+    changed = true
+  }
+  if (!next.sidebarPruneAfterSync && settings.cloudosPruneAfterSync) {
+    next.sidebarPruneAfterSync = true
+    changed = true
+  }
+
+  return changed ? next : settings
 }
 
 /**
@@ -255,7 +309,8 @@ export async function clearMessages(backend?: CLIBackend): Promise<void> {
 
 export async function getInspectorSettings(): Promise<InspectorSettings> {
   const result = await chrome.storage.local.get(KEYS.inspectorSettings)
-  return { ...DEFAULT_INSPECTOR_SETTINGS, ...result[KEYS.inspectorSettings] }
+  const stored = (result[KEYS.inspectorSettings] as Partial<InspectorSettings> | undefined) ?? {}
+  return { ...DEFAULT_INSPECTOR_SETTINGS, ...stored }
 }
 
 export async function setInspectorSettings(
@@ -273,13 +328,13 @@ export function scanCacheKey(url: string): string {
 
 export async function getCachedScan(url: string): Promise<CachedScan | null> {
   const result = await chrome.storage.local.get(KEYS.scanCache)
-  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  const cache = (result[KEYS.scanCache] as Record<string, CachedScan> | undefined) ?? {}
   return cache[scanCacheKey(url)] ?? null
 }
 
 export async function setCachedScan(scan: ScanResult): Promise<void> {
   const result = await chrome.storage.local.get(KEYS.scanCache)
-  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  const cache = (result[KEYS.scanCache] as Record<string, CachedScan> | undefined) ?? {}
   const key = scanCacheKey(scan.url)
   cache[key] = { url: key, result: scan, cachedAt: new Date().toISOString() }
 
@@ -306,6 +361,10 @@ function defaultSettings(): Settings {
     captureConsole: true,
     captureNetwork: false,
     theme: "dark",
+    sidebarSyncEnabled: false,
+    sidebarApiUrl: "https://sidebar.pdx.software",
+    sidebarApiToken: "",
+    sidebarPruneAfterSync: false,
     cloudosSyncEnabled: false,
     cloudosNotesUrl: "https://notes.pdx.software/api/notes",
     cloudosServiceToken: "",
