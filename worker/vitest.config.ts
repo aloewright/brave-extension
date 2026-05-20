@@ -1,7 +1,9 @@
 import { defineConfig } from "vitest/config"
+import react from "@vitejs/plugin-react"
 import { fileURLToPath } from "node:url"
 
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       // `cloudflare:workers` only exists inside workerd. Tests map it to a
@@ -14,7 +16,8 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    setupFiles: ["./tests/web/setup.ts"],
     server: {
       deps: {
         // node: built-ins must not be bundled by vite — let Node resolve them.

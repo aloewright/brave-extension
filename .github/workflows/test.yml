@@ -64,3 +64,6 @@ jobs:
       - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm typecheck
       - run: pnpm test
+      # Smoke the SPA build so a broken web/ TS or Vite config can't slip
+      # through without the worker job catching it.
+      - run: pnpm build:web
