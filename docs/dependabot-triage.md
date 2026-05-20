@@ -4,7 +4,7 @@ _Last updated: 2026-05-06_
 
 This is the shared standard operating procedure for the weekly Dependabot
 rotation across the swarm repos: `alex`, `cloudos`, `codemode`,
-`ai-dev-sidebar`, `lean-extensions`.
+`brave-extension`, `lean-extensions`.
 
 ## Schedule
 
@@ -42,7 +42,7 @@ Monday.
    - https://github.com/aloewright/alex/security/dependabot
    - https://github.com/aloewright/cloudos/security/dependabot
    - https://github.com/aloewright/codemode/security/dependabot
-   - https://github.com/aloewright/ai-dev-sidebar/security/dependabot
+   - https://github.com/aloewright/brave-extension/security/dependabot
    - https://github.com/aloewright/lean-extensions/security/dependabot
 2. For the grouped `dev-deps-minor-patch` PR: confirm CI is green and
    let auto-merge close it. No action required on green PRs.
