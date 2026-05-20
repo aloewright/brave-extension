@@ -22,6 +22,12 @@ const KEYS = {
   legacyMigrationComplete: "migration:ai-dev-messages-complete"
 }
 
+const GATE_KEYS = {
+  allowEvalJs: "settings.allowEvalJs",
+  allowExtensionUninstall: "settings.allowExtensionUninstall",
+  cookiesAllowAll: "settings.cookies.allowAll"
+} as const
+
 const SCAN_CACHE_LIMIT = 50
 
 const BACKENDS: CLIBackend[] = ["claude", "gemini", "copilot", "codex"]
@@ -34,14 +40,28 @@ function migrationMarkerKey(backend: CLIBackend): string {
   return `migration:ai-dev-messages:${backend}`
 }
 
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
 export async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.local.get(KEYS.settings)
-  return { ...defaultSettings(), ...result[KEYS.settings] }
+  return {
+    ...defaultSettings(),
+    ...(objectValue(result[KEYS.settings]) as Partial<Settings>)
+  }
 }
 
 export async function setSettings(settings: Partial<Settings>): Promise<void> {
   const current = await getSettings()
-  await chrome.storage.local.set({ [KEYS.settings]: { ...current, ...settings } })
+  const next = { ...current, ...settings }
+  const writes: Record<string, unknown> = { [KEYS.settings]: next }
+  for (const key of Object.keys(GATE_KEYS) as Array<keyof typeof GATE_KEYS>) {
+    if (key in settings) writes[GATE_KEYS[key]] = next[key]
+  }
+  await chrome.storage.local.set(writes)
 }
 
 /**
@@ -255,7 +275,10 @@ export async function clearMessages(backend?: CLIBackend): Promise<void> {
 
 export async function getInspectorSettings(): Promise<InspectorSettings> {
   const result = await chrome.storage.local.get(KEYS.inspectorSettings)
-  return { ...DEFAULT_INSPECTOR_SETTINGS, ...result[KEYS.inspectorSettings] }
+  return {
+    ...DEFAULT_INSPECTOR_SETTINGS,
+    ...(objectValue(result[KEYS.inspectorSettings]) as Partial<InspectorSettings>)
+  }
 }
 
 export async function setInspectorSettings(
@@ -273,13 +296,13 @@ export function scanCacheKey(url: string): string {
 
 export async function getCachedScan(url: string): Promise<CachedScan | null> {
   const result = await chrome.storage.local.get(KEYS.scanCache)
-  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  const cache = objectValue(result[KEYS.scanCache]) as Record<string, CachedScan>
   return cache[scanCacheKey(url)] ?? null
 }
 
 export async function setCachedScan(scan: ScanResult): Promise<void> {
   const result = await chrome.storage.local.get(KEYS.scanCache)
-  const cache: Record<string, CachedScan> = result[KEYS.scanCache] || {}
+  const cache = objectValue(result[KEYS.scanCache]) as Record<string, CachedScan>
   const key = scanCacheKey(scan.url)
   cache[key] = { url: key, result: scan, cachedAt: new Date().toISOString() }
 

@@ -43,7 +43,7 @@ export const recorderState: RecorderState = {
 }
 
 let pendingStart:
-  | { source: RecorderSource; streamId?: string; id: string }
+  | { source: RecorderSource; streamId?: string; desktopAudio?: boolean; id: string }
   | null = null
 
 // Awaitable hooks driven by offscreen RECORDER_STARTED / RECORDER_STOPPED
@@ -184,6 +184,51 @@ export function updateRecorderAction() {
   }
 }
 
+function shouldFallbackToDisplayCapture(error: unknown): boolean {
+  const message = (error as Error | undefined)?.message ?? ""
+  return /activeTab|not been invoked|Chrome pages cannot be captured/i.test(
+    message
+  )
+}
+
+function getTabMediaStreamId(tabId: number): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (sid) => {
+      if (chrome.runtime.lastError || !sid) {
+        reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
+      } else {
+        resolve(sid)
+      }
+    })
+  })
+}
+
+function chooseDesktopMediaStream(): Promise<{
+  streamId: string
+  canRequestAudioTrack: boolean
+}> {
+  return new Promise((resolve, reject) => {
+    if (!chrome.desktopCapture?.chooseDesktopMedia) {
+      reject(new Error("Desktop capture is unavailable"))
+      return
+    }
+
+    chrome.desktopCapture.chooseDesktopMedia(
+      ["tab", "window", "screen", "audio"],
+      (streamId, options) => {
+        if (!streamId) {
+          reject(new Error("Recording cancelled"))
+          return
+        }
+        resolve({
+          streamId,
+          canRequestAudioTrack: !!options?.canRequestAudioTrack
+        })
+      }
+    )
+  })
+}
+
 export async function startRecording(opts: {
   source: RecorderSource
   tabId?: number
@@ -197,11 +242,13 @@ export async function startRecording(opts: {
   recorderState.active = true
   pendingStart = { source: opts.source, id }
   try {
+    let source = opts.source
     let streamId: string | undefined
+    let desktopAudio = false
     let originUrl: string | null = null
     let tabId: number | null = null
 
-    if (opts.source === "tab") {
+    if (source === "tab") {
       let tid = opts.tabId
       if (!tid) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -220,32 +267,40 @@ export async function startRecording(opts: {
           /* ignore */
         }
       }
-      tabId = tid
-      streamId = await new Promise<string>((resolve, reject) => {
-        chrome.tabCapture.getMediaStreamId({ targetTabId: tid! }, (sid) => {
-          if (chrome.runtime.lastError || !sid) {
-            reject(new Error(chrome.runtime.lastError?.message || "No stream id"))
-          } else {
-            resolve(sid)
-          }
-        })
-      })
+      try {
+        streamId = await getTabMediaStreamId(tid)
+        tabId = tid
+      } catch (err) {
+        if (!shouldFallbackToDisplayCapture(err)) throw err
+        const selected = await chooseDesktopMediaStream()
+        source = "screen"
+        streamId = selected.streamId
+        desktopAudio = selected.canRequestAudioTrack
+        tabId = null
+      }
     }
 
-    pendingStart = { source: opts.source, streamId, id }
+    if (source === "screen" && !streamId) {
+      const selected = await chooseDesktopMediaStream()
+      streamId = selected.streamId
+      desktopAudio = selected.canRequestAudioTrack
+    }
+
+    pendingStart = { source, streamId, desktopAudio, id }
     await ensureOffscreen()
     chrome.runtime
       .sendMessage({
         type: "RECORDER_START",
         id,
-        source: opts.source,
-        streamId
+        source,
+        streamId,
+        desktopAudio
       })
       .catch(() => {
         // Offscreen not yet listening; RECORDER_READY handler will retry.
       })
 
-    recorderState.source = opts.source
+    recorderState.source = source
     recorderState.startedAt = Date.now()
     recorderState.paused = false
     recorderState.elapsedMs = 0
@@ -457,7 +512,8 @@ export function handleRecorderReady(sendStart: (msg: unknown) => void) {
     type: "RECORDER_START",
     id: pendingStart.id,
     source: pendingStart.source,
-    streamId: pendingStart.streamId
+    streamId: pendingStart.streamId,
+    desktopAudio: pendingStart.desktopAudio
   })
   pendingStart = null
 }

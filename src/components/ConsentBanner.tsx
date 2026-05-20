@@ -74,8 +74,16 @@ interface RowProps {
 
 function ConsentRow({ req, pendingCount, onRespond }: RowProps) {
   const [remember, setRemember] = useState(false)
+  const [submitted, setSubmitted] = useState<"allow" | "deny" | null>(null)
   const summary = summariseArgs(req.toolName, req.args as any)
   const isAlwaysPrompt = req.toolClass === "always-prompt"
+  const submit = (decision: "allow" | "deny") => {
+    if (submitted) return
+    setSubmitted(decision)
+    window.setTimeout(() => {
+      onRespond(decision, decision === "allow" ? remember : false)
+    }, 250)
+  }
 
   return (
     <div className="border-b border-amber-700/40 bg-amber-900/30 text-amber-50 px-3 py-2 text-xs">
@@ -96,17 +104,27 @@ function ConsentRow({ req, pendingCount, onRespond }: RowProps) {
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            className="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[11px]"
-            onClick={() => onRespond("allow", remember)}
+            disabled={submitted !== null}
+            className={`px-2 py-1 rounded text-white text-[11px] disabled:cursor-not-allowed ${
+              submitted === "allow"
+                ? "bg-emerald-500"
+                : "bg-emerald-700 hover:bg-emerald-600 disabled:bg-emerald-700/60"
+            }`}
+            onClick={() => submit("allow")}
           >
-            Allow
+            {submitted === "allow" ? "Allowed" : "Allow"}
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded bg-rose-700 hover:bg-rose-600 text-white text-[11px]"
-            onClick={() => onRespond("deny", false)}
+            disabled={submitted !== null}
+            className={`px-2 py-1 rounded text-white text-[11px] disabled:cursor-not-allowed ${
+              submitted === "deny"
+                ? "bg-rose-500"
+                : "bg-rose-700 hover:bg-rose-600 disabled:bg-rose-700/60"
+            }`}
+            onClick={() => submit("deny")}
           >
-            Deny
+            {submitted === "deny" ? "Denied" : "Deny"}
           </button>
         </div>
       </div>

@@ -17,7 +17,6 @@ interface RecState {
 }
 
 export function RecorderSection() {
-  const [source, setSource] = useState<RecorderSource>("tab")
   const [state, setState] = useState<RecState>({
     active: false,
     paused: false,
@@ -71,7 +70,7 @@ export function RecorderSection() {
 
   const handleStart = () => {
     chrome.runtime.sendMessage(
-      { type: "START_RECORDING", source },
+      { type: "START_RECORDING", source: "screen" },
       (res: { ok: boolean; error?: string }) => {
         if (!res?.ok) {
           setState((s) => ({ ...s, lastError: res?.error || "Start failed" }))
@@ -97,27 +96,6 @@ export function RecorderSection() {
   return (
     <div className="flex flex-col h-full p-4 gap-4 text-fg">
       <div className="text-sm font-medium">Recorder</div>
-
-      <div className="flex flex-col gap-2">
-        <label className="text-xs uppercase tracking-wide text-fg/50">Source</label>
-        <div className="flex gap-2">
-          {(["tab", "screen", "camera"] as RecorderSource[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              disabled={state.active}
-              onClick={() => setSource(s)}
-              className={
-                "px-3 py-1.5 rounded text-xs border transition-colors " +
-                (source === s
-                  ? "bg-fg text-bg border-fg"
-                  : "border-fg/20 text-fg/70 hover:bg-fg/10")
-              }>
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <div className="flex items-center gap-3">
         {!state.active ? (
