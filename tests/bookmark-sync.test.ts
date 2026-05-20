@@ -87,9 +87,11 @@ describe("pushSnapshot", () => {
     const r = await pushSnapshot()
     expect(r.pushed).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0]!
+    const call = fetchMock.mock.calls[0] as unknown as [URL | RequestInfo, RequestInit]
+    const url = call[0]
+    const init = call[1]
     expect(String(url)).toBe("https://sidebar.pdx.software/api/bookmarks/snapshot")
-    const body = JSON.parse(String((init as RequestInit).body)) as { bookmarks: { id: string; isFavorite?: boolean }[] }
+    const body = JSON.parse(String(init.body)) as { bookmarks: { id: string; isFavorite?: boolean }[] }
     expect(body.bookmarks).toHaveLength(1)
     expect(body.bookmarks[0]!.id).toBe("b1")
     expect(body.bookmarks[0]!.isFavorite).toBe(true)  // under "Bookmarks Bar"
