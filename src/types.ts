@@ -103,6 +103,9 @@ export interface Settings {
   allowExtensionUninstall: boolean
   cookiesAllowAll: boolean
   braveSearchApiKey: string
+  dopplerProject: string
+  dopplerConfig: string
+  dopplerScope: string
 }
 
 /** Status reported by the native host's mcp.status RPC. */
@@ -117,6 +120,24 @@ export interface MCPStatus {
   tokenSet: boolean
   tools: number
   resources: number
+}
+
+export interface DopplerStatus {
+  cliAvailable: boolean
+  cliVersion: string | null
+  tokenSet: boolean
+  tokenSource: "none" | "cli" | "env"
+  tokenPreview: string | null
+  workplaceName: string | null
+  workplaceSlug: string | null
+  authType: string | null
+  tokenName: string | null
+  defaults: {
+    project: string
+    config: string
+  }
+  lastCheckedAt: string
+  error: string | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -138,7 +159,10 @@ export const DEFAULT_SETTINGS: Settings = {
   allowEvalJs: false,
   allowExtensionUninstall: false,
   cookiesAllowAll: false,
-  braveSearchApiKey: ""
+  braveSearchApiKey: "",
+  dopplerProject: "",
+  dopplerConfig: "",
+  dopplerScope: "/"
 }
 
 // ─── Design inspector types (folded in from Alexometer) ───────────────

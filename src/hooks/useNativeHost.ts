@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { CLIBackend, MCPStatus, NativeHostResponse } from "../types"
+import type { CLIBackend, DopplerStatus, MCPStatus, NativeHostResponse } from "../types"
 
 interface UseNativeHostOptions {
   onStdout?: (data: string, pid: number, backend?: CLIBackend) => void
@@ -12,6 +12,8 @@ interface UseNativeHostOptions {
   onMcpList?: (servers: any[]) => void
   onMcpStatus?: (status: MCPStatus) => void
   onMcpRpcResult?: (msg: { type: string; ok: boolean; error?: string; rotatedAt?: string; enabled?: boolean }) => void
+  onDopplerStatus?: (status: DopplerStatus) => void
+  onDopplerRpcResult?: (msg: { type: string; ok: boolean; error?: string; defaults?: { project: string; config: string }; silent?: boolean }) => void
   onPtyData?: (sessionId: string, data: string) => void
   onPtyExit?: (sessionId: string, exitCode: number, signal?: number) => void
   onPtySpawned?: (sessionId: string, pid: number) => void
@@ -96,6 +98,11 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
           ptype === "mcp.terminal-path.set"
         ) {
           optsRef.current.onMcpRpcResult?.(payload as any)
+        } else if (ptype === "doppler.status") {
+          const { type: _t, ...status } = payload as any
+          optsRef.current.onDopplerStatus?.(status as DopplerStatus)
+        } else if (ptype === "doppler.login" || ptype === "doppler.defaults.set") {
+          optsRef.current.onDopplerRpcResult?.(payload as any)
         }
 
         // mcp responses come back with type "mcp" — payload.data is JSON
@@ -224,6 +231,22 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     (enabled: boolean) => send({ type: "mcp.terminal-path.set", enabled }),
     [send]
   )
+  const dopplerStatus = useCallback(() => send({ type: "doppler.status" }), [send])
+  const dopplerLogin = useCallback(
+    (opts?: { scope?: string; overwrite?: boolean }) => send({ type: "doppler.login", ...(opts || {}) }),
+    [send]
+  )
+  const dopplerSetDefaults = useCallback(
+    (defaults: { project?: string; config?: string }, opts?: { silent?: boolean }) => {
+      send({
+        type: "doppler.defaults.set",
+        project: defaults.project || "",
+        config: defaults.config || "",
+        silent: opts?.silent === true
+      })
+    },
+    [send]
+  )
 
   return {
     connected,
@@ -244,6 +267,9 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     mcpRotateToken,
     mcpRegister,
     mcpUnregister,
-    mcpSetTerminalPath
+    mcpSetTerminalPath,
+    dopplerStatus,
+    dopplerLogin,
+    dopplerSetDefaults
   }
 }
