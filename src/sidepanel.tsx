@@ -5,7 +5,8 @@ import type { SectionId } from "./sections/types";
 import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
-import { LibrarySection } from "./sections/library/LibrarySection";
+import { SessionSection } from "./sections/session/SessionSection";
+import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 import { RecorderSection } from "./sections/recorder/RecorderSection";
@@ -62,7 +63,8 @@ function SidePanel() {
           </div>
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
-          {active === "library" && <LibrarySection />}
+          {active === "tech" && <TechSection />}
+          {active === "session" && <SessionSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}

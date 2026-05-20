@@ -2,7 +2,8 @@ export type SectionId =
   | "terminal"
   | "inspector"
   | "extensions"
-  | "library"
+  | "tech"
+  | "session"
   | "bookmarks"
   | "cookies"
   | "recorder"
@@ -15,11 +16,14 @@ export interface SectionDef {
   shortcut?: string;
 }
 
+// ALO-470: rename Library → Session (snippets + links + paginated feeds).
+// ALO-471: Tech/IP info moves to its own dedicated tab.
 export const SECTIONS: SectionDef[] = [
   { id: "terminal", label: "Terminal" },
   { id: "inspector", label: "Inspector" },
   { id: "extensions", label: "Extensions" },
-  { id: "library", label: "Library" },
+  { id: "tech", label: "Tech" },
+  { id: "session", label: "Session" },
   { id: "bookmarks", label: "Bookmarks" },
   { id: "cookies", label: "Cookies" },
   { id: "recorder", label: "Recorder" },

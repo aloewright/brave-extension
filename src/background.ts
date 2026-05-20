@@ -1,6 +1,10 @@
 import { ulid } from "./lib/ulid";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
+import {
+  addSessionSnippet,
+  copyToClipboardViaTab,
+} from "./lib/session-snippets";
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools";
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools";
 import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools";
@@ -771,13 +775,28 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "save-highlight" && info.selectionText) {
     try {
-      await addHighlight({
-        id: crypto.randomUUID(),
-        text: info.selectionText,
-        sourceUrl: tab.url,
-        sourceTitle: tab.title,
-        createdAt: Date.now(),
-      });
+      const selection = info.selectionText;
+      // ALO-470: drop the highlight into Session snippets, copy it to the
+      // user's clipboard, and keep the legacy Review panel highlight write
+      // for back-compat (the Inspector → Review panel still consumes
+      // addHighlight via chrome.storage.onChanged).
+      await Promise.all([
+        addSessionSnippet({
+          text: selection,
+          sourceUrl: tab.url || "",
+          sourceTitle: tab.title ?? null,
+        }),
+        addHighlight({
+          id: crypto.randomUUID(),
+          text: selection,
+          sourceUrl: tab.url,
+          sourceTitle: tab.title,
+          createdAt: Date.now(),
+        }),
+      ]);
+      // Best-effort clipboard write — privileged URLs will refuse the
+      // script injection and the snippet still lands in Session.
+      void copyToClipboardViaTab(tab.id, selection);
       // A subtle badge blip to confirm capture. The ReviewPanel auto-refreshes
       // via chrome.storage.onChanged, so no port message is needed.
       chrome.action.setBadgeText({ text: "+1" });

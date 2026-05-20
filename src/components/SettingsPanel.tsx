@@ -6,6 +6,7 @@ import {
   sanitizeSubfolder,
   type CaptureSaveLocation
 } from "../lib/capture-destination"
+import { getAutoPipEnabled, setAutoPipEnabled } from "../lib/pip/auto"
 
 export function SettingsPanel({
   settings,
@@ -477,6 +478,10 @@ export function SettingsPanel({
         {/* Captures (ALO-467) — destination for screenshot/full-page PDF saves */}
         <CapturesSection settings={settings} onUpdate={onUpdate} />
 
+        {/* Sidebar UX (ALO-471) — Auto-PiP toggle plus future rail tweaks */}
+        <AutoPipToggleRow />
+
+
         {/* Toggles */}
         <div className="space-y-2">
           <label className="text-[11px] text-fg/50 uppercase tracking-wider block">Features</label>
@@ -514,6 +519,32 @@ export function SettingsPanel({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function AutoPipToggleRow() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    void getAutoPipEnabled().then(setEnabled)
+  }, [])
+  if (enabled === null) return null
+  return (
+    <div>
+      <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
+        Sidebar UX
+      </label>
+      <div className="bg-card/20 rounded p-2 space-y-2">
+        <Toggle
+          label="Auto Picture-in-picture"
+          description="Default ON. When you switch tabs, the active video pops out into a floating window automatically."
+          checked={enabled}
+          onChange={async (v) => {
+            setEnabled(v)
+            await setAutoPipEnabled(v)
+          }}
+        />
       </div>
     </div>
   )
