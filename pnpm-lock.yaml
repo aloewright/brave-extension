@@ -52,10 +52,10 @@ importers:
         specifier: ^22.19.17
         version: 22.19.17
       '@types/react':
-        specifier: ^18.3.12
+        specifier: ^18.3.28
         version: 18.3.28
       '@types/react-dom':
-        specifier: ^18.3.1
+        specifier: ^18.3.7
         version: 18.3.7(@types/react@18.3.28)
       '@vitest/coverage-v8':
         specifier: ^2.1.9
@@ -3058,8 +3058,8 @@ packages:
     resolution: {integrity: sha512-P0efT1C9jIdVRefqjzOQ9Xml57zpOXnIuS+csaB4MdZbTdmGDLo8XhzBG1N7aO11gKDDkJvBLULeFTo46wwreA==}
     hasBin: true
 
-  msgpackr@1.11.9:
-    resolution: {integrity: sha512-FkoAAyyA6HM8wL882EcEyFZ9s7hVADSwG9xrVx3dxxNQAtgADTrJoEWivID82Iv1zWDsv/OtbrrcZAzGzOMdNw==}
+  msgpackr@1.11.12:
+    resolution: {integrity: sha512-RBdJ1Un7yGlXWajrkxcSa93nvQ0w4zBf60c0yYv7YtBelP8H2FA7XsfBbMHtXKXUMUxH7zV3Zuozh+kUQWhHvg==}
 
   msgpackr@1.8.5:
     resolution: {integrity: sha512-mpPs3qqTug6ahbblkThoUY2DQdNXcm4IapwOS3Vm/87vmpzLVelvp9h3It1y9l1VPpiFLV11vfOXnmeEwiIXwg==}
@@ -4598,7 +4598,7 @@ snapshots:
       dotenv: 7.0.0
       dotenv-expand: 5.1.0
       json5: 2.2.3
-      msgpackr: 1.11.9
+      msgpackr: 1.11.12
       nullthrows: 1.1.1
       semver: 7.7.1
 
@@ -6852,7 +6852,7 @@ snapshots:
 
   lmdb@2.5.2:
     dependencies:
-      msgpackr: 1.11.9
+      msgpackr: 1.11.12
       node-addon-api: 4.3.0
       node-gyp-build-optional-packages: 5.0.3
       ordered-binary: 1.6.1
@@ -6980,7 +6980,7 @@ snapshots:
       '@msgpackr-extract/msgpackr-extract-win32-x64': 3.0.3
     optional: true
 
-  msgpackr@1.11.9:
+  msgpackr@1.11.12:
     optionalDependencies:
       msgpackr-extract: 3.0.3
 
