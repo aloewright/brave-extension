@@ -1,41 +1,45 @@
-import { useEffect, useState } from "react"
-import "./style.css"
-import { SidebarRail } from "./components/SidebarRail"
-import type { SectionId } from "./sections/types"
-import { TerminalSection } from "./sections/terminal/TerminalSection"
-import { InspectorSection } from "./sections/inspector/InspectorSection"
-import { ExtensionsSection } from "./sections/extensions/ExtensionsSection"
-import { LibrarySection } from "./sections/library/LibrarySection"
-import { CookiesSection } from "./sections/cookies/CookiesSection"
-import { RecorderSection } from "./sections/recorder/RecorderSection"
-import { EyedropperSection } from "./sections/eyedropper/EyedropperSection"
-import { SettingsSection } from "./sections/settings/SettingsSection"
-import { ConsentBanner } from "./components/ConsentBanner"
+import { useEffect, useState } from "react";
+import "./style.css";
+import { SidebarRail } from "./components/SidebarRail";
+import type { SectionId } from "./sections/types";
+import { TerminalSection } from "./sections/terminal/TerminalSection";
+import { InspectorSection } from "./sections/inspector/InspectorSection";
+import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
+import { LibrarySection } from "./sections/library/LibrarySection";
+import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
+import { CookiesSection } from "./sections/cookies/CookiesSection";
+import { RecorderSection } from "./sections/recorder/RecorderSection";
+import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
+import { SettingsSection } from "./sections/settings/SettingsSection";
+import { ConsentBanner } from "./components/ConsentBanner";
 
-const ACTIVE_KEY = "ui.activeSection"
+const ACTIVE_KEY = "ui.activeSection";
 
 function SidePanel() {
-  const [active, setActive] = useState<SectionId>("terminal")
+  const [active, setActive] = useState<SectionId>("terminal");
 
   useEffect(() => {
     chrome.storage.local.get(ACTIVE_KEY).then((res) => {
-      const stored = res[ACTIVE_KEY] as SectionId | undefined
-      if (stored) setActive(stored)
-    })
+      const stored = res[ACTIVE_KEY] as SectionId | undefined;
+      if (stored) setActive(stored);
+    });
     // React to programmatic navigation (e.g. QuickActionsBar → Library/Recorder).
-    const onChanged = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area !== "local" || !changes[ACTIVE_KEY]) return
-      const next = changes[ACTIVE_KEY].newValue as SectionId | undefined
-      if (next) setActive(next)
-    }
-    chrome.storage.onChanged.addListener(onChanged)
-    return () => chrome.storage.onChanged.removeListener(onChanged)
-  }, [])
+    const onChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area !== "local" || !changes[ACTIVE_KEY]) return;
+      const next = changes[ACTIVE_KEY].newValue as SectionId | undefined;
+      if (next) setActive(next);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
 
   const change = (id: SectionId) => {
-    setActive(id)
-    void chrome.storage.local.set({ [ACTIVE_KEY]: id })
-  }
+    setActive(id);
+    void chrome.storage.local.set({ [ACTIVE_KEY]: id });
+  };
 
   return (
     <div className="w-full h-screen bg-bg text-fg font-sans flex flex-col">
@@ -51,12 +55,15 @@ function SidePanel() {
            * sections remain conditionally rendered to keep their original
            * mount/unmount semantics.
            */}
-          <div className={`flex-1 min-h-0 flex flex-col ${active === "terminal" ? "" : "hidden"}`}>
+          <div
+            className={`flex-1 min-h-0 flex flex-col ${active === "terminal" ? "" : "hidden"}`}
+          >
             <TerminalSection active={active === "terminal"} />
           </div>
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
           {active === "library" && <LibrarySection />}
+          {active === "bookmarks" && <BookmarksSection />}
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
@@ -64,7 +71,7 @@ function SidePanel() {
         </main>
       </div>
     </div>
-  )
+  );
 }
 
-export default SidePanel
+export default SidePanel;
