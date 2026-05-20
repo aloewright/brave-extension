@@ -2,10 +2,12 @@ import { Hono } from "hono"
 import type { Env } from "../env"
 import {
   deleteRecording, getRecording, insertRecording, listRecordings,
+  updateRecording,
   type RecordingRow, type RecordingStatus
 } from "../db"
 import { deleteFor } from "../vectors"
 import { deleteBlob, getBlob, keyFor, putBlob } from "../r2"
+import { kickIngest } from "../workflows/ingest"
 
 const recordings = new Hono<{ Bindings: Env }>()
 
@@ -82,8 +84,14 @@ recordings.post("/", async (c) => {
     updated_at: now
   }
   await insertRecording(c.env, row)
+  const workflowId = await kickIngest(c.env, "recording", meta.id)
+  if (workflowId) {
+    await c.env.DB.prepare("UPDATE recordings SET workflow_id = ?, updated_at = ? WHERE id = ?")
+      .bind(workflowId, Date.now(), meta.id)
+      .run()
+  }
 
-  return c.json({ id: meta.id, status: "pending" as RecordingStatus, r2_key: r2Key }, 201)
+  return c.json({ id: meta.id, status: "pending" as RecordingStatus, r2_key: r2Key, workflow_id: workflowId }, 201)
 })
 
 recordings.get("/", async (c) => {
@@ -124,6 +132,28 @@ recordings.delete("/:id", async (c) => {
   await deleteBlob(c.env, existing.r2_key)
   await deleteRecording(c.env, id)
   return c.body(null, 204)
+})
+
+recordings.post("/:id/reingest", async (c) => {
+  const id = c.req.param("id")
+  const existing = await getRecording(c.env, id)
+  if (!existing) return c.json({ error: { code: "not_found", message: "no such recording" } }, 404)
+
+  // Drop any stale vectors and reset the row before kicking the workflow.
+  await deleteFor(c.env, "recording", id, existing.chunk_count)
+  await updateRecording(c.env, id, {
+    transcript: null,
+    chunk_count: 0,
+    status: "pending",
+    status_message: null,
+    workflow_id: null,
+    updated_at: Date.now()
+  })
+  const workflowId = await kickIngest(c.env, "recording", id)
+  if (workflowId) {
+    await updateRecording(c.env, id, { workflow_id: workflowId, updated_at: Date.now() })
+  }
+  return c.json({ id, status: "pending" as RecordingStatus, workflow_id: workflowId })
 })
 
 export default recordings

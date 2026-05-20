@@ -33,8 +33,11 @@ describe("/api/recordings", () => {
     )
     const res = await authed(env, "/api/recordings", { method: "POST", body })
     expect(res.status).toBe(201)
-    const json = (await res.json()) as { id: string; status: string; r2_key: string }
-    expect(json).toEqual({ id: "rec1", status: "pending", r2_key: "recordings/rec1.mp4" })
+    const json = (await res.json()) as { id: string; status: string; r2_key: string; workflow_id: string | null }
+    expect(json.id).toBe("rec1")
+    expect(json.status).toBe("pending")
+    expect(json.r2_key).toBe("recordings/rec1.mp4")
+    expect(json.workflow_id === null || typeof json.workflow_id === "string").toBe(true)
 
     const row = await getRecording(env, "rec1")
     expect(row?.status).toBe("pending")
