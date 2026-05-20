@@ -22,7 +22,10 @@ import {
   tokenPath,
   envPath,
   wrapperPath,
-  claudeJsonPath
+  claudeJsonPath,
+  findNativeArtifacts,
+  scrubQuarantine,
+  inspectNativeArtifact
 } from "../native-host/installer.mjs"
 
 describe("installer pure helpers", () => {
@@ -225,5 +228,133 @@ describe("installer fs helpers (sandboxed home)", () => {
 
   it("removeTokenAndEnv is safe when files absent", () => {
     expect(() => removeTokenAndEnv(fakeHome)).not.toThrow()
+  })
+})
+
+// ALO-472 — Gatekeeper / quarantine remediation
+describe("native artifact discovery + quarantine scrub", () => {
+  let fakeRoot: string
+
+  beforeEach(() => {
+    fakeRoot = mkdtempSync(join(tmpdir(), "aids-quarantine-"))
+  })
+
+  it("findNativeArtifacts returns every .node and spawn-helper, sorted", () => {
+    // Mimic the node-pty tree we'd see in native-host/node_modules.
+    mkdirSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64"), { recursive: true })
+    mkdirSync(join(fakeRoot, "node-pty/prebuilds/darwin-x64"), { recursive: true })
+    mkdirSync(join(fakeRoot, "other-helper/.bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-x64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-x64/spawn-helper"), "x")
+    writeFileSync(join(fakeRoot, "other-helper/something.node"), "x")
+    // Junk that should be ignored.
+    writeFileSync(join(fakeRoot, "other-helper/README.md"), "x")
+    writeFileSync(join(fakeRoot, "other-helper/.bin/symlink-only"), "x")
+
+    const found = findNativeArtifacts(fakeRoot)
+    expect(found).toHaveLength(5)
+    expect(found.every((p: string) => p.endsWith(".node") || p.endsWith("spawn-helper"))).toBe(true)
+    // Sorted output is stable for diagnostic display.
+    expect(found).toEqual([...found].sort())
+    // .bin contents are excluded.
+    expect(found.some((p: string) => p.includes("/.bin/"))).toBe(false)
+  })
+
+  it("findNativeArtifacts returns empty for a missing root", () => {
+    expect(findNativeArtifacts(join(fakeRoot, "does-not-exist"))).toEqual([])
+  })
+
+  it("scrubQuarantine is a no-op on non-darwin platforms", () => {
+    mkdirSync(join(fakeRoot, "pkg"), { recursive: true })
+    writeFileSync(join(fakeRoot, "pkg/pty.node"), "x")
+    const calls: any[] = []
+    const result = scrubQuarantine(fakeRoot, {
+      platform: "linux",
+      spawnSync: (...args: any[]) => {
+        calls.push(args)
+        return { status: 0 }
+      }
+    })
+    expect(result.scrubbed).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it("scrubQuarantine runs xattr -d com.apple.quarantine for every native artifact", () => {
+    mkdirSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
+    const calls: { cmd: string; args: string[] }[] = []
+    const result = scrubQuarantine(fakeRoot, {
+      platform: "darwin",
+      spawnSync: (cmd: string, args: string[]) => {
+        calls.push({ cmd, args })
+        return { status: 0 }
+      }
+    })
+    expect(result.scrubbed).toHaveLength(2)
+    expect(result.errors).toEqual([])
+    expect(calls).toHaveLength(2)
+    for (const c of calls) {
+      expect(c.cmd).toBe("xattr")
+      expect(c.args.slice(0, 2)).toEqual(["-d", "com.apple.quarantine"])
+    }
+  })
+
+  it("scrubQuarantine surfaces spawn errors per-file without aborting the rest", () => {
+    mkdirSync(join(fakeRoot, "a"), { recursive: true })
+    mkdirSync(join(fakeRoot, "b"), { recursive: true })
+    writeFileSync(join(fakeRoot, "a/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "b/other.node"), "x")
+    const result = scrubQuarantine(fakeRoot, {
+      platform: "darwin",
+      spawnSync: (_cmd: string, args: string[]) => {
+        if (args[2].endsWith("a/pty.node")) {
+          return { error: new Error("xattr missing"), status: null }
+        }
+        return { status: 0 }
+      }
+    })
+    expect(result.scrubbed).toHaveLength(1)
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0].message).toBe("xattr missing")
+  })
+
+  it("inspectNativeArtifact reports adhoc + quarantine state from spawn output", () => {
+    mkdirSync(join(fakeRoot, "n"), { recursive: true })
+    const path = join(fakeRoot, "n/pty.node")
+    writeFileSync(path, "x")
+    const info = inspectNativeArtifact(path, {
+      platform: "darwin",
+      spawnSync: (cmd: string) => {
+        if (cmd === "xattr") {
+          return { status: 0, stdout: "com.apple.quarantine\ncom.apple.metadata:foo\n" }
+        }
+        if (cmd === "codesign") {
+          return {
+            status: 0,
+            stdout: "",
+            stderr:
+              "Executable=" + path + "\n" +
+              "Identifier=pty.node\n" +
+              "Format=Mach-O thin (arm64)\n" +
+              "Signature=adhoc\n" +
+              "TeamIdentifier=not set\n"
+          }
+        }
+        return { status: 1 }
+      }
+    })
+    expect(info.exists).toBe(true)
+    expect(info.signing).toBe("adhoc")
+    expect(info.hasQuarantine).toBe(true)
+    expect(info.identifier).toBe("pty.node")
+    expect(info.xattrs).toContain("com.apple.quarantine")
+  })
+
+  it("inspectNativeArtifact reports `exists: false` for a missing path", () => {
+    const info = inspectNativeArtifact(join(fakeRoot, "missing.node"))
+    expect(info).toEqual({ path: join(fakeRoot, "missing.node"), exists: false })
   })
 })

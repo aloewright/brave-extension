@@ -21,7 +21,9 @@ import {
   writeTokenAndEnv,
   registerClaudeJson,
   tokenPath,
-  envPath
+  envPath,
+  scrubQuarantine,
+  findNativeArtifacts
 } from "../native-host/installer.mjs"
 
 const args = process.argv.slice(2)
@@ -190,56 +192,40 @@ if (existsSync(join(hostDir, "package.json"))) {
   }
 }
 
-// macOS: strip the `com.apple.quarantine` xattr from the node-pty Darwin
-// prebuilds (pty.node + spawn-helper) so Gatekeeper doesn't reject them on
-// first dlopen/exec.
+// macOS: strip `com.apple.quarantine` from every `.node` + spawn-helper
+// inside native-host/node_modules so Gatekeeper doesn't reject them on
+// first dlopen/exec. The popup the user sees ("Apple could not verify
+// '.<hex>-00000000.node' is free of malware") reports XProtect's internal
+// scan-cache filename, but the underlying file is one of the shipped
+// node-pty prebuilds (or any future native helper). ALO-472.
 //
 // We do NOT re-sign. The shipped Microsoft prebuilds carry stable
 // ad-hoc CDHashes that are identical for every user on the same package
 // version, so a single "Allow Anyway" in System Settings → Privacy &
 // Security persists across reinstalls. Re-signing here would mint a new
 // CDHash on every install and invalidate that grant.
+//
+// Covers BOTH darwin-arm64 and darwin-x64 so a universal-install user
+// running under Rosetta also gets a clean state. Covers any other future
+// native helper without code changes — `findNativeArtifacts` walks the
+// full tree.
 if (process.platform === "darwin") {
-  const ptyPrebuildsDir = join(
-    hostDir,
-    "node_modules",
-    ".pnpm",
-    "node-pty@1.1.0",
-    "node_modules",
-    "node-pty",
-    "prebuilds",
-    `darwin-${process.arch === "arm64" ? "arm64" : "x64"}`
-  )
-  const fallbackDir = join(
-    hostDir,
-    "node_modules",
-    "node-pty",
-    "prebuilds",
-    `darwin-${process.arch === "arm64" ? "arm64" : "x64"}`
-  )
-  const prebuildsDir = existsSync(ptyPrebuildsDir)
-    ? ptyPrebuildsDir
-    : existsSync(fallbackDir)
-      ? fallbackDir
-      : null
-  if (prebuildsDir) {
-    const targets = [join(prebuildsDir, "pty.node"), join(prebuildsDir, "spawn-helper")].filter(
-      existsSync
+  const nodeModulesDir = join(hostDir, "node_modules")
+  const artifacts = findNativeArtifacts(nodeModulesDir)
+  if (artifacts.length > 0) {
+    const { scrubbed, errors } = scrubQuarantine(nodeModulesDir)
+    console.log(
+      `✓ Cleared com.apple.quarantine on ${scrubbed.length}/${artifacts.length} native artifacts`
     )
-    if (targets.length > 0) {
-      for (const t of targets) {
-        spawnSync("xattr", ["-d", "com.apple.quarantine", t], { stdio: "ignore" })
-      }
-      const spawnHelper = join(prebuildsDir, "spawn-helper")
-      if (existsSync(spawnHelper)) {
-        chmodSync(spawnHelper, 0o755)
-      }
-      console.log(`✓ Cleared quarantine on node-pty prebuilds in ${prebuildsDir}`)
-      console.log("✓ Ensured node-pty spawn-helper is executable")
+    for (const e of errors) {
+      console.warn(`  ⚠  ${e.path}: ${e.message}`)
+    }
+    if (artifacts.length > 0) {
       console.log(
         "  If Brave still pops 'Apple could not verify…' on first launch, open\n" +
           "  System Settings → Privacy & Security and click 'Allow Anyway' once;\n" +
-          "  the grant persists across reinstalls of the same node-pty version."
+          "  the grant persists across reinstalls of the same node-pty version.\n" +
+          "  Run `pnpm diagnose-host` to see per-file signing/quarantine state."
       )
     }
   }

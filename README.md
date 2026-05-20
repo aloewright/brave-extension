@@ -114,11 +114,34 @@ pnpm install
 pnpm dev            # starts plasmo dev (loads as unpacked extension from build/)
 pnpm build          # production build
 pnpm install-host   # install the native messaging host
+pnpm diagnose-host  # print signing/quarantine state of native artifacts
 pnpm typecheck      # tsc --noEmit -p .
 pnpm test           # vitest run
 pnpm test:coverage  # vitest + v8 coverage (60% line / 50% branch floor)
 pnpm test:e2e       # playwright e2e suite
 ```
+
+### macOS: "Apple could not verify '<random>.node' is free of malware" (ALO-472)
+
+`pnpm install-host` strips `com.apple.quarantine` from every `.node` and
+`spawn-helper` under `native-host/node_modules` before the first sidebar
+terminal launches. The popup's hash-prefixed filename
+(`.9db7f7fe3f8cd7ea-00000000.node`) is XProtect's internal scan-cache
+name; the file on disk is one of node-pty's prebuilt
+`prebuilds/darwin-{arm64,x64}/pty.node` (plus its `spawn-helper`).
+
+If the popup still appears:
+
+1. Run `pnpm diagnose-host` — confirms which artifacts carry the
+   quarantine xattr and what their signing state is.
+2. Re-run with `pnpm diagnose-host --fix` to re-scrub.
+3. If Gatekeeper has already cached a denial decision, open **System
+   Settings → Privacy & Security** and click "Allow Anyway" once. The
+   shipped Microsoft prebuilds are ad-hoc signed with stable CDHashes per
+   `node-pty` version, so the grant persists across reinstalls.
+
+The installer never re-signs the prebuilds (that would mint a new
+CDHash and invalidate any "Allow Anyway" the user has already granted).
 
 ## Typechecking
 

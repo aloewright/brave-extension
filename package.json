@@ -10,6 +10,7 @@
     "package": "plasmo package",
     "install-host": "node scripts/install-native-host.mjs",
     "uninstall-host": "node scripts/uninstall-native-host.mjs",
+    "diagnose-host": "node scripts/diagnose-native-host.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
