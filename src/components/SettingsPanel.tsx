@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import type { Settings, CLIBackend, MCPServer, MCPStatus } from "../types"
+import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus } from "../types"
 import { BACKEND_INFO } from "../types"
 
 export function SettingsPanel({
@@ -9,7 +9,8 @@ export function SettingsPanel({
   nativeHost,
   mcpServers,
   sidebarSync,
-  mcp
+  mcp,
+  doppler
 }: {
   settings: Settings
   onUpdate: (partial: Partial<Settings>) => void
@@ -27,6 +28,13 @@ export function SettingsPanel({
     rotateToken: () => void
     resetRegistration: () => void
     setTerminalPath: (enabled: boolean) => void
+    toast: string | null
+  }
+  doppler?: {
+    status: DopplerStatus | null
+    refresh: () => void
+    login: () => void
+    saveDefaults: () => void
     toast: string | null
   }
 }) {
@@ -310,6 +318,96 @@ export function SettingsPanel({
             </div>
           </div>
         </div>
+
+        {/* Doppler */}
+        {doppler && (
+          <div>
+            <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
+              Doppler
+            </label>
+            <div className="bg-card/20 rounded p-2 space-y-2">
+              <StatusRow
+                label="CLI"
+                ok={!!doppler.status?.cliAvailable}
+                detail={doppler.status?.cliVersion || "not found"}
+              />
+              <StatusRow
+                label="Auth"
+                ok={!!doppler.status?.tokenSet && !doppler.status?.error}
+                warn={!!doppler.status?.tokenSet && !!doppler.status?.error}
+                detail={
+                  doppler.status?.tokenSet
+                    ? `${doppler.status.tokenSource} · ${doppler.status.workplaceName || doppler.status.tokenPreview || "token set"}`
+                    : "not logged in"
+                }
+              />
+              <StatusRow
+                label="Defaults"
+                ok={!!(settings.dopplerProject && settings.dopplerConfig)}
+                detail={
+                  settings.dopplerProject && settings.dopplerConfig
+                    ? `${settings.dopplerProject}/${settings.dopplerConfig}`
+                    : "project/config optional"
+                }
+              />
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="text"
+                  value={settings.dopplerProject}
+                  onChange={(e) => onUpdate({ dopplerProject: e.target.value })}
+                  className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                  placeholder="project"
+                />
+                <input
+                  type="text"
+                  value={settings.dopplerConfig}
+                  onChange={(e) => onUpdate({ dopplerConfig: e.target.value })}
+                  className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                  placeholder="config"
+                />
+              </div>
+              <input
+                type="text"
+                value={settings.dopplerScope}
+                onChange={(e) => onUpdate({ dopplerScope: e.target.value })}
+                className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                placeholder="/"
+              />
+
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  onClick={doppler.login}
+                  disabled={!nativeHost.connected}
+                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40"
+                >
+                  OAuth login
+                </button>
+                <button
+                  onClick={doppler.saveDefaults}
+                  disabled={!nativeHost.connected}
+                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 disabled:opacity-40"
+                >
+                  Save defaults
+                </button>
+                <button
+                  onClick={doppler.refresh}
+                  disabled={!nativeHost.connected}
+                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50 disabled:opacity-40"
+                  title="Refresh Doppler status"
+                >
+                  ↻
+                </button>
+              </div>
+
+              {doppler.status?.error && (
+                <div className="text-[10px] text-warning/90 pt-1 break-words">
+                  {doppler.status.error.slice(0, 140)}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Sidebar Sync (Phase 5 cutover from CloudOS) */}
         <div className="space-y-2">

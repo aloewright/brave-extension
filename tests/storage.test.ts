@@ -46,6 +46,9 @@ describe("getSettings / setSettings", () => {
     expect(s.sidebarApiUrl).toBe("https://sidebar.pdx.software")
     expect(s.sidebarApiToken).toBe("")
     expect(s.sidebarPruneAfterSync).toBe(false)
+    expect(s.dopplerProject).toBe("")
+    expect(s.dopplerConfig).toBe("")
+    expect(s.dopplerScope).toBe("/")
   })
 
   it("migrates cloudos* settings into sidebar* slots on first read", async () => {

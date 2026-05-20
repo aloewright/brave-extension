@@ -389,6 +389,9 @@ function defaultSettings(): Settings {
     allowEvalJs: false,
     allowExtensionUninstall: false,
     cookiesAllowAll: false,
-    braveSearchApiKey: ""
+    braveSearchApiKey: "",
+    dopplerProject: "",
+    dopplerConfig: "",
+    dopplerScope: "/"
   }
 }

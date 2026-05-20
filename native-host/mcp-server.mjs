@@ -37,6 +37,8 @@ import {
   RECORDER_BRIDGED_TOOL_DEFS,
   buildRecorderHostTools
 } from "./tool-defs/recorder-tools.mjs"
+import { buildDopplerHostTools } from "./tool-defs/doppler-tools.mjs"
+import { DopplerClient } from "./doppler.mjs"
 
 const PORT_RANGE = [8473, 8474, 8475, 8476, 8477, 8478, 8479, 8480, 8481, 8482, 8483]
 
@@ -45,8 +47,9 @@ function nowIso() {
 }
 
 export class MCPServer {
-  constructor({ logger } = {}) {
+  constructor({ logger, doppler } = {}) {
     this.log = logger || (() => {})
+    this.doppler = doppler || new DopplerClient({ logger: this.log })
     this.token = null
     this.port = null
     this.httpServer = null
@@ -161,6 +164,22 @@ export class MCPServer {
 
   setTerminalPath(enabled) {
     return installerSetTerminalPath(!!enabled)
+  }
+
+  getDopplerDefaults() {
+    return this.doppler.getDefaults()
+  }
+
+  setDopplerDefaults(defaults) {
+    return this.doppler.setDefaults(defaults)
+  }
+
+  getDopplerStatus() {
+    return this.doppler.status()
+  }
+
+  dopplerLogin(opts) {
+    return this.doppler.login(opts)
   }
 
   stop() {
@@ -453,6 +472,12 @@ export class MCPServer {
       })
     }
     for (const def of buildRecorderHostTools(this)) {
+      this.tools.set(def.name, def)
+    }
+
+    // Doppler secrets (host-side). The native host reads the local Doppler
+    // login token on demand; the extension never stores it.
+    for (const def of buildDopplerHostTools(this.doppler)) {
       this.tools.set(def.name, def)
     }
   }

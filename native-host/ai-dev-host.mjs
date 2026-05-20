@@ -604,6 +604,43 @@ async function main() {
         break
       }
 
+      case "doppler.defaults.set": {
+        try {
+          const defaults = mcp.setDopplerDefaults({
+            project: msg.project,
+            config: msg.config
+          })
+          sendMessage({ type: "doppler.defaults.set", ok: true, defaults, silent: msg.silent === true })
+          sendMessage({ type: "doppler.status", ...(await mcp.getDopplerStatus()) })
+        } catch (err) {
+          sendMessage({ type: "doppler.defaults.set", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "doppler.status": {
+        try {
+          sendMessage({ type: "doppler.status", ...(await mcp.getDopplerStatus()) })
+        } catch (err) {
+          sendMessage({ type: "doppler.status", error: err.message })
+        }
+        break
+      }
+
+      case "doppler.login": {
+        try {
+          const result = await mcp.dopplerLogin({
+            scope: msg.scope || "/",
+            overwrite: msg.overwrite !== false
+          })
+          sendMessage({ type: "doppler.login", ok: true, ...result })
+          sendMessage({ type: "doppler.status", ...(await mcp.getDopplerStatus()) })
+        } catch (err) {
+          sendMessage({ type: "doppler.login", ok: false, error: err.message })
+        }
+        break
+      }
+
       case "mcp.resource.upsert": {
         if (msg.uri) {
           mcp.upsertResource(msg.uri, {

@@ -3,12 +3,13 @@ import { useSettings } from "../../hooks/useSettings"
 import { useNativeHost } from "../../hooks/useNativeHost"
 import { useSidebarSync } from "../../hooks/useSidebarSync"
 import { useEffect, useRef, useState } from "react"
-import type { MCPServer, MCPStatus } from "../../types"
+import type { DopplerStatus, MCPServer, MCPStatus } from "../../types"
 
 export function SettingsSection() {
   const { settings, update } = useSettings()
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpStatus, setMcpStatus] = useState<MCPStatus | null>(null)
+  const [dopplerStatus, setDopplerStatus] = useState<DopplerStatus | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string) => {
@@ -43,6 +44,23 @@ export function SettingsSection() {
           )
           break
       }
+    },
+    onDopplerStatus: (s) => setDopplerStatus(s),
+    onDopplerRpcResult: (msg) => {
+      if (msg.silent) return
+      if (!msg.ok) {
+        showToast(`Doppler: ${msg.error || msg.type}`)
+        return
+      }
+      switch (msg.type) {
+        case "doppler.login":
+          showToast("Doppler login complete.")
+          nativeHost.dopplerStatus()
+          break
+        case "doppler.defaults.set":
+          showToast("Doppler defaults saved.")
+          break
+      }
     }
   } as any)
   const sidebarSync = useSidebarSync({ settings, messages: [] })
@@ -51,6 +69,13 @@ export function SettingsSection() {
     if (settings && nativeHost.connected) {
       nativeHost.getMCPServers(settings.claudeConfigPath)
       nativeHost.mcpStatus()
+      if (settings.dopplerProject || settings.dopplerConfig) {
+        nativeHost.dopplerSetDefaults({
+          project: settings.dopplerProject,
+          config: settings.dopplerConfig
+        }, { silent: true })
+      }
+      nativeHost.dopplerStatus()
     }
   }, [settings?.claudeConfigPath, nativeHost.connected])
 
@@ -87,6 +112,19 @@ export function SettingsSection() {
           setTimeout(() => nativeHost.mcpRegister(), 250)
         },
         setTerminalPath: (enabled: boolean) => nativeHost.mcpSetTerminalPath(enabled),
+        toast
+      }}
+      doppler={{
+        status: dopplerStatus,
+        refresh: () => nativeHost.dopplerStatus(),
+        login: () => nativeHost.dopplerLogin({
+          scope: settings.dopplerScope || "/",
+          overwrite: true
+        }),
+        saveDefaults: () => nativeHost.dopplerSetDefaults({
+          project: settings.dopplerProject,
+          config: settings.dopplerConfig
+        }),
         toast
       }}
     />

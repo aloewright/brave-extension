@@ -51,7 +51,11 @@ const EXPECTED_TOOLS = [
   "profiles_apply",
   "groups_list",
   "groups_apply",
-  "brave_search"
+  "brave_search",
+  "doppler_status",
+  "doppler_login",
+  "doppler_secret_get",
+  "doppler_secrets_download"
 ]
 
 describe("MCP tools registry", () => {
