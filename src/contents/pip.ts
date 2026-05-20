@@ -83,15 +83,7 @@ async function togglePiP(): Promise<PiPResult> {
     return { ok: false, action: "none", reason: PIP_NO_VIDEO_REASON }
   }
 
-  // Some sites set disablePictureInPicture as a hostile move. Strip it.
-  if (video.disablePictureInPicture) {
-    try {
-      video.disablePictureInPicture = false
-      video.removeAttribute("disablepictureinpicture")
-    } catch {
-      /* read-only on some custom elements — ignore and try anyway */
-    }
-  }
+  allowVideoPictureInPicture(video)
 
   // requestPictureInPicture rejects if the video has no data yet. If we're
   // catching it pre-load (e.g. user clicked the button as the page was
@@ -164,17 +156,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
  * the attribute, so toggling off takes effect without a reload.
  */
 
-const AUTO_PIP_SUPPORTED =
+const AUTO_PIP_ATTRIBUTE_SUPPORTED =
   typeof HTMLVideoElement !== "undefined" &&
   "autoPictureInPicture" in HTMLVideoElement.prototype
 
 let autoPipEnabled = false
 let autoPipObserver: MutationObserver | null = null
+let mediaSessionAutoPipHandlerInstalled = false
 
 // `autoPictureInPicture` isn't in TypeScript's lib.dom yet (still a draft
 // WICG spec) — Chrome ships it, we feature-detect it, and this cast keeps
 // `tsc --noEmit` quiet without touching tsconfig.
 type WithAutoPip = HTMLVideoElement & { autoPictureInPicture?: boolean }
+
+function allowVideoPictureInPicture(video: HTMLVideoElement): void {
+  // Some sites set disablePictureInPicture as a hostile move. Strip it.
+  if (!video.disablePictureInPicture) return
+  try {
+    video.disablePictureInPicture = false
+    video.removeAttribute("disablepictureinpicture")
+  } catch {
+    /* read-only on some custom elements — ignore and try anyway */
+  }
+}
 
 function setAutoPipAttribute(video: HTMLVideoElement, value: boolean): void {
   try {
@@ -187,7 +191,7 @@ function setAutoPipAttribute(video: HTMLVideoElement, value: boolean): void {
 }
 
 function applyToAllVideos(value: boolean): void {
-  if (!AUTO_PIP_SUPPORTED) return
+  if (!AUTO_PIP_ATTRIBUTE_SUPPORTED) return
   // Closed shadow DOMs are intentionally skipped: querySelectorAll
   // can't pierce them, and reaching into closed shadow roots from a
   // content script isn't possible without page-script injection,
@@ -201,7 +205,7 @@ function applyToAllVideos(value: boolean): void {
 }
 
 function handleMutations(mutations: MutationRecord[]): void {
-  if (!autoPipEnabled || !AUTO_PIP_SUPPORTED) return
+  if (!autoPipEnabled || !AUTO_PIP_ATTRIBUTE_SUPPORTED) return
   for (const m of mutations) {
     const added = Array.from(m.addedNodes)
     for (const node of added) {
@@ -223,7 +227,7 @@ function handleMutations(mutations: MutationRecord[]): void {
 }
 
 function startAutoPipObserver(): void {
-  if (autoPipObserver || !AUTO_PIP_SUPPORTED) return
+  if (autoPipObserver || !AUTO_PIP_ATTRIBUTE_SUPPORTED) return
   if (typeof MutationObserver === "undefined") return
   autoPipObserver = new MutationObserver(handleMutations)
   autoPipObserver.observe(document.documentElement, {
@@ -238,9 +242,43 @@ function stopAutoPipObserver(): void {
   autoPipObserver = null
 }
 
+function requestAutoPictureInPicture(): void {
+  if (!autoPipEnabled) return
+  if (!document.pictureInPictureEnabled || document.pictureInPictureElement) return
+
+  const video = pickBestVideo()
+  if (!video || video.readyState < 2) return
+
+  allowVideoPictureInPicture(video)
+  video.requestPictureInPicture().catch(() => {
+    // The browser only grants this callback when auto-PiP is eligible.
+    // If site policy or media state still blocks PiP, leave the page alone.
+  })
+}
+
+function syncMediaSessionAutoPipHandler(enabled: boolean): void {
+  const mediaSession = navigator.mediaSession
+  if (!mediaSession || typeof mediaSession.setActionHandler !== "function") {
+    return
+  }
+
+  if (!enabled && !mediaSessionAutoPipHandlerInstalled) return
+
+  try {
+    ;(mediaSession as any).setActionHandler(
+      "enterpictureinpicture",
+      enabled ? requestAutoPictureInPicture : null
+    )
+    mediaSessionAutoPipHandlerInstalled = enabled
+  } catch {
+    // Older Chromium builds do not recognize enterpictureinpicture.
+  }
+}
+
 function applyAutoPipState(enabled: boolean): void {
   autoPipEnabled = enabled
-  if (!AUTO_PIP_SUPPORTED) return
+  syncMediaSessionAutoPipHandler(enabled)
+  if (!AUTO_PIP_ATTRIBUTE_SUPPORTED) return
   if (enabled) {
     applyToAllVideos(true)
     startAutoPipObserver()

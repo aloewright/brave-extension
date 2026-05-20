@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import {
   chunkBase64,
   joinChunks,
@@ -14,7 +14,15 @@ import {
   mirrorChunk,
   mirrorFinish
 } from "../native-host/recorder-mirror.mjs"
-import { handleMirrorMessage } from "../src/background/recorder"
+import {
+  handleMirrorMessage,
+  getRecordingElapsedMs,
+  notifyRecorderStarted,
+  notifyRecorderFinalized,
+  registerStartWaiter,
+  registerStopWaiter,
+  recorderState
+} from "../src/background/recorder"
 import { chooseRecorderMimeType, streamBlobToMirror } from "../src/tabs/offscreen"
 
 describe("chunkBase64 / joinChunks", () => {
@@ -316,5 +324,175 @@ describe("handleRecorderStopped — no SW-side base64 buffering", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// Tests for recorder.ts waiter registration and getRecordingElapsedMs.
+// These cover functionality that was refactored in this PR (removal of
+// desktopCapture helpers; simplified pendingStart type).
+
+describe("recorder waiter registration (registerStartWaiter / registerStopWaiter)", () => {
+  beforeEach(() => {
+    // Reset recorder state to a known baseline before each test.
+    recorderState.active = false
+    recorderState.paused = false
+    recorderState.source = null
+    recorderState.startedAt = null
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = null
+    recorderState.tabId = null
+    recorderState.originUrl = null
+    recorderState.lastSaved = null
+    recorderState.lastError = null
+  })
+
+  it("notifyRecorderStarted calls all registered start waiters with the id", () => {
+    const received: string[] = []
+    registerStartWaiter((id) => received.push(id))
+    registerStartWaiter((id) => received.push(`copy:${id}`))
+
+    notifyRecorderStarted("test-id-42")
+    expect(received).toEqual(["test-id-42", "copy:test-id-42"])
+  })
+
+  it("notifyRecorderStarted clears waiters after firing (fires once)", () => {
+    const calls: string[] = []
+    registerStartWaiter((id) => calls.push(id))
+    notifyRecorderStarted("first")
+    notifyRecorderStarted("second")
+    // Waiter should have been cleared after the first notify
+    expect(calls).toEqual(["first"])
+  })
+
+  it("registerStartWaiter returns an unsubscribe function", () => {
+    const received: string[] = []
+    const unsubscribe = registerStartWaiter((id) => received.push(id))
+    unsubscribe()
+    notifyRecorderStarted("should-not-arrive")
+    expect(received).toHaveLength(0)
+  })
+
+  it("notifyRecorderFinalized calls all registered stop waiters with metadata", () => {
+    const meta: RecordingMetadata = {
+      id: "meta-1",
+      source: "tab",
+      durationMs: 5000,
+      sizeBytes: 1024,
+      mimeType: "video/mp4",
+      filename: "recording.mp4",
+      createdAt: new Date().toISOString()
+    }
+    const received: (RecordingMetadata | null)[] = []
+    registerStopWaiter((m) => received.push(m))
+    notifyRecorderFinalized(meta)
+    expect(received).toHaveLength(1)
+    expect(received[0]).toEqual(meta)
+  })
+
+  it("notifyRecorderFinalized forwards null when recording was cancelled", () => {
+    const received: (RecordingMetadata | null)[] = []
+    registerStopWaiter((m) => received.push(m))
+    notifyRecorderFinalized(null)
+    expect(received).toEqual([null])
+  })
+
+  it("notifyRecorderFinalized clears waiters after firing (fires once)", () => {
+    const calls: number[] = []
+    registerStopWaiter(() => calls.push(1))
+    notifyRecorderFinalized(null)
+    notifyRecorderFinalized(null)
+    expect(calls).toHaveLength(1)
+  })
+
+  it("registerStopWaiter returns an unsubscribe function", () => {
+    const received: (RecordingMetadata | null)[] = []
+    const unsubscribe = registerStopWaiter((m) => received.push(m))
+    unsubscribe()
+    notifyRecorderFinalized(null)
+    expect(received).toHaveLength(0)
+  })
+
+  it("a waiter that throws does not prevent subsequent waiters from being called", () => {
+    const received: string[] = []
+    registerStartWaiter(() => {
+      throw new Error("boom")
+    })
+    registerStartWaiter((id) => received.push(id))
+    // Should not throw; the error is swallowed per the impl.
+    expect(() => notifyRecorderStarted("tolerant")).not.toThrow()
+    expect(received).toEqual(["tolerant"])
+  })
+})
+
+describe("getRecordingElapsedMs", () => {
+  beforeEach(() => {
+    recorderState.active = false
+    recorderState.paused = false
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = null
+  })
+
+  it("returns 0 when not active and elapsedMs is 0", () => {
+    expect(getRecordingElapsedMs()).toBe(0)
+  })
+
+  it("returns accumulated elapsedMs when not active", () => {
+    recorderState.elapsedMs = 3000
+    expect(getRecordingElapsedMs()).toBe(3000)
+  })
+
+  it("returns elapsedMs without adding live time when paused", () => {
+    recorderState.active = true
+    recorderState.paused = true
+    recorderState.elapsedMs = 2000
+    recorderState.lastResumedAt = Date.now() - 5000 // 5s ago, but paused
+    expect(getRecordingElapsedMs()).toBe(2000)
+  })
+
+  it("returns elapsedMs without adding live time when lastResumedAt is null", () => {
+    recorderState.active = true
+    recorderState.paused = false
+    recorderState.elapsedMs = 1500
+    recorderState.lastResumedAt = null
+    expect(getRecordingElapsedMs()).toBe(1500)
+  })
+
+  it("adds live elapsed time when active and not paused", () => {
+    const now = Date.now()
+    recorderState.active = true
+    recorderState.paused = false
+    recorderState.elapsedMs = 1000
+    recorderState.lastResumedAt = now - 3000
+    const elapsed = getRecordingElapsedMs(now)
+    // Should be 1000 (accumulated) + 3000 (live) = 4000
+    expect(elapsed).toBe(4000)
+  })
+
+  it("never returns a negative value when clock skews backward", () => {
+    const now = Date.now()
+    recorderState.active = true
+    recorderState.paused = false
+    recorderState.elapsedMs = 500
+    recorderState.lastResumedAt = now + 9999 // future timestamp
+    const elapsed = getRecordingElapsedMs(now)
+    // Math.max(0, ...) ensures no negative contribution
+    expect(elapsed).toBe(500)
+  })
+})
+
+describe("recorder.ts removed desktop capture exports", () => {
+  it("shouldFallbackToDisplayCapture is no longer exported", async () => {
+    const mod = await import("../src/background/recorder")
+    expect((mod as any).shouldFallbackToDisplayCapture).toBeUndefined()
+  })
+
+  it("getTabMediaStreamId is no longer exported", async () => {
+    const mod = await import("../src/background/recorder")
+    expect((mod as any).getTabMediaStreamId).toBeUndefined()
+  })
+
+  it("chooseDesktopMediaStream is no longer exported", async () => {
+    const mod = await import("../src/background/recorder")
+    expect((mod as any).chooseDesktopMediaStream).toBeUndefined()
   })
 })

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 import app from "../../src/index"
 import type { Env } from "../../src/env"
 import { makeEnv } from "../helpers"
@@ -14,7 +14,12 @@ describe("/api/conversations", () => {
   let env: Env
 
   beforeEach(() => {
+    vi.useFakeTimers({ now: 1_000_000 })
     env = makeEnv()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("POST creates a conversation, embeds it, and returns the id", async () => {
@@ -64,7 +69,7 @@ describe("/api/conversations", () => {
         body: JSON.stringify({ backend: "claude", title: `t${i}`, content_text: "x", started_at: i, message_count: 1 })
       })
       // ensure updated_at differs
-      await new Promise((r) => setTimeout(r, 2))
+      vi.advanceTimersByTime(2);
     }
     const res = await authed(env, "/api/conversations")
     expect(res.status).toBe(200)

@@ -1,3 +1,5 @@
+![brave dev extension](assets/readme-banner.svg)
+
 # AI Dev Sidebar
 
 [![Tests](https://github.com/aloewright/ai-dev-sidebar/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/ai-dev-sidebar/actions/workflows/test.yml)
