@@ -13,7 +13,8 @@
     "d1:migrate:remote": "wrangler d1 migrations apply sidebar --remote"
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "pdfjs-dist": "^5.7.284"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260520.0",

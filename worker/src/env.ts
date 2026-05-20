@@ -8,9 +8,11 @@ export interface Env {
   SIDEBAR_TOKEN: string
 }
 
-// Workers AI model ids used in Phase 1.
+// Workers AI model ids used by the Worker.
 export const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5" as const
 export const EMBED_DIMS = 768 as const
+export const TRANSCRIBE_MODEL = "@cf/openai/whisper" as const
+export const OCR_MODEL = "@cf/llava-hf/llava-1.5-7b-hf" as const
 
 // AI Gateway id from the account's existing config. Per CLAUDE.md, dynamic/*
 // routes are broken inside a Worker; we route specific @cf/* models through
