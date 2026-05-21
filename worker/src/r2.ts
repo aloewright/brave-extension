@@ -1,11 +1,18 @@
 import type { Env } from "./env"
 
-export type BlobType = "recording" | "pdf"
+export type BlobType = "recording" | "pdf" | "capture"
 
 /** Deterministic R2 key for a given resource. */
 export function keyFor(type: BlobType, id: string, ext: string): string {
   const cleanExt = ext.replace(/^\./, "").toLowerCase()
-  return type === "recording" ? `recordings/${id}.${cleanExt}` : `pdfs/${id}.${cleanExt}`
+  switch (type) {
+    case "recording":
+      return `recordings/${id}.${cleanExt}`
+    case "pdf":
+      return `pdfs/${id}.${cleanExt}`
+    case "capture":
+      return `captures/${id}.${cleanExt}`
+  }
 }
 
 export async function putBlob(

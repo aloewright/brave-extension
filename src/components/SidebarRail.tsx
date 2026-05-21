@@ -1,12 +1,10 @@
-import { useState } from "react"
 import type { SectionId } from "../sections/types"
 import { SECTIONS } from "../sections/types"
 import { LeoIcon, type LeoIconName } from "./leo"
 import {
   runPipQuickAction,
   runSaveLinkQuickAction,
-  runScreenshotQuickAction,
-  type QuickActionResult
+  runScreenshotQuickAction
 } from "../lib/quick-actions"
 
 interface Props {
@@ -18,9 +16,10 @@ const ICONS: Record<SectionId, LeoIconName> = {
   terminal: "terminal",
   inspector: "search",
   extensions: "puzzle-piece",
-  tech: "browser-extensions",
+  tech: "robot",
   session: "inbox",
   bookmarks: "product-bookmarks",
+  captures: "screenshot",
   cookies: "cookie",
   recorder: "radio-checked",
   eyedropper: "paint-brush",
@@ -35,7 +34,7 @@ const NORD_BLUE = "#88C0D0"
 interface QuickActionDef {
   label: string
   icon: LeoIconName
-  run: () => Promise<QuickActionResult>
+  run: () => Promise<unknown>
 }
 
 const QUICK_ACTIONS: QuickActionDef[] = [
@@ -45,19 +44,11 @@ const QUICK_ACTIONS: QuickActionDef[] = [
 ]
 
 export function SidebarRail({ active, onChange }: Props) {
-  const [toast, setToast] = useState<string | null>(null)
-  const [pending, setPending] = useState<string | null>(null)
-
   const handleQuickAction = async (def: QuickActionDef) => {
-    setPending(def.label)
     try {
-      const res = await def.run()
-      setToast(res.message)
-    } catch (err) {
-      setToast(err instanceof Error ? err.message : String(err))
-    } finally {
-      setPending(null)
-      setTimeout(() => setToast(null), 2400)
+      await def.run()
+    } catch {
+      /* quick actions intentionally do not render rail feedback */
     }
   }
 
@@ -99,21 +90,12 @@ export function SidebarRail({ active, onChange }: Props) {
             onClick={() => handleQuickAction(def)}
             title={def.label}
             aria-label={def.label}
-            disabled={pending !== null}
-            className={`p-2 rounded transition-colors disabled:opacity-50 hover:bg-[${NORD_BLUE}]/15`}
+            className={`p-2 rounded transition-colors hover:bg-[${NORD_BLUE}]/15`}
             style={{ color: NORD_BLUE }}
           >
             <LeoIcon name={def.icon} size={16} />
           </button>
         ))}
-        {toast && (
-          <div
-            className="text-[8px] text-fg/70 text-center px-1 leading-tight break-words max-w-[60px]"
-            data-testid="sidebar-rail-toast"
-          >
-            {toast}
-          </div>
-        )}
       </div>
     </nav>
   )

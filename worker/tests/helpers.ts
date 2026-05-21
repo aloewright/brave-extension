@@ -196,9 +196,15 @@ function fakeVector(dims: number): number[] {
 }
 
 function applyMigrationsSync(sqlite: DatabaseSync): void {
-  const sqlPath = join(__dirname, "..", "migrations", "0001_init.sql")
-  const sql = readFileSync(sqlPath, "utf-8")
-  sqlite.exec(sql)
+  // Apply every numbered .sql file in migrations/, in order. New tables
+  // (e.g. captures from 0002) become available to tests without each test
+  // touching helpers.
+  const dir = join(__dirname, "..", "migrations")
+  const filenames = ["0001_init.sql", "0002_captures.sql"]
+  for (const f of filenames) {
+    const sql = readFileSync(join(dir, f), "utf-8")
+    sqlite.exec(sql)
+  }
 }
 
 // ── node:sqlite → D1Database adapter ───────────────────────────────────────

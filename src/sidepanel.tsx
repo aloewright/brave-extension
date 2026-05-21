@@ -8,6 +8,7 @@ import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
 import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
+import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 import { RecorderSection } from "./sections/recorder/RecorderSection";
 import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
@@ -66,6 +67,7 @@ function SidePanel() {
           {active === "tech" && <TechSection />}
           {active === "session" && <SessionSection />}
           {active === "bookmarks" && <BookmarksSection />}
+          {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
