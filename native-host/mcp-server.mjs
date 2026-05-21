@@ -182,6 +182,10 @@ export class MCPServer {
     return this.doppler.login(opts)
   }
 
+  dopplerSecretsDownload(opts) {
+    return this.doppler.downloadSecrets(opts)
+  }
+
   stop() {
     for (const { res } of this.sseClients.values()) {
       try {

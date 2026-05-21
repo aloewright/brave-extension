@@ -10,7 +10,6 @@ import {
 import { ExtensionsSection as LxExtensionsSection } from "../_lx/components/ExtensionsSection"
 import { ProfilesSection as LxProfilesSection } from "../_lx/components/ProfilesSection"
 import { GroupsSection as LxGroupsSection } from "../_lx/components/GroupsSection"
-import { QuickActionsBar } from "./QuickActionsBar"
 
 type Tab = "extensions" | "profiles" | "groups"
 
@@ -19,6 +18,12 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "profiles", label: "Profiles" },
   { id: "groups", label: "Groups" }
 ]
+
+// ALO-471 — Quick actions (screenshot, PiP, save link) moved to the bottom
+// of the sidebar rail (SidebarRail). The Open Recorder / Open Library
+// shortcuts at the top of this section are gone; the rail's primary nav
+// owns navigation. Technologies + IP info also moved to the dedicated
+// "Tech" section.
 
 export function ExtensionsSection() {
   const [tab, setTab] = useState<Tab>("extensions")
@@ -40,14 +45,8 @@ export function ExtensionsSection() {
     updateSettings({ activeProfileId: profile.id })
   }
 
-  const navigate = (id: "library" | "recorder") => {
-    void chrome.storage.local.set({ "ui.activeSection": id })
-  }
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Quick-actions icon row (network/tech/RSS info, PiP, save link, screenshot, PDF) */}
-      <QuickActionsBar onNavigate={navigate} />
       {/* Profile pill row — visible across all tabs, mirrors the lean-extensions popup */}
       {profiles.length > 0 && (
         <div className="px-3 py-2 border-b border-border flex items-center gap-2">

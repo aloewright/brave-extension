@@ -7,6 +7,7 @@ const DEFAULT_API_HOST = "https://api.doppler.com"
 const DEFAULT_TIMEOUT_MS = 30_000
 const LOGIN_TIMEOUT_MS = 5 * 60_000
 const OUTPUT_CAP_BYTES = 256 * 1024
+const DEFAULT_DOPPLER_SCOPE = "/"
 
 export function dopplerDefaultsPath(home = homedir()) {
   return join(home, ".config", "ai-dev-sidebar", "doppler.json")
@@ -24,8 +25,14 @@ function previewToken(token) {
 function normalizeDefaults(input = {}) {
   return {
     project: typeof input.project === "string" ? input.project.trim() : "",
-    config: typeof input.config === "string" ? input.config.trim() : ""
+    config: typeof input.config === "string" ? input.config.trim() : "",
+    scope: normalizeScope(input.scope)
   }
+}
+
+function normalizeScope(scope) {
+  const value = typeof scope === "string" ? scope.trim() : ""
+  return value || DEFAULT_DOPPLER_SCOPE
 }
 
 function parseJsonSafe(text) {
@@ -101,11 +108,12 @@ export class DopplerClient {
 
     let token
     try {
-      const resolved = await this._getToken()
+      const resolved = await this._getToken({ scope: this.defaults.scope })
       token = resolved.token
       status.tokenSet = true
       status.tokenSource = resolved.source
       status.tokenPreview = resolved.preview
+      status.tokenScope = resolved.scope || null
     } catch (err) {
       status.error = status.error || redact(err.message)
       return status
@@ -127,22 +135,25 @@ export class DopplerClient {
   }
 
   async login({ scope = "/", overwrite = true } = {}) {
-    const args = ["login", "--yes", "--no-check-version", "--scope", scope || "/"]
+    const cleanScope = normalizeScope(scope)
+    const args = ["login", "--yes", "--no-check-version", "--scope", cleanScope]
     if (overwrite) args.push("--overwrite")
 
     const result = await this._runDoppler(args, { timeoutMs: LOGIN_TIMEOUT_MS })
     if (result.code !== 0) {
       throw new Error(redact(result.stderr || result.stdout || `doppler login exited ${result.code}`))
     }
+    this.setDefaults({ scope: cleanScope })
     return {
       ok: true,
+      scope: cleanScope,
       stdout: redact(result.stdout).slice(-4000),
       stderr: redact(result.stderr).slice(-4000)
     }
   }
 
   async downloadSecrets(args = {}) {
-    const { token } = await this._getToken()
+    const { token } = await this._getToken({ scope: args.scope || this.defaults.scope })
     const project = stringOrDefault(args.project, this.defaults.project)
     const config = stringOrDefault(args.config, this.defaults.config)
     const names = normalizeSecretNames(args.secrets)
@@ -172,20 +183,62 @@ export class DopplerClient {
     return { name, value: secrets[name] }
   }
 
-  async _getToken() {
+  async _getToken({ scope } = {}) {
     const envToken = process.env.DOPPLER_TOKEN?.trim()
     if (envToken) {
       return { token: envToken, source: "env", preview: previewToken(envToken) }
     }
 
-    const result = await this._runDoppler(["configure", "get", "token", "--plain"], {
+    const triedScopes = candidateScopes(scope, this.defaults.scope, process.cwd(), this.home)
+    let lastError = ""
+    for (const candidate of triedScopes) {
+      const result = await this._runDoppler(["configure", "get", "token", "--plain", "--scope", candidate], {
+        timeoutMs: 10_000
+      })
+      const token = result.stdout.trim()
+      if (result.code === 0 && token) {
+        return { token, source: "cli", preview: previewToken(token), scope: candidate }
+      }
+      lastError = result.stderr || result.stdout || lastError
+    }
+
+    const configured = await this._getTokenFromAllConfig(triedScopes)
+    if (configured) return configured
+
+    throw new Error(redact(lastError || "Doppler is not logged in. Run `doppler login` or use Settings."))
+  }
+
+  async _getTokenFromAllConfig(preferredScopes = []) {
+    const result = await this._runDoppler(["configure", "--all", "--json"], {
       timeoutMs: 10_000
     })
-    const token = result.stdout.trim()
-    if (result.code !== 0 || !token) {
-      throw new Error(redact(result.stderr || "Doppler is not logged in. Run `doppler login` or use Settings."))
+    if (result.code !== 0) return null
+    const parsed = parseJsonSafe(result.stdout)
+    if (!parsed || typeof parsed !== "object") return null
+
+    const entries = Object.entries(parsed)
+      .map(([scope, cfg]) => ({
+        scope,
+        token: typeof cfg?.token === "string" ? cfg.token.trim() : ""
+      }))
+      .filter((entry) => entry.token)
+    if (!entries.length) return null
+
+    const preferred = new Set(preferredScopes)
+    entries.sort((a, b) => {
+      const ap = preferred.has(a.scope) ? 1 : 0
+      const bp = preferred.has(b.scope) ? 1 : 0
+      if (ap !== bp) return bp - ap
+      return b.scope.length - a.scope.length
+    })
+
+    const match = entries[0]
+    return {
+      token: match.token,
+      source: "cli",
+      preview: previewToken(match.token),
+      scope: match.scope
     }
-    return { token, source: "cli", preview: previewToken(token) }
   }
 
   _apiUrl(path) {
@@ -225,6 +278,17 @@ export class DopplerClient {
   }
 }
 
+function candidateScopes(...values) {
+  const out = []
+  const add = (value) => {
+    const normalized = normalizeScope(value)
+    if (!out.includes(normalized)) out.push(normalized)
+  }
+  values.forEach(add)
+  add(DEFAULT_DOPPLER_SCOPE)
+  return out
+}
+
 function stringOrDefault(value, fallback) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback
 }
@@ -247,7 +311,7 @@ function runCommandDefault(command, args = [], { timeoutMs = DEFAULT_TIMEOUT_MS 
     const child = spawn(command, args, {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1" }
+      env: withCliPath({ ...process.env, NO_COLOR: "1" })
     })
 
     const timer = setTimeout(() => {
@@ -281,4 +345,21 @@ function runCommandDefault(command, args = [], { timeoutMs = DEFAULT_TIMEOUT_MS 
       })
     })
   })
+}
+
+function withCliPath(env) {
+  const existing = env.PATH || ""
+  const additions = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin"
+  ]
+  const parts = existing.split(":").filter(Boolean)
+  for (const part of additions) {
+    if (!parts.includes(part)) parts.push(part)
+  }
+  return { ...env, PATH: parts.join(":") }
 }

@@ -415,3 +415,98 @@ export async function updatePdf(
 export async function deletePdf(env: Env, id: string): Promise<void> {
   await env.DB.prepare("DELETE FROM pdfs WHERE id = ?").bind(id).run()
 }
+
+// ── Capture queries (ALO-468) ──────────────────────────────────────────────
+export type CaptureKind = "screenshot" | "pdf"
+export type CaptureStatus = "pending" | "ready" | "failed"
+
+export interface CaptureRow {
+  id: string
+  kind: CaptureKind
+  filename: string
+  source_url: string | null
+  source_title: string | null
+  mime_type: string
+  size_bytes: number
+  r2_key: string
+  extracted_text: string | null
+  status: CaptureStatus
+  status_message: string | null
+  chunk_count: number
+  created_at: number
+  updated_at: number
+}
+
+export async function insertCapture(env: Env, row: CaptureRow): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO captures
+       (id, kind, filename, source_url, source_title, mime_type, size_bytes,
+        r2_key, extracted_text, status, status_message, chunk_count,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      row.id, row.kind, row.filename, row.source_url, row.source_title,
+      row.mime_type, row.size_bytes, row.r2_key, row.extracted_text,
+      row.status, row.status_message, row.chunk_count,
+      row.created_at, row.updated_at
+    )
+    .run()
+}
+
+export async function getCapture(env: Env, id: string): Promise<CaptureRow | null> {
+  return (await env.DB.prepare("SELECT * FROM captures WHERE id = ?").bind(id).first<CaptureRow>()) ?? null
+}
+
+export async function listCaptures(
+  env: Env,
+  opts: { kind?: CaptureKind; status?: CaptureStatus; limit?: number; before?: number } = {}
+): Promise<CaptureRow[]> {
+  const limit = Math.min(opts.limit ?? 50, 200)
+  const where: string[] = []
+  const binds: (string | number)[] = []
+  if (opts.kind) {
+    where.push("kind = ?")
+    binds.push(opts.kind)
+  }
+  if (opts.status) {
+    where.push("status = ?")
+    binds.push(opts.status)
+  }
+  if (opts.before) {
+    where.push("created_at < ?")
+    binds.push(opts.before)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const stmt = env.DB.prepare(
+    `SELECT * FROM captures ${whereSql} ORDER BY created_at DESC LIMIT ?`
+  ).bind(...binds, limit)
+  const { results } = await stmt.all<CaptureRow>()
+  return results ?? []
+}
+
+export async function updateCapture(
+  env: Env,
+  id: string,
+  patch: {
+    extracted_text?: string | null
+    status?: CaptureStatus
+    status_message?: string | null
+    chunk_count?: number
+    updated_at: number
+  }
+): Promise<void> {
+  const sets: string[] = []
+  const binds: (string | number | null)[] = []
+  if (patch.extracted_text !== undefined) { sets.push("extracted_text = ?"); binds.push(patch.extracted_text) }
+  if (patch.status !== undefined) { sets.push("status = ?"); binds.push(patch.status) }
+  if (patch.status_message !== undefined) { sets.push("status_message = ?"); binds.push(patch.status_message) }
+  if (patch.chunk_count !== undefined) { sets.push("chunk_count = ?"); binds.push(patch.chunk_count) }
+  sets.push("updated_at = ?"); binds.push(patch.updated_at)
+  binds.push(id)
+  await env.DB.prepare(`UPDATE captures SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run()
+}
+
+export async function deleteCapture(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM captures WHERE id = ?").bind(id).run()
+}

@@ -31,7 +31,7 @@ describe("DopplerClient", () => {
   it("checks CLI/API status without exposing the raw token", async () => {
     const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
       if (args.includes("--version")) return { code: 0, stdout: "Doppler CLI 3.75.1\n", stderr: "" }
-      if (args.join(" ") === "configure get token --plain") {
+      if (args.join(" ") === "configure get token --plain --scope /") {
         return { code: 0, stdout: "dp.ct.super-secret-token\n", stderr: "" }
       }
       return { code: 1, stdout: "", stderr: "unexpected" }
@@ -57,7 +57,7 @@ describe("DopplerClient", () => {
 
   it("downloads requested secrets using saved project/config defaults", async () => {
     const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
-      if (args.join(" ") === "configure get token --plain") {
+      if (args.join(" ") === "configure get token --plain --scope /") {
         return { code: 0, stdout: "dp.ct.test-token\n", stderr: "" }
       }
       return { code: 0, stdout: "Doppler CLI\n", stderr: "" }
@@ -79,6 +79,54 @@ describe("DopplerClient", () => {
     expect(url.searchParams.get("project")).toBe("api")
     expect(url.searchParams.get("config")).toBe("dev")
     expect(url.searchParams.get("secrets")).toBe("OPENAI_API_KEY")
+  })
+
+  it("recognizes CLI tokens scoped outside the native host cwd", async () => {
+    const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args.join(" ") === "configure get token --plain --scope /Users/aloe/Development/ai-dev-sidebar") {
+        return { code: 1, stdout: "", stderr: "token not found" }
+      }
+      if (args.join(" ") === "configure get token --plain --scope /Users/aloe") {
+        return { code: 0, stdout: "dp.ct.scoped-token\n", stderr: "" }
+      }
+      return { code: 1, stdout: "", stderr: "unexpected" }
+    })
+    const fetchImpl = vi.fn(async () => jsonResponse({ workplace: { name: "Aloes" } }))
+    const client = new DopplerClient({ runCommand, fetchImpl, home: tmpHome() })
+    client.setDefaults({ scope: "/Users/aloe" })
+
+    const status = await client.status()
+
+    expect(status.tokenSet).toBe(true)
+    expect(status.tokenSource).toBe("cli")
+    expect(status.tokenScope).toBe("/Users/aloe")
+    expect(JSON.stringify(status)).not.toContain("scoped-token")
+  })
+
+  it("falls back to tokens from configure --all when direct scope lookup misses", async () => {
+    const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "configure" && args[1] === "get") {
+        return { code: 1, stdout: "", stderr: "token not found" }
+      }
+      if (args.join(" ") === "configure --all --json") {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            "/Users/aloe": { token: "dp.ct.all-config-token" }
+          }),
+          stderr: ""
+        }
+      }
+      return { code: 1, stdout: "", stderr: "unexpected" }
+    })
+    const fetchImpl = vi.fn(async () => jsonResponse({ workplace: { name: "Aloes" } }))
+    const client = new DopplerClient({ runCommand, fetchImpl, home: tmpHome() })
+
+    const status = await client.status()
+
+    expect(status.tokenSet).toBe(true)
+    expect(status.tokenScope).toBe("/Users/aloe")
+    expect(JSON.stringify(status)).not.toContain("all-config-token")
   })
 
   it("surfaces missing CLI login as an actionable error", async () => {

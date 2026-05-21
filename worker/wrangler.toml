@@ -11,11 +11,10 @@ directory = "./dist/web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# D1 — filled in after `wrangler d1 create sidebar` in Task 9
 [[d1_databases]]
 binding = "DB"
 database_name = "sidebar"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "5de7b694-0bc8-4073-9c3b-497076216901"
 migrations_dir = "./migrations"
 
 # Vectorize — filled in after `wrangler vectorize create sidebar-search` in Task 9

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { PIP_AUTO_CHANGED_MESSAGE } from "../src/lib/pip/auto"
+import {
+  PIP_AUTO_CHANGED_MESSAGE,
+  PIP_AUTO_KEY,
+  getAutoPipEnabled,
+  setAutoPipEnabled
+} from "../src/lib/pip/auto"
 
 describe("auto picture-in-picture content script", () => {
   let listeners: Array<
@@ -76,5 +81,38 @@ describe("auto picture-in-picture content script", () => {
     handler()
 
     expect(video.requestPictureInPicture).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ALO-471 — Auto-PiP defaults ON for new users (key absent) and for
+// existing users who had it on (`true` stored). Only an explicit `false`
+// keeps it off.
+describe("getAutoPipEnabled — ALO-471 default-on", () => {
+  beforeEach(async () => {
+    // tests/setup.ts wires chrome.storage.local in-memory; clear it.
+    if (chrome?.storage?.local?.clear) {
+      await chrome.storage.local.clear()
+    }
+  })
+
+  it("returns true when the storage key is absent (first run)", async () => {
+    expect(await getAutoPipEnabled()).toBe(true)
+  })
+
+  it("returns true when stored value is literal true", async () => {
+    await chrome.storage.local.set({ [PIP_AUTO_KEY]: true })
+    expect(await getAutoPipEnabled()).toBe(true)
+  })
+
+  it("returns false only when the user has explicitly disabled it", async () => {
+    await chrome.storage.local.set({ [PIP_AUTO_KEY]: false })
+    expect(await getAutoPipEnabled()).toBe(false)
+  })
+
+  it("setAutoPipEnabled round-trips the explicit-off case", async () => {
+    await setAutoPipEnabled(false)
+    expect(await getAutoPipEnabled()).toBe(false)
+    await setAutoPipEnabled(true)
+    expect(await getAutoPipEnabled()).toBe(true)
   })
 })

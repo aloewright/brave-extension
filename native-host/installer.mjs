@@ -12,10 +12,11 @@
  *   - Toggling terminal-path on/off is a clean round-trip.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from "fs"
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
 import { randomBytes } from "crypto"
+import { spawnSync as defaultSpawnSync } from "child_process"
 
 export const HOST_NAME = "com.aidev.sidebar"
 export const MCP_SERVER_ID = "ai-dev-sidebar"
@@ -329,5 +330,153 @@ export function removeTokenAndEnv(home = homedir()) {
     if (existsSync(p)) {
       try { unlinkSync(p) } catch {}
     }
+  }
+}
+
+// ── macOS Gatekeeper / quarantine remediation (ALO-472) ──────────────────
+//
+// node-pty ships ad-hoc-signed `.node` and `spawn-helper` Mach-O bundles
+// (no Developer ID). When pnpm extracts them from a downloaded tarball, the
+// files can inherit the `com.apple.quarantine` xattr. Gatekeeper then
+// shows "Apple could not verify '<random>.node' is free of malware…" the
+// first time the dlopen happens — the popup blocks the user's first
+// terminal session. The transient hash-prefixed filename in the popup is
+// XProtect's internal scan-cache name; the actual file on disk is
+// `prebuilds/darwin-{arm64,x64}/pty.node`.
+//
+// Fix: strip `com.apple.quarantine` from every Mach-O artifact the
+// native-host depends on at install time. Idempotent — re-running converges.
+
+/**
+ * Names we always treat as native artifacts even without an extension. Add
+ * here if a future dependency ships a binary helper with an unusual name.
+ */
+const NATIVE_HELPER_NAMES = new Set(["spawn-helper"])
+
+function isLikelyNativeFile(path) {
+  if (path.endsWith(".node")) return true
+  const base = path.split("/").pop() || ""
+  return NATIVE_HELPER_NAMES.has(base)
+}
+
+/**
+ * Walk a tree and return every `.node` file plus known helper binaries.
+ * Skips `node_modules/.bin` symlinks and any non-existent path.
+ *
+ * Exported for unit tests — pure modulo the filesystem.
+ */
+export function findNativeArtifacts(root) {
+  if (!existsSync(root)) return []
+  const out = []
+  const stack = [root]
+  while (stack.length > 0) {
+    const dir = stack.pop()
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const ent of entries) {
+      const full = join(dir, ent.name)
+      // Skip pnpm's symlink farm so we don't walk the same tree twice.
+      if (ent.isSymbolicLink()) continue
+      if (ent.isDirectory()) {
+        if (ent.name === ".bin") continue
+        stack.push(full)
+      } else if (ent.isFile() && isLikelyNativeFile(full)) {
+        out.push(full)
+      }
+    }
+  }
+  return out.sort()
+}
+
+/**
+ * Strip `com.apple.quarantine` from every native artifact found under
+ * `root`. On non-darwin platforms this is a no-op so callers don't need
+ * to platform-gate at the call site.
+ *
+ * The spawn function is injectable so tests don't actually shell out.
+ * Returns `{ scrubbed, errors }` where `scrubbed` lists files we ran
+ * `xattr -d com.apple.quarantine` against (regardless of whether the
+ * attr was already absent — xattr exits 0 either way on macOS once we
+ * use `-d` against a missing key combined with `|| true` semantics from
+ * spawnSync's stdio:"ignore", and the worst case is a harmless retry).
+ */
+export function scrubQuarantine(root, options = {}) {
+  if ((options.platform ?? process.platform) !== "darwin") {
+    return { scrubbed: [], errors: [] }
+  }
+  const spawn = options.spawnSync ?? defaultSpawnSync
+  const artifacts = findNativeArtifacts(root)
+  const scrubbed = []
+  const errors = []
+  for (const path of artifacts) {
+    const res = spawn("xattr", ["-d", "com.apple.quarantine", path], {
+      stdio: "ignore"
+    })
+    // xattr returns 1 if the attribute wasn't set; that's fine.
+    if (res.error) {
+      errors.push({ path, message: res.error.message })
+      continue
+    }
+    scrubbed.push(path)
+    // spawn-helper must remain executable after the scrub — chmodSync is
+    // platform-safe and a no-op for a file that's already 0755.
+    const base = path.split("/").pop()
+    if (base === "spawn-helper") {
+      try { chmodSync(path, 0o755) } catch { /* best effort */ }
+    }
+  }
+  return { scrubbed, errors }
+}
+
+/**
+ * Inspect a single native artifact and return a diagnostic record. Used by
+ * `scripts/diagnose-native-host.mjs`. spawn is injectable for tests.
+ */
+export function inspectNativeArtifact(path, options = {}) {
+  const spawn = options.spawnSync ?? defaultSpawnSync
+  const exists = existsSync(path)
+  if (!exists) return { path, exists: false }
+  let sizeBytes = 0
+  try { sizeBytes = statSync(path).size } catch { /* leave 0 */ }
+  let xattrs = []
+  if ((options.platform ?? process.platform) === "darwin") {
+    const xr = spawn("xattr", [path], { encoding: "utf8" })
+    if (xr.status === 0 && typeof xr.stdout === "string") {
+      xattrs = xr.stdout.split("\n").map((s) => s.trim()).filter(Boolean)
+    }
+  }
+  let signing = "unknown"
+  let identifier = null
+  let teamIdentifier = null
+  if ((options.platform ?? process.platform) === "darwin") {
+    const cs = spawn("codesign", ["-dvv", path], { encoding: "utf8" })
+    const out = (cs.stdout ?? "") + (cs.stderr ?? "")
+    if (/code object is not signed/i.test(out)) {
+      signing = "unsigned"
+    } else if (/Signature=adhoc/i.test(out)) {
+      signing = "adhoc"
+    } else if (/TeamIdentifier=(?!not set)/i.test(out)) {
+      signing = "developer-id"
+      const teamMatch = out.match(/TeamIdentifier=(\S+)/)
+      teamIdentifier = teamMatch?.[1] ?? null
+    } else if (/Signature=/i.test(out)) {
+      signing = "other"
+    }
+    const idMatch = out.match(/Identifier=(\S+)/)
+    identifier = idMatch?.[1] ?? null
+  }
+  return {
+    path,
+    exists: true,
+    sizeBytes,
+    xattrs,
+    hasQuarantine: xattrs.includes("com.apple.quarantine"),
+    signing,
+    identifier,
+    teamIdentifier
   }
 }

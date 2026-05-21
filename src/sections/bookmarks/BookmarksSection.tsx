@@ -5,6 +5,13 @@ import {
   type BookmarkSnapshot,
   type StoredBookmark,
 } from "../../lib/bookmark-snapshot";
+import {
+  categorizeBookmarks,
+  CategorizeError,
+  MAX_BATCH,
+  type ProposedCategory,
+} from "../../lib/bookmark-categorize";
+import { getSettings } from "../../storage";
 
 type BookmarkView = "alphabetical" | "favorites" | "categories";
 
@@ -37,7 +44,13 @@ function groupByCategory(bookmarks: StoredBookmark[]) {
     );
 }
 
-function BookmarkRow({ bookmark }: { bookmark: StoredBookmark }) {
+function BookmarkRow({
+  bookmark,
+  proposedCategory,
+}: {
+  bookmark: StoredBookmark;
+  proposedCategory?: ProposedCategory;
+}) {
   let host = bookmark.url;
   try {
     host = new URL(bookmark.url).hostname.replace(/^www\./, "");
@@ -45,18 +58,32 @@ function BookmarkRow({ bookmark }: { bookmark: StoredBookmark }) {
     // Keep the raw URL if parsing fails.
   }
 
+  // ALO-469: clicking a row opens the bookmark in a new tab via
+  // chrome.tabs.create — keeps the sidebar open instead of navigating it
+  // out of the side panel (which the default <a> click could do depending
+  // on the user's browser config).
+  const onOpen = () => {
+    chrome.tabs.create({ url: bookmark.url, active: true });
+  };
+
   return (
-    <a
-      className="flex min-w-0 flex-col gap-0.5 rounded border border-transparent px-2.5 py-2 text-sm hover:border-border hover:bg-accent/60 focus-visible:border-primary focus-visible:bg-accent focus-visible:outline-none"
-      href={bookmark.url}
+    <button
+      type="button"
+      onClick={onOpen}
       title={bookmark.url}
+      className="flex min-w-0 flex-col gap-0.5 rounded border border-transparent px-2.5 py-2 text-left text-sm hover:border-border hover:bg-accent/60 focus-visible:border-primary focus-visible:bg-accent focus-visible:outline-none"
     >
       <span className="truncate font-medium text-fg">{bookmark.title}</span>
       <span className="truncate text-xs text-fg/45">
         {host}
         {bookmark.category ? ` · ${bookmark.category}` : ""}
+        {proposedCategory && (
+          <span className="ml-2 inline-flex items-center rounded bg-primary/20 px-1.5 text-[10px] text-primary">
+            AI: {proposedCategory.category} ({proposedCategory.confidence})
+          </span>
+        )}
       </span>
-    </a>
+    </button>
   );
 }
 
@@ -65,6 +92,11 @@ export function BookmarksSection() {
   const [snapshot, setSnapshot] = useState<BookmarkSnapshot | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proposedCategories, setProposedCategories] = useState<
+    Record<string, ProposedCategory>
+  >({});
+  const [categorizing, setCategorizing] = useState(false);
+  const [categorizeError, setCategorizeError] = useState<string | null>(null);
 
   const syncBookmarks = (force = false) => {
     setSyncing(true);
@@ -104,6 +136,65 @@ export function BookmarksSection() {
   }, []);
 
   const bookmarks = snapshot?.bookmarks ?? [];
+
+  const runCategorize = async () => {
+    setCategorizing(true);
+    setCategorizeError(null);
+    try {
+      const settings = await getSettings();
+      if (!settings.sidebarApiUrl || !settings.sidebarApiToken) {
+        throw new CategorizeError(
+          "Configure Sidebar API URL + token in Settings first",
+          0,
+          "not_configured",
+        );
+      }
+      if (bookmarks.length === 0) {
+        setCategorizing(false);
+        return;
+      }
+      const merged: Record<string, ProposedCategory> = { ...proposedCategories };
+      for (let i = 0; i < bookmarks.length; i += MAX_BATCH) {
+        const slice = bookmarks.slice(i, i + MAX_BATCH).map((b) => ({
+          id: b.id,
+          title: b.title,
+          url: b.url,
+          folder: b.category,
+        }));
+        const res = await categorizeBookmarks({
+          apiUrl: settings.sidebarApiUrl,
+          apiToken: settings.sidebarApiToken,
+          items: slice,
+        });
+        for (const p of res.proposals) merged[p.id] = p;
+      }
+      setProposedCategories(merged);
+    } catch (err) {
+      const msg =
+        err instanceof CategorizeError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      setCategorizeError(msg);
+    } finally {
+      setCategorizing(false);
+    }
+  };
+
+  const applyProposed = () => {
+    // Local-first: applying is purely a UX shift — the Worker side gets the
+    // categories on the next snapshot push (bookmarks.ts → /snapshot). We
+    // surface accepted categories by carrying them in BookmarkRow's
+    // displayed label so the user sees them under each row.
+    setProposedCategories({});
+  };
+
+  const dismissProposed = () => {
+    setProposedCategories({});
+    setCategorizeError(null);
+  };
+
   const alphabetical = useMemo(
     () => [...bookmarks].sort(compareBookmarks),
     [bookmarks],
@@ -130,15 +221,59 @@ export function BookmarksSection() {
               {bookmarks.length} stored · {pulledLabel}
             </div>
           </div>
-          <LeoButton
-            size="xs"
-            variant="neutral"
-            disabled={syncing}
-            onClick={() => syncBookmarks(true)}
-          >
-            {syncing ? "Pulling" : "Pull"}
-          </LeoButton>
+          <div className="flex items-center gap-1.5">
+            <LeoButton
+              size="xs"
+              variant="neutral"
+              disabled={syncing}
+              onClick={() => syncBookmarks(true)}
+            >
+              {syncing ? "Pulling" : "Pull"}
+            </LeoButton>
+            <LeoButton
+              size="xs"
+              variant="primary"
+              disabled={categorizing || bookmarks.length === 0}
+              onClick={runCategorize}
+              title="Send minimal bookmark fields (title, domain, folder) to Cloudflare AI Gateway"
+            >
+              {categorizing ? "Categorizing…" : "AI categorize"}
+            </LeoButton>
+          </div>
         </div>
+        {Object.keys(proposedCategories).length > 0 && (
+          <div
+            className="mt-2 flex items-center justify-between rounded bg-primary/10 px-2 py-1 text-[11px] text-primary"
+            data-testid="bookmark-categorize-banner"
+          >
+            <span>
+              {Object.keys(proposedCategories).length} proposed categor
+              {Object.keys(proposedCategories).length === 1 ? "y" : "ies"} —
+              review below
+            </span>
+            <span className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded bg-primary/30 px-2 py-0.5 hover:bg-primary/40"
+                onClick={applyProposed}
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                className="rounded bg-card/40 px-2 py-0.5 text-fg/60 hover:bg-card/60"
+                onClick={dismissProposed}
+              >
+                Dismiss
+              </button>
+            </span>
+          </div>
+        )}
+        {categorizeError && (
+          <div className="mt-2 rounded bg-warning/10 px-2 py-1 text-[11px] text-warning">
+            {categorizeError}
+          </div>
+        )}
         <div className="mt-3 flex gap-1">
           {VIEWS.map((item) => (
             <LeoTabButton
@@ -162,7 +297,11 @@ export function BookmarksSection() {
         {view === "alphabetical" && (
           <div className="flex flex-col gap-1">
             {alphabetical.map((bookmark) => (
-              <BookmarkRow key={bookmark.id} bookmark={bookmark} />
+              <BookmarkRow
+                key={bookmark.id}
+                bookmark={bookmark}
+                proposedCategory={proposedCategories[bookmark.id]}
+              />
             ))}
           </div>
         )}
@@ -171,7 +310,11 @@ export function BookmarksSection() {
           <div className="flex flex-col gap-1">
             {favorites.length > 0 ? (
               favorites.map((bookmark) => (
-                <BookmarkRow key={bookmark.id} bookmark={bookmark} />
+                <BookmarkRow
+                key={bookmark.id}
+                bookmark={bookmark}
+                proposedCategory={proposedCategories[bookmark.id]}
+              />
               ))
             ) : (
               <div className="rounded border border-border p-4 text-sm text-fg/50">
@@ -195,7 +338,11 @@ export function BookmarksSection() {
                 </div>
                 <div className="flex flex-col gap-1">
                   {group.items.map((bookmark) => (
-                    <BookmarkRow key={bookmark.id} bookmark={bookmark} />
+                    <BookmarkRow
+                key={bookmark.id}
+                bookmark={bookmark}
+                proposedCategory={proposedCategories[bookmark.id]}
+              />
                   ))}
                 </div>
               </section>

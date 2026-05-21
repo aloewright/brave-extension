@@ -32,18 +32,22 @@ export interface PiPAutoChangedMessage {
 }
 
 /**
- * Read the auto-PiP flag from `chrome.storage.local`. Returns `false`
- * when the key is unset (first run), when the stored value isn't
- * literally `true` (corrupted or wrong type), or when the storage API
- * is unavailable. Never throws.
+ * Read the auto-PiP flag from `chrome.storage.local`.
+ *
+ * ALO-471 reversed the default — Auto-PiP defaults ON for both new
+ * (key absent) and existing (already had `true` stored) users. Only an
+ * explicit `false` keeps it off. Returns `false` only when the user
+ * has explicitly disabled it; everything else (unset / wrong type /
+ * storage API unavailable) returns `true`. Never throws.
  */
 export async function getAutoPipEnabled(): Promise<boolean> {
   try {
-    if (!chrome?.storage?.local) return false
+    if (!chrome?.storage?.local) return true
     const result = await chrome.storage.local.get(PIP_AUTO_KEY)
-    return result?.[PIP_AUTO_KEY] === true
+    const stored = result?.[PIP_AUTO_KEY]
+    return stored === false ? false : true
   } catch {
-    return false
+    return true
   }
 }
 
