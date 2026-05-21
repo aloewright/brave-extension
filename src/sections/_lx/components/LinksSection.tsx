@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { openExternalLink } from "../../../lib/open-url"
 import type { CollectedLink, Settings } from "../types"
 
 interface Props {
@@ -139,7 +140,15 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
         {filtered.map((link) => (
           <div key={link.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-card/50 transition-colors group">
             <div className="flex-1 min-w-0">
-              <a href={link.url} target="_blank" rel="noopener" className="text-sm text-chart-1 hover:underline truncate block">{link.title}</a>
+              <a
+                href={link.url}
+                target="_blank"
+                rel="noopener"
+                onClick={openExternalLink(link.url)}
+                className="text-sm text-chart-1 hover:underline truncate block"
+              >
+                {link.title}
+              </a>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="text-[10px] text-fg/30 truncate max-w-[200px]">{link.url}</span>
                 {link.tags.map((t) => (

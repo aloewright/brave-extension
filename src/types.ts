@@ -143,7 +143,9 @@ export interface DopplerStatus {
   defaults: {
     project: string
     config: string
+    scope?: string
   }
+  tokenScope?: string | null
   lastCheckedAt: string
   error: string | null
 }

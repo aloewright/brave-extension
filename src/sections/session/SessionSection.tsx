@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { LeoTabButton } from "../../components/leo"
+import { openExternalLink } from "../../lib/open-url"
 import { useLinks, useSettings as useLxSettings } from "../_lx/hooks/useStorage"
 import { LinksSection as LxLinksSection } from "../_lx/components/LinksSection"
 import { CaptureSection as LxCaptureSection } from "../_lx/components/CaptureSection"
@@ -137,6 +138,7 @@ function SnippetList({
               href={s.sourceUrl}
               target="_blank"
               rel="noreferrer"
+              onClick={openExternalLink(s.sourceUrl)}
               className="truncate max-w-[70%] hover:text-primary"
               title={s.sourceUrl}
             >

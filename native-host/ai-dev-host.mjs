@@ -608,7 +608,8 @@ async function main() {
         try {
           const defaults = mcp.setDopplerDefaults({
             project: msg.project,
-            config: msg.config
+            config: msg.config,
+            scope: msg.scope
           })
           sendMessage({ type: "doppler.defaults.set", ok: true, defaults, silent: msg.silent === true })
           sendMessage({ type: "doppler.status", ...(await mcp.getDopplerStatus()) })
@@ -637,6 +638,21 @@ async function main() {
           sendMessage({ type: "doppler.status", ...(await mcp.getDopplerStatus()) })
         } catch (err) {
           sendMessage({ type: "doppler.login", ok: false, error: err.message })
+        }
+        break
+      }
+
+      case "doppler.secrets.download": {
+        try {
+          const secrets = await mcp.dopplerSecretsDownload({
+            project: msg.project,
+            config: msg.config,
+            scope: msg.scope,
+            secrets: Array.isArray(msg.secrets) ? msg.secrets : []
+          })
+          sendMessage({ type: "doppler.secrets.download", ok: true, secrets, silent: msg.silent === true })
+        } catch (err) {
+          sendMessage({ type: "doppler.secrets.download", ok: false, error: err.message, silent: msg.silent === true })
         }
         break
       }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { LeoButton } from "../../components/leo"
+import { openExternalLink } from "../../lib/open-url"
 import { getSettings } from "../../storage"
 import {
   absoluteBlobUrl,
@@ -176,6 +177,7 @@ export function CapturesSection() {
                   href={url}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={openExternalLink(url)}
                   className="truncate text-xs font-medium text-fg hover:text-primary"
                   title={item.filename}
                 >
@@ -191,6 +193,7 @@ export function CapturesSection() {
                     href={item.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
+                    onClick={openExternalLink(item.sourceUrl)}
                     className="truncate text-[10px] text-fg/40 hover:text-primary"
                   >
                     {item.sourceUrl}

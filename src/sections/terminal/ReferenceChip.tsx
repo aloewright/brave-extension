@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { openExternalLink } from "../../lib/open-url"
 import { truncate } from "../../lib/text"
 import type { Reference } from "../../types"
 
@@ -78,6 +79,7 @@ export function ReferenceChip({ reference, onRemove }: Props) {
                 href={reference.url}
                 target="_blank"
                 rel="noreferrer"
+                onClick={openExternalLink(reference.url)}
                 className="text-primary/80 hover:text-primary truncate block"
                 title={reference.url}>
                 {reference.url}
