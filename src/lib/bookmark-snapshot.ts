@@ -17,6 +17,36 @@ export interface BookmarkSnapshot {
   pulledAt: string;
 }
 
+export interface BookmarkCategoryProposal {
+  id: string;
+  category: string;
+}
+
+export function applyBookmarkCategoryProposals(
+  snapshot: BookmarkSnapshot,
+  proposals: BookmarkCategoryProposal[],
+): BookmarkSnapshot {
+  const byId = new Map(
+    proposals
+      .map((proposal) => [proposal.id, proposal.category.trim()] as const)
+      .filter(([, category]) => category.length > 0),
+  );
+  if (byId.size === 0) return snapshot;
+
+  return {
+    ...snapshot,
+    bookmarks: snapshot.bookmarks.map((bookmark) => {
+      const category = byId.get(bookmark.id);
+      if (!category) return bookmark;
+      return {
+        ...bookmark,
+        category,
+        isFavorite: true,
+      };
+    }),
+  };
+}
+
 function titleOrHost(title: string, url: string): string {
   const clean = title.trim();
   if (clean) return clean;

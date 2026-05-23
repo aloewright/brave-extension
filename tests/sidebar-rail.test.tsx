@@ -1,5 +1,18 @@
-import { describe, it, expect } from "vitest"
+import * as React from "react"
+import { MantineProvider } from "@mantine/core"
+import { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { SECTIONS, type SectionId } from "../src/sections/types"
+
+;(globalThis as { React?: typeof React }).React = React
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+vi.mock("../src/lib/quick-actions", () => ({
+  runScreenshotQuickAction: vi.fn(),
+  runPipQuickAction: vi.fn(),
+  runSaveLinkQuickAction: vi.fn()
+}))
 
 // ALO-471 — sidebar rail layout + section composition.
 //
@@ -12,7 +25,45 @@ import { SECTIONS, type SectionId } from "../src/sections/types"
 //   3. The bottom quick-action group covers Screenshot / PiP / Save link.
 //
 // We verify (1) and (2) via SECTIONS, and (3) via the lib that backs the
-// rail's bottom group.
+// rail's bottom group plus direct DOM checks through happy-dom.
+
+let mountedRoots: Root[] = []
+
+afterEach(() => {
+  for (const root of mountedRoots) {
+    act(() => root.unmount())
+  }
+  mountedRoots = []
+  document.body.innerHTML = ""
+  vi.clearAllMocks()
+  vi.useRealTimers()
+})
+
+async function renderRail() {
+  const { SidebarRail } = await import("../src/components/SidebarRail")
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  mountedRoots.push(root)
+
+  await act(async () => {
+    root.render(
+      React.createElement(
+        MantineProvider,
+        {},
+        React.createElement(SidebarRail, { active: "terminal", onChange: vi.fn() })
+      )
+    )
+  })
+
+  return host
+}
+
+function quickActionButton(host: HTMLElement, label: string) {
+  const button = host.querySelector(`button[aria-label="${label}"]`)
+  expect(button).toBeInstanceOf(HTMLButtonElement)
+  return button as HTMLButtonElement
+}
 
 describe("SECTIONS reflects ALO-471 reorg", () => {
   it("includes the dedicated Tech section", () => {
@@ -51,5 +102,51 @@ describe("Bottom quick-action group composition", () => {
     expect(typeof mod.runScreenshotQuickAction).toBe("function")
     expect(typeof mod.runPipQuickAction).toBe("function")
     expect(typeof mod.runSaveLinkQuickAction).toBe("function")
+  })
+
+  it("shows loading feedback while a bottom quick action is running", async () => {
+    const mod = await import("../src/lib/quick-actions")
+    let resolveAction: (value: { kind: "success"; message: string }) => void = () => {}
+    vi.mocked(mod.runSaveLinkQuickAction).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveAction = resolve })
+    )
+
+    const host = await renderRail()
+    const button = quickActionButton(host, "Save link")
+
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(button.dataset.feedback).toBe("loading")
+    expect(button.getAttribute("aria-busy")).toBe("true")
+    expect(button.disabled).toBe(true)
+
+    await act(async () => {
+      resolveAction({ kind: "success", message: "Link saved" })
+    })
+
+    expect(button.dataset.feedback).toBe("success")
+    expect(button.title).toBe("Link saved")
+    expect(button.disabled).toBe(false)
+  })
+
+  it("shows error feedback when a bottom quick action fails", async () => {
+    const mod = await import("../src/lib/quick-actions")
+    vi.mocked(mod.runPipQuickAction).mockResolvedValueOnce({
+      kind: "error",
+      message: "Reload page first"
+    })
+
+    const host = await renderRail()
+    const button = quickActionButton(host, "Picture-in-picture")
+
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(button.dataset.feedback).toBe("error")
+    expect(button.title).toBe("Reload page first")
+    expect(button.disabled).toBe(false)
   })
 })

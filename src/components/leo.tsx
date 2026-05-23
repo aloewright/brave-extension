@@ -11,6 +11,7 @@ export function cx(...classes: Array<string | false | null | undefined>) {
 
 export type LeoIconName =
   | "browser-extensions"
+  | "camera"
   | "chevrons-down"
   | "chevrons-up"
   | "check-normal"
@@ -45,6 +46,9 @@ const puzzlePieceIcon = (
 
 const ICONS: Record<LeoIconName, ReactNode> = {
   "browser-extensions": puzzlePieceIcon,
+  camera: (
+    <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M8.95 4.5c.69 0 1.322.39 1.63 1.007l.406.812c.037.074.112.12.195.12h1.638c.083 0 .158-.046.195-.12l.406-.812A1.825 1.825 0 0 1 15.05 4.5h1.7a3.25 3.25 0 0 1 3.25 3.25v8.5a3.25 3.25 0 0 1-3.25 3.25h-9.5A3.25 3.25 0 0 1 4 16.25v-8.5A3.25 3.25 0 0 1 7.25 4.5zm-1.7 1.6a1.65 1.65 0 0 0-1.65 1.65v8.5a1.65 1.65 0 0 0 1.65 1.65h9.5a1.65 1.65 0 0 0 1.65-1.65v-8.5a1.65 1.65 0 0 0-1.65-1.65h-1.7a.225.225 0 0 0-.201.124l-.406.811a1.82 1.82 0 0 1-1.624 1.005H11.18c-.69 0-1.32-.389-1.624-1.005l-.406-.811A.225.225 0 0 0 8.95 6.1zm4.75 3.15a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7m0 1.6a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8" />
+  ),
   "chevrons-down": (
     <path fill="currentColor" d="M5.47 6.72a.75.75 0 0 1 1.06 0L12 12.19l5.47-5.47a.75.75 0 1 1 1.06 1.06l-6 6a.75.75 0 0 1-1.06 0l-6-6a.75.75 0 0 1 0-1.06m0 5a.75.75 0 0 1 1.06 0L12 17.19l5.47-5.47a.75.75 0 1 1 1.06 1.06l-6 6a.75.75 0 0 1-1.06 0l-6-6a.75.75 0 0 1 0-1.06" />
   ),

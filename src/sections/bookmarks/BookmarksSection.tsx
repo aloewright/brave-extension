@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LeoButton, LeoTabButton } from "../../components/leo";
 import {
+  applyBookmarkCategoryProposals,
   BOOKMARK_SNAPSHOT_KEY,
   type BookmarkSnapshot,
   type StoredBookmark,
@@ -168,6 +169,15 @@ export function BookmarksSection() {
         });
         for (const p of res.proposals) merged[p.id] = p;
       }
+      if (snapshot) {
+        const next = applyBookmarkCategoryProposals(
+          snapshot,
+          Object.values(merged),
+        );
+        setSnapshot(next);
+        await chrome.storage.local.set({ [BOOKMARK_SNAPSHOT_KEY]: next });
+        setView("favorites");
+      }
       setProposedCategories(merged);
     } catch (err) {
       const msg =
@@ -180,14 +190,6 @@ export function BookmarksSection() {
     } finally {
       setCategorizing(false);
     }
-  };
-
-  const applyProposed = () => {
-    // Local-first: applying is purely a UX shift — the Worker side gets the
-    // categories on the next snapshot push (bookmarks.ts → /snapshot). We
-    // surface accepted categories by carrying them in BookmarkRow's
-    // displayed label so the user sees them under each row.
-    setProposedCategories({});
   };
 
   const dismissProposed = () => {
@@ -247,24 +249,17 @@ export function BookmarksSection() {
             data-testid="bookmark-categorize-banner"
           >
             <span>
-              {Object.keys(proposedCategories).length} proposed categor
-              {Object.keys(proposedCategories).length === 1 ? "y" : "ies"} —
-              review below
+              {Object.keys(proposedCategories).length} AI categor
+              {Object.keys(proposedCategories).length === 1 ? "y" : "ies"} applied —
+              grouped under Favorites
             </span>
             <span className="flex items-center gap-1">
-              <button
-                type="button"
-                className="rounded bg-primary/30 px-2 py-0.5 hover:bg-primary/40"
-                onClick={applyProposed}
-              >
-                Accept
-              </button>
               <button
                 type="button"
                 className="rounded bg-card/40 px-2 py-0.5 text-fg/60 hover:bg-card/60"
                 onClick={dismissProposed}
               >
-                Dismiss
+                Hide
               </button>
             </span>
           </div>
@@ -311,10 +306,10 @@ export function BookmarksSection() {
             {favorites.length > 0 ? (
               favorites.map((bookmark) => (
                 <BookmarkRow
-                key={bookmark.id}
-                bookmark={bookmark}
-                proposedCategory={proposedCategories[bookmark.id]}
-              />
+                  key={bookmark.id}
+                  bookmark={bookmark}
+                  proposedCategory={proposedCategories[bookmark.id]}
+                />
               ))
             ) : (
               <div className="rounded border border-border p-4 text-sm text-fg/50">
@@ -339,10 +334,10 @@ export function BookmarksSection() {
                 <div className="flex flex-col gap-1">
                   {group.items.map((bookmark) => (
                     <BookmarkRow
-                key={bookmark.id}
-                bookmark={bookmark}
-                proposedCategory={proposedCategories[bookmark.id]}
-              />
+                      key={bookmark.id}
+                      bookmark={bookmark}
+                      proposedCategory={proposedCategories[bookmark.id]}
+                    />
                   ))}
                 </div>
               </section>

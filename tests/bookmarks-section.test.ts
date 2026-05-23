@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  applyBookmarkCategoryProposals,
   BOOKMARK_SNAPSHOT_KEY,
   flattenBookmarkTree,
 } from "../src/lib/bookmark-snapshot";
@@ -93,5 +94,39 @@ describe("bookmark snapshot and section", () => {
     expect(railSource).toContain('bookmarks: "product-bookmarks"');
     expect(backgroundSource).toContain("ensureBookmarkSnapshot()");
     expect(backgroundSource).toContain("SYNC_BOOKMARK_SNAPSHOT");
+  });
+
+  it("applies AI categories and moves categorized bookmarks into Favorites", () => {
+    const snapshot = {
+      pulledAt: "2026-05-23T00:00:00.000Z",
+      bookmarks: [
+        {
+          id: "1",
+          title: "React",
+          url: "https://react.dev",
+          category: "Bookmarks Bar",
+          path: ["Bookmarks Bar"],
+          isFavorite: false,
+        },
+        {
+          id: "2",
+          title: "MDN",
+          url: "https://developer.mozilla.org",
+          category: "Docs",
+          path: ["Docs"],
+          isFavorite: false,
+        },
+      ],
+    };
+
+    const next = applyBookmarkCategoryProposals(snapshot, [
+      { id: "1", category: "Frontend" },
+      { id: "2", category: "Reference" },
+    ]);
+
+    expect(next.bookmarks).toEqual([
+      expect.objectContaining({ id: "1", category: "Frontend", isFavorite: true }),
+      expect.objectContaining({ id: "2", category: "Reference", isFavorite: true }),
+    ]);
   });
 });

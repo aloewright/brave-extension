@@ -12,6 +12,9 @@ import {
   type CaptureSummary
 } from "../../lib/captures-client"
 
+type CapturesConfig = { apiUrl: string; apiToken: string }
+type VisibleCapture = CaptureSummary | CaptureSearchHit
+
 /**
  * Page Captures section (ALO-468). Lists screenshots + PDFs the user has
  * uploaded to their R2 bucket via the sidebar rail's Screenshot/PDF
@@ -31,7 +34,7 @@ export function CapturesSection() {
   const [busy, setBusy] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [config, setConfig] = useState<{ apiUrl: string; apiToken: string } | null>(null)
+  const [config, setConfig] = useState<CapturesConfig | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -192,9 +195,7 @@ export function CapturesSection() {
               className="flex items-start gap-2 rounded border border-border/60 bg-card/20 px-2.5 py-2 hover:border-border"
               data-testid="capture-row"
             >
-              <div className="flex-shrink-0 mt-0.5 rounded bg-accent/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-fg/60">
-                {item.kind}
-              </div>
+              <CapturePreview item={item} config={config} />
               <div className="flex min-w-0 flex-col">
                 <button
                   type="button"
@@ -242,6 +243,72 @@ export function CapturesSection() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function CapturePreview({
+  item,
+  config
+}: {
+  item: VisibleCapture
+  config: CapturesConfig | null
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const canPreview = item.kind === "screenshot" && !!config
+
+  useEffect(() => {
+    if (!canPreview || !config) {
+      setPreviewUrl(null)
+      setFailed(false)
+      return
+    }
+
+    let cancelled = false
+    let objectUrl: string | null = null
+    setPreviewUrl(null)
+    setFailed(false)
+
+    void (async () => {
+      try {
+        const blob = await fetchCaptureBlob(config, item.blobUrl)
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewUrl(objectUrl)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [canPreview, config, item.blobUrl])
+
+  if (!canPreview) {
+    return (
+      <div className="flex h-12 w-[72px] flex-shrink-0 items-center justify-center rounded bg-accent/35 text-[9px] uppercase tracking-wide text-fg/55">
+        {item.kind}
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-12 w-[72px] flex-shrink-0 overflow-hidden rounded border border-border/50 bg-accent/25">
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt={`${item.filename} preview`}
+          className="h-full w-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] uppercase tracking-wide text-fg/45">
+          {failed ? "No preview" : "Loading"}
+        </div>
+      )}
     </div>
   )
 }
