@@ -1,0 +1,72 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      # --ignore-scripts skips Plasmo's post-install hooks; the storage
+      # and types tests don't need the extension to be built.
+      #
+      # NOTE (PDX-124): --no-frozen-lockfile temporarily set so pnpm can
+      # bring pnpm-lock.yaml into sync with the new `@types/node` devDep.
+      # A follow-up PR will commit the regenerated lockfile and restore
+      # --frozen-lockfile.
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - run: pnpm test
+
+  build:
+    runs-on: ubuntu-latest
+    # Production build smoke (ALO-112). Catches Plasmo manifest / bundler
+    # regressions that vitest can't see.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
+
+  worker:
+    name: Worker tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          # node:sqlite requires Node 22.5+; pin 22.x line.
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: worker/pnpm-lock.yaml
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - run: pnpm typecheck
+      - run: pnpm test
+      # Smoke the SPA build so a broken web/ TS or Vite config can't slip
+      # through without the worker job catching it.
+      - run: pnpm build:web

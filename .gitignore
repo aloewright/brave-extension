@@ -1,0 +1,13 @@
+node_modules
+build
+.plasmo
+tsconfig.tsbuildinfo
+.DS_Store
+.omx/
+test-results/
+coverage/
+# Build outputs (Worker SPA in worker/dist/web/, future bundles).
+dist/
+# Local-only state from agent tooling and wrangler dev runs.
+.claude/
+.wrangler/

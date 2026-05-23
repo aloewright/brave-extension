@@ -1,0 +1,619 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme: tweakcn "extension ui"
+ * https://tweakcn.com/themes/cmnqpszke000204l849uk8oan
+ *
+ * Tokens are in space-separated RGB so Tailwind's `/<alpha>` opacity modifiers work.
+ * Default is dark; add class="light" on <html> to switch.
+ */
+:root {
+  /* Dark mode (default) */
+  --background: 59 59 63;
+  --foreground: 241 241 241;
+  --card: 74 74 78;
+  --card-foreground: 241 241 241;
+  --popover: 59 59 63;
+  --popover-foreground: 241 241 241;
+  --primary: 225 227 230;
+  --primary-foreground: 59 59 63;
+  --secondary: 80 80 85;
+  --secondary-foreground: 241 241 241;
+  --muted: 74 74 78;
+  --muted-foreground: 176 176 181;
+  --accent: 90 90 96;
+  --accent-foreground: 241 241 241;
+  --destructive: 158 94 94;
+  --destructive-foreground: 252 234 234;
+  --border: 80 80 85;
+  --input: 80 80 85;
+  --ring: 176 176 181;
+  --sidebar: 49 49 53;
+  --sidebar-foreground: 241 241 241;
+
+  /* Status colors — kept as raw because they aren't part of the theme */
+  --success: 74 222 128;
+  --warning: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
+
+  --radius: 0.5rem;
+  --shadow-color: 0 0 0;
+  --shadow-opacity: 0.3;
+
+  /*
+   * Leo-compatible aliases. These intentionally map Leo semantics onto this
+   * extension's existing palette so adopting Leo primitives does not repaint
+   * the app.
+   */
+  --leo-color-text-primary: rgb(var(--foreground));
+  --leo-color-text-secondary: rgb(var(--muted-foreground));
+  --leo-color-container-background: rgb(var(--background));
+  --leo-color-container-highlight: rgb(var(--card));
+  --leo-color-divider-subtle: rgb(var(--border));
+  --leo-radius-m: var(--radius);
+  --leo-font-text-default-regular: 400 14px/20px "Inter", system-ui, sans-serif;
+  --leo-font-text-small-regular: 400 12px/16px "Inter", system-ui, sans-serif;
+  --leo-font-heading-h4: 600 18px/24px "Inter", system-ui, sans-serif;
+}
+
+.light {
+  --background: 247 247 248;
+  --foreground: 59 59 63;
+  --card: 255 255 255;
+  --card-foreground: 59 59 63;
+  --popover: 255 255 255;
+  --popover-foreground: 59 59 63;
+  --primary: 59 59 63;
+  --primary-foreground: 247 247 248;
+  --secondary: 225 227 230;
+  --secondary-foreground: 59 59 63;
+  --muted: 241 242 244;
+  --muted-foreground: 110 110 115;
+  --accent: 236 238 240;
+  --accent-foreground: 59 59 63;
+  --destructive: 244 167 167;
+  --destructive-foreground: 74 21 21;
+  --border: 226 226 229;
+  --input: 226 226 229;
+  --ring: 59 59 63;
+  --sidebar: 241 242 244;
+  --sidebar-foreground: 59 59 63;
+
+  --shadow-opacity: 0.05;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: rgb(var(--background));
+  color: rgb(var(--foreground));
+  letter-spacing: 0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(var(--sidebar));
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent));
+}
+
+/* Terminal output styling */
+.terminal-output pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.terminal-output .ansi-red {
+  color: #f87171;
+}
+.terminal-output .ansi-green {
+  color: #4ade80;
+}
+.terminal-output .ansi-yellow {
+  color: #fbbf24;
+}
+.terminal-output .ansi-blue {
+  color: #60a5fa;
+}
+.terminal-output .ansi-magenta {
+  color: #c084fc;
+}
+.terminal-output .ansi-cyan {
+  color: #22d3ee;
+}
+.terminal-output .ansi-bold {
+  font-weight: 700;
+}
+.terminal-output .ansi-dim {
+  opacity: 0.6;
+}
+
+/* New tab workspace */
+.newtab-workspace {
+  min-height: 100vh;
+  overflow-x: hidden;
+  letter-spacing: 0;
+  background:
+    linear-gradient(135deg, rgba(97, 211, 148, 0.12), transparent 28%),
+    linear-gradient(315deg, rgba(76, 201, 240, 0.1), transparent 26%),
+    rgb(var(--background));
+}
+
+.newtab-workspace a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.newtab-workspace__shell {
+  width: min(1180px, calc(100vw - 48px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 34px 0 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.newtab-workspace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.newtab-workspace__count {
+  font-size: 12px;
+  line-height: 1;
+  color: rgb(var(--muted-foreground));
+  text-transform: uppercase;
+}
+
+.newtab-search {
+  height: 54px;
+  width: min(760px, 100%);
+  margin: 0 auto 4px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 0 8px 0 16px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  background: rgb(var(--card) / 0.9);
+  box-shadow: 0 18px 34px rgb(var(--shadow-color) / var(--shadow-opacity));
+}
+
+.newtab-search:focus-within {
+  border-color: rgb(var(--ring));
+  box-shadow:
+    0 0 0 3px rgb(var(--background)),
+    0 0 0 5px rgb(var(--ring) / 0.72);
+}
+
+.newtab-search__icon {
+  width: 20px;
+  height: 20px;
+  color: rgb(var(--muted-foreground));
+}
+
+.newtab-search__input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: rgb(var(--foreground));
+  font:
+    500 17px/1.2 "Inter",
+    system-ui,
+    sans-serif;
+}
+
+.newtab-search__input::placeholder {
+  color: rgb(var(--muted-foreground));
+}
+
+.newtab-search__button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(var(--muted-foreground));
+  background: transparent;
+  cursor: pointer;
+}
+
+.newtab-search__button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.newtab-search__button:hover,
+.newtab-search__button:focus-visible {
+  color: rgb(var(--foreground));
+  background: rgb(var(--foreground) / 0.08);
+  outline: none;
+}
+
+.newtab-quick-links {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.newtab-quick-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  color: rgb(var(--foreground));
+  background: rgb(var(--background-elevated, var(--background)));
+  border: 1px solid rgb(var(--foreground) / 0.18);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.newtab-quick-link:hover,
+.newtab-quick-link:focus-visible {
+  border-color: rgb(var(--foreground) / 0.32);
+  background: rgb(var(--foreground));
+  color: rgb(var(--background));
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.newtab-quick-link__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.newtab-app-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.newtab-app-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.newtab-app-grid--top {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.newtab-app-grid--focus {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.newtab-app-grid--compact {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.workspace-app-card {
+  --workspace-app-accent: rgb(var(--primary));
+  min-height: 132px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  background: rgb(var(--card) / 0.86);
+  box-shadow: 0 20px 42px rgb(var(--shadow-color) / var(--shadow-opacity));
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+  cursor: grab;
+}
+
+.workspace-app-card:active {
+  cursor: grabbing;
+}
+
+.workspace-app-card--dragging {
+  opacity: 0.4;
+}
+
+.workspace-app-card--drop-target {
+  border-color: var(--workspace-app-accent);
+  box-shadow: 0 0 0 2px var(--workspace-app-accent);
+}
+
+.workspace-app-card:hover,
+.workspace-app-card:focus-visible {
+  border-color: var(--workspace-app-accent);
+  background: rgb(var(--card) / 0.98);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.workspace-app-card--small {
+  min-height: 102px;
+  padding: 12px;
+  gap: 12px;
+}
+
+.workspace-app-card--add {
+  cursor: pointer;
+  border-style: dashed;
+  background: transparent;
+  color: rgb(var(--muted-foreground));
+  text-align: left;
+  font: inherit;
+}
+
+.workspace-app-card--add:hover,
+.workspace-app-card--add:focus-visible {
+  border-color: rgb(var(--foreground) / 0.5);
+  color: rgb(var(--foreground));
+  background: rgb(var(--card) / 0.6);
+}
+
+.workspace-app-card:focus-visible {
+  box-shadow:
+    0 0 0 3px rgb(var(--background)),
+    0 0 0 5px var(--workspace-app-accent);
+}
+
+.workspace-app-card__mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--workspace-app-accent);
+  background: color-mix(in srgb, var(--workspace-app-accent) 16%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--workspace-app-accent) 42%, transparent);
+  line-height: 1;
+}
+
+.workspace-app-card__icon {
+  width: 22px;
+  height: 22px;
+}
+
+.workspace-app-card--small .workspace-app-card__mark {
+  width: 34px;
+  height: 34px;
+}
+
+.workspace-app-card--small .workspace-app-card__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.workspace-app-card__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workspace-app-card__name {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.workspace-app-card--small .workspace-app-card__name {
+  font-size: 14px;
+  line-height: 1.18;
+}
+
+.newtab-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.newtab-panel {
+  min-height: 224px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 14px;
+  background: rgb(var(--card) / 0.72);
+}
+
+.newtab-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.newtab-panel__header h2 {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.newtab-panel__header span {
+  min-width: 24px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(var(--muted-foreground));
+  background: rgb(var(--secondary));
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.newtab-panel__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.newtab-panel__clear {
+  background: transparent;
+  border: 1px solid rgb(var(--border));
+  color: rgb(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.newtab-panel__clear:hover,
+.newtab-panel__clear:focus-visible {
+  background: rgb(var(--destructive) / 0.12);
+  border-color: rgb(var(--destructive) / 0.6);
+  color: rgb(var(--destructive));
+  outline: none;
+}
+
+.newtab-shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.newtab-panel--scroll .newtab-shortcut-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.newtab-shortcut {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  color: rgb(var(--foreground));
+  background: rgb(var(--background) / 0.28);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.newtab-shortcut:hover,
+.newtab-shortcut:focus-visible {
+  border-color: rgb(var(--border));
+  background: rgb(var(--accent));
+  outline: none;
+}
+
+.newtab-shortcut__title,
+.newtab-shortcut__meta {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newtab-shortcut__title {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.newtab-shortcut__meta {
+  color: rgb(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.newtab-panel__empty {
+  border: 1px dashed rgb(var(--border));
+  border-radius: 8px;
+  padding: 18px;
+  color: rgb(var(--muted-foreground));
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (max-width: 900px) {
+  .newtab-app-grid--top,
+  .newtab-app-grid--focus,
+  .newtab-app-grid--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .newtab-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .newtab-workspace__shell {
+    width: min(100vw - 28px, 420px);
+    padding: 28px 0;
+    justify-content: flex-start;
+  }
+
+  .newtab-search {
+    height: 50px;
+  }
+
+  .newtab-workspace__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .newtab-app-grid--top,
+  .newtab-app-grid--focus,
+  .newtab-app-grid--compact {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-app-card {
+    min-height: 112px;
+  }
+
+  .workspace-app-card--small {
+    min-height: 86px;
+  }
+}

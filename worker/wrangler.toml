@@ -1,0 +1,39 @@
+name = "sidebar-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_compat"]
+
+# Static SPA served from the same Worker. /api/* still hits Hono via the
+# main script; everything else falls through to the asset bundle, with
+# SPA-style fallback to index.html so client-side routes resolve.
+[assets]
+directory = "./dist/web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sidebar"
+database_id = "5de7b694-0bc8-4073-9c3b-497076216901"
+migrations_dir = "./migrations"
+
+# Vectorize — filled in after `wrangler vectorize create sidebar-search` in Task 9
+[[vectorize]]
+binding = "VECTORS"
+index_name = "sidebar-search"
+
+# R2 bucket for recordings + PDFs. Created via `wrangler r2 bucket create sidebar-blobs`.
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "sidebar-blobs"
+
+# Workers AI binding. Tests don't read this file (they use plain vitest
+# with stubbed env.AI), so it's safe to keep enabled here for production.
+[ai]
+binding = "AI"
+
+# Durable ingest pipeline for recordings + PDFs.
+[[workflows]]
+binding = "INGEST"
+name = "sidebar-ingest"
+class_name = "IngestWorkflow"

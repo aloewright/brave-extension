@@ -1,0 +1,47 @@
+{
+  "name": "sidebar-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "vite --config vite.config.web.ts",
+    "build:web": "vite build --config vite.config.web.ts",
+    "build": "pnpm build:web && wrangler deploy",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.web.json",
+    "d1:migrate:local": "wrangler d1 migrations apply sidebar --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply sidebar --remote"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "pdfjs-dist": "^5.7.284",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260520.0",
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "happy-dom": "^20.9.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.4.2",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.93.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "ws": "8.20.1"
+    }
+  }
+}

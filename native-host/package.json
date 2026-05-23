@@ -1,0 +1,19 @@
+{
+  "name": "brave-extension-native-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native messaging host for Brave Dev Extension — bridges browser to local CLI tools and PTY shells.",
+  "type": "module",
+  "main": "ai-dev-host.mjs",
+  "dependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty"
+    ]
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "name": "brave-extension",
+  "displayName": "Brave Dev Extension",
+  "version": "0.1.0",
+  "description": "Brave sidebar extension connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
+  "author": "aloe",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "install-host": "node scripts/install-native-host.mjs",
+    "uninstall-host": "node scripts/uninstall-native-host.mjs",
+    "diagnose-host": "node scripts/diagnose-native-host.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p .",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.7",
+    "@plasmohq/storage": "^1.15.0",
+    "@tanstack/react-virtual": "^3.13.24",
+    "fflate": "^0.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-web-links": "^0.9.0"
+  },
+  "devDependencies": {
+    "@plasmohq/prettier-plugin-sort-imports": "4.0.1",
+    "@playwright/test": "^1.60.0",
+    "@types/chrome": "^0.1.42",
+    "@types/node": "^22.19.17",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "autoprefixer": "^10.5.0",
+    "happy-dom": "^20.9.0",
+    "postcss": "^8.5.14",
+    "plasmo": "0.90.5",
+    "prettier": "3.8.3",
+    "tailwindcss": "^3.4.19",
+    "typescript": "6.0.3",
+    "vite": "6.4.2",
+    "vitest": "^4.1.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "@babel/traverse": "7.29.0",
+      "@plasmohq/parcel-resolver-post": "0.4.6",
+      "@plasmohq/parcel-transformer-manifest": "0.21.1",
+      "@plasmohq/parcel-transformer-svelte": "0.6.1",
+      "content-security-policy-parser": "0.6.0",
+      "esbuild": "0.25.12",
+      "msgpackr": "1.11.9",
+      "svelte": "5.55.9",
+      "tsup": "8.5.1",
+      "vite": "6.4.2"
+    }
+  },
+  "manifest": {
+    "permissions": [
+      "storage",
+      "unlimitedStorage",
+      "tabs",
+      "activeTab",
+      "sidePanel",
+      "nativeMessaging",
+      "debugger",
+      "scripting",
+      "contextMenus",
+      "tabCapture",
+      "desktopCapture",
+      "offscreen",
+      "alarms",
+      "management",
+      "bookmarks",
+      "history",
+      "cookies",
+      "downloads",
+      "tabGroups",
+      "browsingData",
+      "webNavigation",
+      "declarativeNetRequest",
+      "privacy",
+      "contentSettings"
+    ],
+    "host_permissions": [
+      "<all_urls>"
+    ],
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    },
+    "chrome_url_overrides": {
+      "newtab": "newtab.html"
+    },
+    "commands": {
+      "toggle-sidebar": {
+        "suggested_key": {
+          "default": "Alt+Shift+A"
+        },
+        "description": "Toggle Brave Dev Extension"
+      }
+    }
+  }
+}
