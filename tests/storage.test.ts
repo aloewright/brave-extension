@@ -46,6 +46,9 @@ describe("getSettings / setSettings", () => {
     expect(s.sidebarApiUrl).toBe("https://sidebar.pdx.software")
     expect(s.sidebarApiToken).toBe("")
     expect(s.sidebarPruneAfterSync).toBe(false)
+    expect(s.browserAgentCloudPlanningEnabled).toBe(false)
+    expect(s.browserAgentCloudVisionEnabled).toBe(false)
+    expect(s.browserAgentCloudOcrEnabled).toBe(false)
     expect(s.dopplerProject).toBe("")
     expect(s.dopplerConfig).toBe("")
     expect(s.dopplerScope).toBe("/")
@@ -110,6 +113,45 @@ describe("getSettings / setSettings", () => {
     s = await getSettings()
     expect(s.theme).toBe("light") // preserved
     expect(s.backend).toBe("gemini")
+  })
+
+  it("setSettings persists browserAgentCloud* flags and getSettings reads them back", async () => {
+    await setSettings({
+      browserAgentCloudPlanningEnabled: true,
+      browserAgentCloudVisionEnabled: true,
+      browserAgentCloudOcrEnabled: true,
+    })
+    const s = await getSettings()
+    expect(s.browserAgentCloudPlanningEnabled).toBe(true)
+    expect(s.browserAgentCloudVisionEnabled).toBe(true)
+    expect(s.browserAgentCloudOcrEnabled).toBe(true)
+  })
+
+  it("setSettings can disable individual cloud flags after enabling them", async () => {
+    await setSettings({
+      browserAgentCloudPlanningEnabled: true,
+      browserAgentCloudVisionEnabled: true,
+      browserAgentCloudOcrEnabled: true,
+    })
+    await setSettings({ browserAgentCloudPlanningEnabled: false })
+    const s = await getSettings()
+    expect(s.browserAgentCloudPlanningEnabled).toBe(false)
+    // other cloud flags remain unchanged
+    expect(s.browserAgentCloudVisionEnabled).toBe(true)
+    expect(s.browserAgentCloudOcrEnabled).toBe(true)
+  })
+
+  it("browserAgentCloud* defaults are false even when other stored keys exist", async () => {
+    // Simulate a stored settings object that predates the cloud flags
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: { theme: "light", backend: "claude" }
+    })
+    const s = await getSettings()
+    expect(s.browserAgentCloudPlanningEnabled).toBe(false)
+    expect(s.browserAgentCloudVisionEnabled).toBe(false)
+    expect(s.browserAgentCloudOcrEnabled).toBe(false)
+    // pre-existing fields still respected
+    expect(s.theme).toBe("light")
   })
 
   it("mirrors tool-gate settings to the consent FSM keys", async () => {

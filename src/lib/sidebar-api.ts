@@ -69,6 +69,13 @@ export interface BrowserAgentSession {
   pendingConsent: unknown
   createdAt: string
   updatedAt: string
+  cloudUse?: BrowserAgentCloudUse
+}
+
+export interface BrowserAgentCloudUse {
+  planning?: boolean
+  vision?: boolean
+  ocr?: boolean
 }
 
 export interface BrowserAgentChatPayload {
@@ -76,6 +83,7 @@ export interface BrowserAgentChatPayload {
   message: string
   objective?: string
   observation?: unknown
+  cloudUse?: BrowserAgentCloudUse
 }
 
 export class ApiError extends Error {

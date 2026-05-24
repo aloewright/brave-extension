@@ -1,8 +1,10 @@
 import { Hono } from "hono"
 import type { Env } from "../env"
+import { AGENT_PLAN_MODEL, AI_GATEWAY_ID } from "../env"
 import { ulid } from "../ulid"
 
 type AgentRole = "user" | "assistant" | "tool" | "system" | "observation"
+type AgentCloudUse = { planning: boolean; vision: boolean; ocr: boolean }
 
 interface AgentSessionRow {
   id: string
@@ -26,6 +28,16 @@ interface AgentMessageRow {
   observation: string | null
   token_estimate: number
   created_at: number
+}
+
+interface AgentPlanResult {
+  status: string
+  nextStep: string
+  stopCondition: string
+  reply: string
+  provider: string
+  model?: string
+  gateway?: string
 }
 
 const agent = new Hono<{ Bindings: Env }>()
@@ -108,38 +120,42 @@ agent.post("/chat", async (c) => {
     message?: string
     objective?: string
     observation?: unknown
+    cloudUse?: Partial<AgentCloudUse>
   } | null
   if (!body || typeof body.message !== "string") {
     return c.json({ error: { code: "bad_request", message: "message required" } }, 400)
   }
 
+  const cloudUse = normalizeCloudUse(body.cloudUse)
+  const cloudObservation = cloudUse.planning ? serializeObservation(body.observation) : null
   const id = cleanId(body.sessionId) || ulid()
   let session = await getSession(c.env, id)
   if (!session) {
     const now = Date.now()
-    const observation = serializeObservation(body.observation)
     const objective = cleanText(body.objective || body.message, 2000)
     await c.env.DB.prepare(
       `INSERT INTO browser_agent_sessions
         (id, objective, status, next_step, compact_summary, token_estimate, memory_refs,
          last_observation, pending_consent, created_at, updated_at)
        VALUES (?, ?, 'planning', 'Observe the page and plan the next browser action.', '', ?, '[]', ?, NULL, ?, ?)`
-    ).bind(id, objective, estimateTokens([objective, observation]), observation, now, now).run()
+    ).bind(id, objective, estimateTokens([objective, cloudObservation ?? ""]), cloudObservation, now, now).run()
     session = (await getSession(c.env, id))!
   }
 
-  const observation = serializeObservation(body.observation)
-  await appendMessage(c.env, id, "user", body.message, body.observation)
-  const plan = buildDeterministicPlan(body.message, observation, session)
+  await appendMessage(c.env, id, "user", body.message, cloudUse.planning ? body.observation : undefined)
+  const cloudPlan = cloudUse.planning && cloudObservation
+    ? await buildCloudPlan(c.env, body.message, cloudObservation, session).catch(() => null)
+    : null
+  const plan = cloudPlan ?? buildDeterministicPlan(body.message, cloudObservation ?? "", session)
   await appendMessage(c.env, id, "assistant", plan.reply, undefined)
   await updateSession(c.env, id, {
     objective: cleanText(body.objective || session.objective || body.message, 2000),
     status: plan.status,
     next_step: plan.nextStep,
     compact_summary: session.compact_summary,
-    token_estimate: estimateTokens([session.compact_summary, body.message, plan.reply, observation]),
+    token_estimate: estimateTokens([session.compact_summary, body.message, plan.reply, cloudObservation ?? ""]),
     memory_refs: session.memory_refs,
-    last_observation: observation,
+    last_observation: cloudObservation ?? session.last_observation,
     pending_consent: null,
     updated_at: Date.now()
   })
@@ -153,7 +169,10 @@ agent.post("/chat", async (c) => {
       nextStep: updated.next_step,
       stopCondition: plan.stopCondition
     },
-    provider: "worker-deterministic",
+    provider: plan.provider,
+    cloudUse,
+    model: plan.model,
+    gateway: plan.gateway,
     compacted: updated.compact_summary !== session.compact_summary
   })
 })
@@ -286,7 +305,93 @@ async function compactSession(env: Env, session: AgentSessionRow): Promise<Agent
   return (await getSession(env, session.id))!
 }
 
-function buildDeterministicPlan(message: string, observationJson: string, session: AgentSessionRow) {
+function normalizeCloudUse(value: Partial<AgentCloudUse> | undefined): AgentCloudUse {
+  return {
+    planning: value?.planning === true,
+    vision: value?.vision === true,
+    ocr: value?.ocr === true
+  }
+}
+
+async function buildCloudPlan(
+  env: Env,
+  message: string,
+  observationJson: string,
+  session: AgentSessionRow
+): Promise<AgentPlanResult> {
+  const prompt = [
+    "Return strict JSON only with keys status, nextStep, stopCondition, reply.",
+    "You are planning one safe browser-agent step. You do not execute actions.",
+    "Use the capped observation as authorized page context.",
+    `Objective: ${session.objective || message}`,
+    `User message: ${cleanText(message, 2000)}`,
+    `Observation JSON: ${cleanText(observationJson, 12000)}`
+  ].join("\n")
+
+  const res = (await env.AI.run(
+    AGENT_PLAN_MODEL,
+    {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a privacy-scoped browser planner. Respond with compact strict JSON only."
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 700
+    },
+    { gateway: { id: AI_GATEWAY_ID } }
+  )) as { response?: string; result?: string; choices?: Array<{ message?: { content?: string } }> }
+
+  const raw = extractAiText(res)
+  const parsed = parseJson(extractJson(raw)) as {
+    status?: string
+    nextStep?: string
+    stopCondition?: string
+    reply?: string
+  } | null
+  const deterministic = buildDeterministicPlan(message, observationJson, session)
+  const hasUsableCloudPlan = Boolean(
+    parsed && (parsed.status || parsed.nextStep || parsed.stopCondition || parsed.reply)
+  )
+  if (!hasUsableCloudPlan) {
+    return deterministic
+  }
+  const status = cleanText(parsed!.status || deterministic.status, 80) || "planning"
+  const nextStep = cleanText(parsed!.nextStep || deterministic.nextStep, 500)
+  const stopCondition = cleanText(parsed!.stopCondition || deterministic.stopCondition, 500)
+  const reply = preserveText(parsed!.reply || raw || deterministic.reply, 2000)
+
+  return {
+    status,
+    nextStep,
+    stopCondition,
+    reply,
+    provider: "cloudflare-ai-gateway",
+    model: AGENT_PLAN_MODEL,
+    gateway: AI_GATEWAY_ID
+  }
+}
+
+function extractAiText(
+  res:
+    | { response?: string; result?: string; choices?: Array<{ message?: { content?: string } }> }
+    | undefined
+): string {
+  if (!res) return ""
+  if (typeof res.response === "string") return res.response
+  if (typeof res.result === "string") return res.result
+  const choice = res.choices?.[0]?.message?.content
+  return typeof choice === "string" ? choice : ""
+}
+
+function extractJson(raw: string): string {
+  const match = raw.match(/\{[\s\S]*\}/)
+  return match ? match[0] : raw
+}
+
+function buildDeterministicPlan(message: string, observationJson: string, session: AgentSessionRow): AgentPlanResult {
   const obs = parseJson(observationJson) as { title?: string; nodes?: unknown[]; limits?: { nodesTruncated?: boolean } } | null
   const nodeCount = Array.isArray(obs?.nodes) ? obs.nodes.length : 0
   const objective = session.objective || message
@@ -303,7 +408,8 @@ function buildDeterministicPlan(message: string, observationJson: string, sessio
     status: "planning",
     nextStep,
     stopCondition: "Stop when the requested page state is reached or a required user consent/input is missing.",
-    reply
+    reply,
+    provider: "worker-deterministic"
   }
 }
 
@@ -341,6 +447,11 @@ function cleanId(value: unknown): string | null {
 
 function cleanText(value: unknown, max: number): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim()
+  return text.length > max ? `${text.slice(0, max)}...[truncated]` : text
+}
+
+function preserveText(value: unknown, max: number): string {
+  const text = String(value ?? "").trim()
   return text.length > max ? `${text.slice(0, max)}...[truncated]` : text
 }
 

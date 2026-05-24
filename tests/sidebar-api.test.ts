@@ -95,15 +95,101 @@ describe("sidebar-api client", () => {
     const out = await client.agent.chat({
       sessionId: "s1",
       message: "save",
-      observation: { title: "Example", nodes: [] }
+      observation: { title: "Example", nodes: [] },
+      cloudUse: { planning: true, vision: false, ocr: false }
     })
     expect(out.provider).toBe("worker-deterministic")
     expect(calls[0]!.url).toBe(`${BASE}/api/agent/chat`)
     expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
       sessionId: "s1",
       message: "save",
-      observation: { title: "Example" }
+      observation: { title: "Example" },
+      cloudUse: { planning: true }
     })
+  })
+
+  it("agent.chat omits cloudUse from body when not provided (backward compat)", async () => {
+    const { calls } = mockFetch([
+      {
+        body: {
+          session: { id: "s1", objective: "save", status: "planning", nextStep: "observe", compactSummary: "", tokenEstimate: 1, memoryRefs: [], lastObservation: null, pendingConsent: null, createdAt: "now", updatedAt: "now" },
+          reply: "Plan",
+          plan: { objective: "save", status: "planning", nextStep: "observe", stopCondition: "done" },
+          provider: "worker-deterministic",
+          compacted: false
+        }
+      }
+    ])
+    const client = createSidebarApiClient("tok", BASE)
+    await client.agent.chat({
+      sessionId: "s2",
+      message: "do something",
+    })
+    const sent = JSON.parse(String(calls[0]!.init.body))
+    // cloudUse key should not be present when not passed
+    expect(sent).not.toHaveProperty("cloudUse")
+  })
+
+  it("agent.chat sends cloudUse with all-false flags when explicitly provided", async () => {
+    const { calls } = mockFetch([
+      {
+        body: {
+          session: { id: "s1", objective: "save", status: "planning", nextStep: "observe", compactSummary: "", tokenEstimate: 1, memoryRefs: [], lastObservation: null, pendingConsent: null, createdAt: "now", updatedAt: "now" },
+          reply: "Plan",
+          plan: { objective: "save", status: "planning", nextStep: "observe", stopCondition: "done" },
+          provider: "worker-deterministic",
+          compacted: false
+        }
+      }
+    ])
+    const client = createSidebarApiClient("tok", BASE)
+    await client.agent.chat({
+      sessionId: "s3",
+      message: "look around",
+      cloudUse: { planning: false, vision: false, ocr: false },
+    })
+    const sent = JSON.parse(String(calls[0]!.init.body))
+    expect(sent.cloudUse).toEqual({ planning: false, vision: false, ocr: false })
+  })
+
+  it("agent.chat forwards partial cloudUse object as-is", async () => {
+    const { calls } = mockFetch([
+      {
+        body: {
+          session: { id: "s1", objective: "save", status: "planning", nextStep: "observe", compactSummary: "", tokenEstimate: 1, memoryRefs: [], lastObservation: null, pendingConsent: null, createdAt: "now", updatedAt: "now" },
+          reply: "Plan",
+          plan: { objective: "save", status: "planning", nextStep: "observe", stopCondition: "done" },
+          provider: "cloudflare-ai-gateway",
+          compacted: false
+        }
+      }
+    ])
+    const client = createSidebarApiClient("tok", BASE)
+    await client.agent.chat({
+      sessionId: "s4",
+      message: "check page",
+      cloudUse: { planning: true },
+    })
+    const sent = JSON.parse(String(calls[0]!.init.body))
+    expect(sent.cloudUse).toMatchObject({ planning: true })
+  })
+
+  it("agent.chat sends to /api/agent/chat regardless of cloudUse setting", async () => {
+    const { calls } = mockFetch([
+      {
+        body: {
+          session: { id: "s1", objective: "x", status: "planning", nextStep: "observe", compactSummary: "", tokenEstimate: 1, memoryRefs: [], lastObservation: null, pendingConsent: null, createdAt: "now", updatedAt: "now" },
+          reply: "ok",
+          plan: { objective: "x", status: "planning", nextStep: "observe", stopCondition: "done" },
+          provider: "cloudflare-ai-gateway",
+          compacted: false
+        }
+      }
+    ])
+    const client = createSidebarApiClient("tok", BASE)
+    await client.agent.chat({ message: "ping", cloudUse: { planning: true, vision: true, ocr: true } })
+    expect(calls[0]!.url).toBe(`${BASE}/api/agent/chat`)
+    expect(calls[0]!.init.method).toBe("POST")
   })
 
   it("throws ApiError on non-2xx with the server's code/message", async () => {

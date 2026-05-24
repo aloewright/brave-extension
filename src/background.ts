@@ -3,6 +3,7 @@ import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { getSettings } from "./storage";
 import { createSidebarApiClient } from "./lib/sidebar-api";
+import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
 import {
   addSessionSnippet,
   copyToClipboardViaTab,
@@ -697,12 +698,13 @@ async function handlePageAgentMessage(input: {
       settings.sidebarApiToken,
       settings.sidebarApiUrl,
     );
-    const res = await client.agent.chat({
+    const res = await client.agent.chat(buildBrowserAgentCloudChatPayload({
+      settings,
       sessionId,
       message: text,
       objective: text,
       observation,
-    });
+    }));
     return {
       sessionId: res.session.id,
       reply: replyWithActionResult(localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply, actionResult),
