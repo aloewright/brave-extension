@@ -1,6 +1,7 @@
 export const NODEWARDEN_DEFAULT_URL = "https://passwords.lazee.workers.dev"
 export const PASSWORD_AUTOFILL_STORAGE_KEY = "passwords.autofill.cache"
 export const PASSWORD_SELECTED_LOGIN_KEY = "passwords.autofill.selectedLoginId"
+export const PASSWORD_NODEWARDEN_URL_KEY = "passwords.nodewarden.serverUrl"
 export const DISPOSABLE_ALIASES_STORAGE_KEY = "passwords.disposableAliases"
 export const DISPOSABLE_ALIAS_ENDPOINT =
   "https://mail.fly.pm/api/v1/aliases/disposable"
@@ -11,6 +12,10 @@ export interface PasswordLogin {
   username: string
   password: string
   urls: string[]
+  notes?: string
+  folder?: string
+  favorite?: boolean
+  createdAt?: number
   updatedAt: number
 }
 
@@ -32,14 +37,31 @@ export async function setPasswordLogins(logins: PasswordLogin[]): Promise<void> 
 }
 
 export async function addPasswordLogin(input: Omit<PasswordLogin, "id" | "updatedAt">) {
+  const now = Date.now()
   const login: PasswordLogin = {
     ...input,
     id: crypto.randomUUID(),
-    updatedAt: Date.now()
+    createdAt: input.createdAt ?? now,
+    updatedAt: now
   }
   const logins = await getPasswordLogins()
   await setPasswordLogins([login, ...logins])
   return login
+}
+
+export async function updatePasswordLogin(
+  id: string,
+  updates: Partial<Omit<PasswordLogin, "id" | "createdAt">>
+): Promise<PasswordLogin | null> {
+  const logins = await getPasswordLogins()
+  let updated: PasswordLogin | null = null
+  const next = logins.map((login) => {
+    if (login.id !== id) return login
+    updated = { ...login, ...updates, updatedAt: Date.now() }
+    return updated
+  })
+  await setPasswordLogins(next)
+  return updated
 }
 
 export async function removePasswordLogin(id: string): Promise<void> {
@@ -53,6 +75,12 @@ export async function setSelectedPasswordLogin(id: string | null): Promise<void>
   } else {
     await chrome.storage.local.remove(PASSWORD_SELECTED_LOGIN_KEY)
   }
+}
+
+export async function getSelectedPasswordLoginId(): Promise<string | null> {
+  const got = await chrome.storage.local.get(PASSWORD_SELECTED_LOGIN_KEY)
+  const value = got[PASSWORD_SELECTED_LOGIN_KEY]
+  return typeof value === "string" ? value : null
 }
 
 export async function getMatchingPasswordLogins(pageUrl: string): Promise<PasswordLogin[]> {
@@ -74,6 +102,36 @@ export async function getMatchingPasswordLogins(pageUrl: string): Promise<Passwo
       }
     })
   )
+}
+
+export async function getNodewardenServerUrl(): Promise<string> {
+  const got = await chrome.storage.local.get(PASSWORD_NODEWARDEN_URL_KEY)
+  const value = got[PASSWORD_NODEWARDEN_URL_KEY]
+  if (typeof value === "string" && value.trim()) {
+    try {
+      return normalizeServerUrl(value)
+    } catch {
+      return NODEWARDEN_DEFAULT_URL
+    }
+  }
+  return NODEWARDEN_DEFAULT_URL
+}
+
+export async function setNodewardenServerUrl(url: string): Promise<string> {
+  const normalized = normalizeServerUrl(url)
+  await chrome.storage.local.set({ [PASSWORD_NODEWARDEN_URL_KEY]: normalized })
+  return normalized
+}
+
+export function normalizeServerUrl(url: string): string {
+  const parsed = new URL(url.trim())
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Server URL must use http or https")
+  }
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "")
+  parsed.search = ""
+  parsed.hash = ""
+  return parsed.toString().replace(/\/+$/, "")
 }
 
 export async function getDisposableAliases(): Promise<DisposableAlias[]> {
@@ -127,6 +185,10 @@ function isPasswordLogin(value: unknown): value is PasswordLogin {
     typeof login.password === "string" &&
     Array.isArray(login.urls) &&
     login.urls.every((url) => typeof url === "string") &&
+    (login.notes === undefined || typeof login.notes === "string") &&
+    (login.folder === undefined || typeof login.folder === "string") &&
+    (login.favorite === undefined || typeof login.favorite === "boolean") &&
+    (login.createdAt === undefined || typeof login.createdAt === "number") &&
     typeof login.updatedAt === "number"
   )
 }

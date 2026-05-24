@@ -6,7 +6,11 @@ import {
   NODEWARDEN_DEFAULT_URL,
   addPasswordLogin,
   getMatchingPasswordLogins,
-  getPasswordLogins
+  getNodewardenServerUrl,
+  getPasswordLogins,
+  PASSWORD_NODEWARDEN_URL_KEY,
+  normalizeServerUrl,
+  updatePasswordLogin
 } from "../src/lib/passwords"
 import {
   STICKY_NOTES_LIMIT,
@@ -74,6 +78,51 @@ describe("passwords and Nodewarden", () => {
     expect(await getPasswordLogins()).toHaveLength(1)
     expect(await getMatchingPasswordLogins("https://www.example.com/session")).toHaveLength(1)
     expect(await getMatchingPasswordLogins("https://elsewhere.test")).toEqual([])
+  })
+
+  it("renders a responsive Bitwarden-style sidebar vault surface", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"),
+      "utf8"
+    )
+    expect(source).toContain('{ id: "vault", label: "Vault" }')
+    expect(source).toContain('{ id: "generator", label: "Generator" }')
+    expect(source).toContain('{ id: "web", label: "Web Vault" }')
+    expect(source).toContain("grid-cols-[minmax(190px,0.9fr)_minmax(230px,1.1fr)]")
+    expect(source).toContain("max-[620px]:grid-cols-1")
+  })
+
+  it("updates local vault items and normalizes Nodewarden server URLs", async () => {
+    const login = await addPasswordLogin({
+      name: "Example",
+      username: "a@example.com",
+      password: "secret",
+      urls: ["https://example.com/login"]
+    })
+    await updatePasswordLogin(login.id, { favorite: true, folder: "Work" })
+    expect((await getPasswordLogins())[0]).toMatchObject({
+      favorite: true,
+      folder: "Work"
+    })
+    expect(normalizeServerUrl("https://passwords.lazee.workers.dev/vault?x=1#y")).toBe(
+      "https://passwords.lazee.workers.dev/vault"
+    )
+  })
+
+  it("keeps invalid stored Nodewarden URLs from crashing the Passwords tab", async () => {
+    await chrome.storage.local.set({ [PASSWORD_NODEWARDEN_URL_KEY]: "not a url" })
+    await expect(getNodewardenServerUrl()).resolves.toBe(NODEWARDEN_DEFAULT_URL)
+  })
+
+  it("uses newline-delimited URI input and unbiased password sampling", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"),
+      "utf8"
+    )
+    expect(source).toContain('<TextAreaInput label="URIs"')
+    expect(source).toContain('.split("\\n")')
+    expect(source).toContain("maxValidByte")
+    expect(source).toContain("if (byte >= maxValidByte) continue")
   })
 })
 
