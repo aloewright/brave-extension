@@ -78,9 +78,10 @@ export function RecorderSection() {
     return () => clearInterval(i);
   }, [state.active, state.paused]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     chrome.runtime.sendMessage(
-      { type: "START_RECORDING", source: "screen" },
+      { type: "START_RECORDING", source: "tab", tabId: tab?.id },
       (res: { ok: boolean; error?: string }) => {
         if (!res?.ok) {
           setState((s) => ({ ...s, lastError: res?.error || "Start failed" }));

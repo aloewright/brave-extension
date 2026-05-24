@@ -78,6 +78,20 @@ describe("new tab workspace apps", () => {
     expect(source).not.toContain("workspace-app-card__domain");
   });
 
+  it("lets workspace link cards be removed and keeps removals persisted", () => {
+    const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
+    const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
+
+    expect(source).toContain('const HIDDEN_APPS_STORAGE_KEY = "newtab.hiddenApps"');
+    expect(source).toContain("const WORKSPACE_APP_STORAGE_KEYS = [");
+    expect(source).toContain("chrome.storage.local.get(\n        WORKSPACE_APP_STORAGE_KEYS,");
+    expect(source).toContain("const removeApp = (app: WorkspaceApp) =>");
+    expect(source).toContain('aria-label={`Remove ${app.name}`}');
+    expect(source).toContain("existingCustoms.filter");
+    expect(source).toContain("Array.from(new Set([...existingHidden, app.url]))");
+    expect(styles).toContain(".workspace-app-card__remove");
+  });
+
   it("uses app icons instead of monogram initials", () => {
     const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
 
