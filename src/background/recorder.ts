@@ -15,10 +15,8 @@ import {
 import { ulid } from "../lib/ulid";
 import { getSettings } from "../storage";
 import { suggestMediaFilename } from "../lib/ai-rename";
-import {
-  releaseOffscreenDocument,
-  retainOffscreenDocument,
-} from "./offscreen";
+import { chooseDesktopMediaStream as chooseDesktopMediaSelection } from "../lib/desktop-capture";
+import { releaseOffscreenDocument, retainOffscreenDocument } from "./offscreen";
 
 export interface RecorderState {
   active: boolean;
@@ -62,10 +60,13 @@ let pendingStart: {
 // messages, so MCP `recorder_start` / `recorder_stop` can resolve only when
 // recording actually begins / a final RecordingMetadata is persisted.
 type StartWaiter = (id: string) => void;
+type StartFailureWaiter = (error: string) => void;
 type StopWaiter = (meta: RecordingMetadata | null) => void;
 let startWaiters: StartWaiter[] = [];
+let startFailureWaiters: StartFailureWaiter[] = [];
 let stopWaiters: StopWaiter[] = [];
 let actionTicker: ReturnType<typeof setInterval> | null = null;
+const RECORDER_START_TIMEOUT_MS = 30_000;
 
 export function registerStartWaiter(w: StartWaiter): () => void {
   startWaiters.push(w);
@@ -83,12 +84,34 @@ export function registerStopWaiter(w: StopWaiter): () => void {
   };
 }
 
+export function registerStartFailureWaiter(w: StartFailureWaiter): () => void {
+  startFailureWaiters.push(w);
+  return () => {
+    const i = startFailureWaiters.indexOf(w);
+    if (i >= 0) startFailureWaiters.splice(i, 1);
+  };
+}
+
 export function notifyRecorderStarted(id: string) {
   const ws = startWaiters;
   startWaiters = [];
+  startFailureWaiters = [];
   for (const w of ws) {
     try {
       w(id);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function notifyRecorderStartFailed(error: string) {
+  const ws = startFailureWaiters;
+  startWaiters = [];
+  startFailureWaiters = [];
+  for (const w of ws) {
+    try {
+      w(error);
     } catch {
       /* ignore */
     }
@@ -209,35 +232,52 @@ async function getActiveNormalTab(): Promise<chrome.tabs.Tab | undefined> {
   return tab;
 }
 
-function chooseDesktopMediaStream(): Promise<{
-  streamId: string;
-  canRequestAudioTrack: boolean;
-}> {
-  return new Promise((resolve, reject) => {
-    if (!chrome.desktopCapture?.chooseDesktopMedia) {
-      reject(new Error("Desktop capture is unavailable"));
-      return;
-    }
+function waitForRecorderStart(
+  id: string,
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let unregisterStart: (() => void) | null = null;
+    let unregisterFailure: (() => void) | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    chrome.desktopCapture.chooseDesktopMedia(
-      ["tab", "window", "screen", "audio"],
-      (streamId, options) => {
-        if (!streamId) {
-          reject(new Error("Recording cancelled"));
-          return;
-        }
-        resolve({
-          streamId,
-          canRequestAudioTrack: !!options?.canRequestAudioTrack,
-        });
-      },
-    );
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      unregisterStart?.();
+      unregisterFailure?.();
+      unregisterStart = null;
+      unregisterFailure = null;
+    };
+
+    const settle = (result: { ok: boolean; error?: string; id?: string }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    unregisterStart = registerStartWaiter((startedId) => {
+      if (startedId !== id) return;
+      settle({ ok: true, id: startedId });
+    });
+    unregisterFailure = registerStartFailureWaiter((error) => {
+      settle({ ok: false, error: error || "Recording failed" });
+    });
+    timer = setTimeout(() => {
+      const error = "Timed out waiting for recorder to start";
+      resetState();
+      recorderState.lastError = error;
+      settle({ ok: false, error });
+    }, RECORDER_START_TIMEOUT_MS);
   });
 }
 
 export async function startRecording(opts: {
   source: RecorderSource;
   tabId?: number;
+  streamId?: string;
+  desktopAudio?: boolean;
 }): Promise<{ ok: boolean; error?: string; id?: string }> {
   if (recorderState.active || pendingStart) {
     return { ok: false, error: "Already recording" };
@@ -249,8 +289,8 @@ export async function startRecording(opts: {
   pendingStart = { source: opts.source, id };
   try {
     let source = opts.source;
-    let streamId: string | undefined;
-    let desktopAudio = false;
+    let streamId: string | undefined = opts.streamId;
+    let desktopAudio = !!opts.desktopAudio;
     let originUrl: string | null = null;
     let tabId: number | null = null;
 
@@ -282,12 +322,13 @@ export async function startRecording(opts: {
     }
 
     if (source === "screen" && !streamId) {
-      const selected = await chooseDesktopMediaStream();
+      const selected = await chooseDesktopMediaSelection();
       streamId = selected.streamId;
-      desktopAudio = selected.canRequestAudioTrack;
+      desktopAudio = selected.desktopAudio;
     }
 
     pendingStart = { source, streamId, desktopAudio, id };
+    const started = waitForRecorderStart(id);
     await ensureOffscreen();
     chrome.runtime
       .sendMessage({
@@ -296,6 +337,9 @@ export async function startRecording(opts: {
         source,
         streamId,
         desktopAudio,
+      })
+      .then(() => {
+        if (pendingStart?.id === id) pendingStart = null;
       })
       .catch(() => {
         // Offscreen not yet listening; RECORDER_READY handler will retry.
@@ -310,9 +354,10 @@ export async function startRecording(opts: {
     recorderState.originUrl = originUrl;
     recorderState.lastError = null;
     updateRecorderAction();
-    return { ok: true, id };
+    return await started;
   } catch (err) {
     recorderState.lastError = (err as Error).message;
+    notifyRecorderStartFailed(recorderState.lastError);
     recorderState.active = false;
     recorderState.paused = false;
     recorderState.elapsedMs = 0;
@@ -490,7 +535,8 @@ export async function handleRecorderStopped(
       sizeBytes: msg.sizeBytes,
       mimeType,
       filename,
-      originalFilename: originalFilename === filename ? undefined : originalFilename,
+      originalFilename:
+        originalFilename === filename ? undefined : originalFilename,
       createdAt: createdAt.toISOString(),
       originUrl: recorderState.originUrl ?? undefined,
     };
@@ -531,6 +577,7 @@ function resetState() {
 export function handleRecorderError(error: string) {
   resetState();
   recorderState.lastError = error || "Recording failed";
+  notifyRecorderStartFailed(recorderState.lastError);
 }
 
 export function handleRecorderReady(sendStart: (msg: unknown) => void) {

@@ -80,7 +80,10 @@ export function RecorderSection() {
   }, [state.active, state.paused]);
 
   const handleStart = async () => {
-    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    setState((s) => ({ ...s, lastError: null }));
+    const win = await chrome.windows.getLastFocused({
+      windowTypes: ["normal"],
+    });
     const [tab] = win?.id
       ? await chrome.tabs.query({ active: true, windowId: win.id })
       : [];
@@ -186,7 +189,9 @@ export function RecorderSection() {
                     Video
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono">{r.filename}</span>
+                    <span className="block truncate font-mono">
+                      {r.filename}
+                    </span>
                     {r.originalFilename && (
                       <span className="block truncate text-[10px] text-fg/35">
                         {r.originalFilename}
@@ -209,9 +214,9 @@ export function RecorderSection() {
 
 async function openRecordingPreview(recording: RecordingMetadata) {
   const url = chrome.runtime.getURL(
-    `media-preview.html?id=${encodeURIComponent(recording.id)}`
-  )
-  await openPopupWindow(url, 760, 560)
+    `media-preview.html?id=${encodeURIComponent(recording.id)}`,
+  );
+  await openPopupWindow(url, 760, 560);
 }
 
 function elapsedRecordingMs(state: RecState, now: number): number {

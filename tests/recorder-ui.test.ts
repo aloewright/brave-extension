@@ -9,8 +9,12 @@ describe("recorder section UI", () => {
       "utf8",
     );
 
-    expect(source).toContain('chrome.windows.getLastFocused({ windowTypes: ["normal"] })');
-    expect(source).toContain("chrome.tabs.query({ active: true, windowId: win.id })");
+    expect(source).toMatch(
+      /chrome\.windows\.getLastFocused\(\{\s*windowTypes: \["normal"\],\s*\}\)/,
+    );
+    expect(source).toContain(
+      "chrome.tabs.query({ active: true, windowId: win.id })",
+    );
     expect(source).toContain('source: "tab"');
     expect(source).toContain("tabId: tab.id");
     expect(source).toContain('lastError: "No active tab"');
@@ -18,6 +22,18 @@ describe("recorder section UI", () => {
     expect(source).not.toContain('source: "screen"');
     expect(source).not.toContain("RECORDER_START_OPTIONS");
     expect(source).not.toContain("What do you want to record?");
+  });
+
+  it("starts toolbar popup recording from the Brave desktop picker", () => {
+    const source = readFileSync(join(process.cwd(), "src/popup.tsx"), "utf8");
+
+    expect(source).toContain("chooseDesktopMediaStream");
+    expect(source).toContain("streamId: selected.streamId");
+    expect(source).toContain("desktopAudio: selected.desktopAudio");
+    expect(source).toContain("chrome.runtime.lastError?.message");
+    expect(source).toContain("!response?.ok");
+    expect(source).toMatch(/>\s*Record\s*<\/button>/);
+    expect(source).not.toContain(">Record Tab<");
   });
 
   it("declares desktop capture for the Brave picker", () => {

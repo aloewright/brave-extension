@@ -1,4 +1,5 @@
 import {
+  default as React,
   useEffect,
   useMemo,
   useState,
@@ -399,7 +400,7 @@ type AppDrag = {
   onDrop: (index: number) => void;
 };
 
-function AppCard({
+export function AppCard({
   app,
   size = "standard",
   drag,
@@ -454,6 +455,23 @@ function AppCard({
           <span className="workspace-app-card__name">{app.name}</span>
         </span>
       </a>
+      {app.quickLinks?.length ? (
+        <nav
+          className="workspace-app-card__quick-links"
+          aria-label={`${app.name} quick links`}
+        >
+          {app.quickLinks.map((link) => (
+            <a
+              key={link.url}
+              className="workspace-app-card__quick-link"
+              draggable={false}
+              href={link.url}
+            >
+              {link.label}
+            </a>
+          ))}
+        </nav>
+      ) : null}
       <button
         type="button"
         className="workspace-app-card__remove"
@@ -631,37 +649,34 @@ function NewTabWorkspace() {
   useEffect(() => {
     let live = true;
     try {
-      chrome.storage.local.get(
-        WORKSPACE_APP_STORAGE_KEYS,
-        (result) => {
-          if (!live) return;
-          const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
-          const hidden = new Set(
-            Array.isArray(result?.[HIDDEN_APPS_STORAGE_KEY])
-              ? result[HIDDEN_APPS_STORAGE_KEY].filter(
-                  (url): url is string => typeof url === "string",
-                )
-              : [],
-          );
-          const combined = [
-            ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
-            ...customs,
-          ];
-          const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
-          if (Array.isArray(storedOrder) && storedOrder.length > 0) {
-            setApps(
-              applyStoredOrder(
-                combined,
-                storedOrder.filter(
-                  (url): url is string => typeof url === "string",
-                ),
+      chrome.storage.local.get(WORKSPACE_APP_STORAGE_KEYS, (result) => {
+        if (!live) return;
+        const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
+        const hidden = new Set(
+          Array.isArray(result?.[HIDDEN_APPS_STORAGE_KEY])
+            ? result[HIDDEN_APPS_STORAGE_KEY].filter(
+                (url): url is string => typeof url === "string",
+              )
+            : [],
+        );
+        const combined = [
+          ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
+          ...customs,
+        ];
+        const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
+        if (Array.isArray(storedOrder) && storedOrder.length > 0) {
+          setApps(
+            applyStoredOrder(
+              combined,
+              storedOrder.filter(
+                (url): url is string => typeof url === "string",
               ),
-            );
-          } else {
-            setApps(combined);
-          }
-        },
-      );
+            ),
+          );
+        } else {
+          setApps(combined);
+        }
+      });
     } catch {
       /* chrome.storage may be unavailable in some preview contexts */
     }
@@ -742,7 +757,9 @@ function NewTabWorkspace() {
           const existingCustoms = sanitizeCustomApps(
             result?.[CUSTOM_APPS_STORAGE_KEY],
           );
-          const existingHidden = Array.isArray(result?.[HIDDEN_APPS_STORAGE_KEY])
+          const existingHidden = Array.isArray(
+            result?.[HIDDEN_APPS_STORAGE_KEY],
+          )
             ? result[HIDDEN_APPS_STORAGE_KEY].filter(
                 (url): url is string => typeof url === "string",
               )
@@ -806,9 +823,7 @@ function NewTabWorkspace() {
         <QuickLinks />
 
         <header className="newtab-workspace__header">
-          <span className="newtab-workspace__count">
-            {apps.length} links
-          </span>
+          <span className="newtab-workspace__count">{apps.length} links</span>
         </header>
 
         <section className="newtab-app-groups" aria-label="Workspace apps">

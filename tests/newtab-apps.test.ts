@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { AppCard } from "../src/newtab";
 import { WORKSPACE_APPS } from "../src/newtab-apps";
 
 describe("new tab workspace apps", () => {
@@ -82,13 +85,19 @@ describe("new tab workspace apps", () => {
     const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
     const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
 
-    expect(source).toContain('const HIDDEN_APPS_STORAGE_KEY = "newtab.hiddenApps"');
+    expect(source).toContain(
+      'const HIDDEN_APPS_STORAGE_KEY = "newtab.hiddenApps"',
+    );
     expect(source).toContain("const WORKSPACE_APP_STORAGE_KEYS = [");
-    expect(source).toContain("chrome.storage.local.get(\n        WORKSPACE_APP_STORAGE_KEYS,");
+    expect(source).toContain(
+      "chrome.storage.local.get(WORKSPACE_APP_STORAGE_KEYS",
+    );
     expect(source).toContain("const removeApp = (app: WorkspaceApp) =>");
-    expect(source).toContain('aria-label={`Remove ${app.name}`}');
+    expect(source).toContain("aria-label={`Remove ${app.name}`}");
     expect(source).toContain("existingCustoms.filter");
-    expect(source).toContain("Array.from(new Set([...existingHidden, app.url]))");
+    expect(source).toContain(
+      "Array.from(new Set([...existingHidden, app.url]))",
+    );
     expect(styles).toContain(".workspace-app-card__remove");
   });
 
@@ -109,6 +118,66 @@ describe("new tab workspace apps", () => {
       "palette",
       "directory",
       "video",
+    ]);
+  });
+
+  it("adds GitHub quick links for pull requests, repositories, and feed", () => {
+    const github = WORKSPACE_APPS.find((app) => app.name === "GitHub");
+
+    expect(github?.quickLinks).toEqual([
+      { label: "Pull Requests", url: "https://github.com/pulls" },
+      {
+        label: "Repositories",
+        url: "https://github.com/aloewright?tab=repositories",
+      },
+      { label: "Feed", url: "https://github.com/dashboard-feed" },
+    ]);
+
+    if (!github) throw new Error("GitHub app missing");
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      createElement(AppCard, {
+        app: github,
+        drag: {
+          index: 0,
+          isDragging: false,
+          isDropTarget: false,
+          onDragStart: () => {},
+          onDragOver: () => {},
+          onDragLeave: () => {},
+          onDragEnd: () => {},
+          onDrop: () => {},
+        },
+        onRemove: () => {},
+      }),
+    );
+
+    const mainLink = container.querySelector<HTMLAnchorElement>(
+      ".workspace-app-card__link",
+    );
+    const quickLinkNav = container.querySelector(
+      ".workspace-app-card__quick-links",
+    );
+    const quickLinks = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>(
+        ".workspace-app-card__quick-link",
+      ),
+    );
+
+    expect(mainLink?.getAttribute("aria-label")).toBe("GitHub");
+    expect(quickLinkNav?.getAttribute("aria-label")).toBe("GitHub quick links");
+    expect(
+      quickLinks.map((link) => ({
+        label: link.textContent,
+        url: link.getAttribute("href"),
+      })),
+    ).toEqual([
+      { label: "Pull Requests", url: "https://github.com/pulls" },
+      {
+        label: "Repositories",
+        url: "https://github.com/aloewright?tab=repositories",
+      },
+      { label: "Feed", url: "https://github.com/dashboard-feed" },
     ]);
   });
 
