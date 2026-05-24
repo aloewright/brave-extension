@@ -13,8 +13,17 @@ const observation = {
   url: "https://example.com",
   title: "Example",
   timestamp: 1,
-  nodes: [{ ref: "e1", role: "button", name: "Save", selector: "#save", rect: { x: 0, y: 0, w: 40, h: 20 }, state: {} }],
-  limits: { nodesTruncated: false }
+  nodes: [
+    {
+      ref: "e1",
+      role: "button",
+      name: "Save",
+      selector: "#save",
+      rect: { x: 0, y: 0, w: 40, h: 20 },
+      state: {},
+    },
+  ],
+  limits: { nodesTruncated: false },
 }
 
 describe("/api/agent", () => {
@@ -28,10 +37,12 @@ describe("/api/agent", () => {
     const res = await authed(env, "/api/agent/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ objective: "click save", observation })
+      body: JSON.stringify({ objective: "click save", observation }),
     })
     expect(res.status).toBe(201)
-    const body = (await res.json()) as { session: { id: string; objective: string; lastObservation: any } }
+    const body = (await res.json()) as {
+      session: { id: string; objective: string; lastObservation: any }
+    }
     expect(body.session.objective).toBe("click save")
     expect(body.session.lastObservation.title).toBe("Example")
 
@@ -43,10 +54,14 @@ describe("/api/agent", () => {
     const res = await authed(env, "/api/agent/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "click save", observation })
+      body: JSON.stringify({ message: "click save", observation }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { id: string; nextStep: string; lastObservation: unknown }; reply: string; provider: string }
+    const body = (await res.json()) as {
+      session: { id: string; nextStep: string; lastObservation: unknown }
+      reply: string
+      provider: string
+    }
     expect(body.provider).toBe("worker-deterministic")
     expect(body.reply).toContain("Objective: click save")
     expect(body.session.lastObservation).toBeNull()
@@ -59,8 +74,8 @@ describe("/api/agent", () => {
         status: "planning",
         nextStep: "Click the Save button.",
         stopCondition: "The draft is saved.",
-        reply: "Cloud plan: click Save."
-      })
+        reply: "Cloud plan: click Save.",
+      }),
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -70,17 +85,59 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation: { ...observation, visibleText: "private page text" },
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
+        cloudUse: { planning: true, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { lastObservation: any }; reply: string; provider: string; cloudUse: unknown; model: string; gateway: string }
+    const body = (await res.json()) as {
+      session: { lastObservation: any }
+      reply: string
+      provider: string
+      cloudUse: unknown
+      model: string
+      gateway: string
+    }
     expect(body.provider).toBe("cloudflare-ai-gateway")
     expect(body.reply).toBe("Cloud plan: click Save.")
     expect(body.session.lastObservation.visibleText).toBe("private page text")
-    expect(body.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
+    expect(body.cloudUse).toEqual({
+      planning: true,
+      vision: false,
+      ocr: false,
+    })
     expect(aiRun).toHaveBeenCalledOnce()
-    expect(JSON.stringify(aiRun.mock.calls[0])).toContain("private page text")
+    const payload = (aiRun.mock.calls[0] as unknown[])[1] as {
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(payload.messages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("privacy-scoped browser planner"),
+    })
+    expect(payload.messages[1]?.role).toBe("user")
+    expect(payload.messages[1]?.content.length).toBeGreaterThan(0)
+    expect(payload.messages[1]?.content).toContain("private page text")
+  })
+
+  it("rejects blank chat messages before calling AI Gateway", async () => {
+    const aiRun = vi.fn(async () => {
+      throw new Error("AI Gateway should not be called")
+    })
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "   ",
+        observation,
+        cloudUse: { planning: true },
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: { message: string } }
+    expect(body.error.message).toBe("message required")
+    expect(aiRun).not.toHaveBeenCalled()
   })
 
   it("preserves AI Gateway reply newlines while normalizing internal plan fields", async () => {
@@ -89,8 +146,8 @@ describe("/api/agent", () => {
         status: "planning\nwith detail",
         nextStep: "Click Save\nthen observe.",
         stopCondition: "Saved\nor blocked.",
-        reply: "Cloud plan:\n\n1. Click Save.\n2. Observe again."
-      })
+        reply: "Cloud plan:\n\n1. Click Save.\n2. Observe again.",
+      }),
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -100,11 +157,14 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation,
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
+        cloudUse: { planning: true, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { status: string; nextStep: string }; reply: string }
+    const body = (await res.json()) as {
+      session: { status: string; nextStep: string }
+      reply: string
+    }
     expect(body.reply).toBe("Cloud plan:\n\n1. Click Save.\n2. Observe again.")
     expect(body.session.status).toBe("planning with detail")
     expect(body.session.nextStep).toBe("Click Save then observe.")
@@ -120,11 +180,16 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation,
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
+        cloudUse: { planning: true, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { provider: string; model?: string; gateway?: string; reply: string }
+    const body = (await res.json()) as {
+      provider: string
+      model?: string
+      gateway?: string
+      reply: string
+    }
     expect(body.provider).toBe("worker-deterministic")
     expect(body.model).toBeUndefined()
     expect(body.gateway).toBeUndefined()
@@ -143,17 +208,22 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation: { ...observation, visibleText: "secret account content" },
-        cloudUse: { planning: false, vision: false, ocr: false }
-      })
+        cloudUse: { planning: false, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { id: string; lastObservation: unknown }; provider: string }
+    const body = (await res.json()) as {
+      session: { id: string; lastObservation: unknown }
+      provider: string
+    }
     expect(body.provider).toBe("worker-deterministic")
     expect(body.session.lastObservation).toBeNull()
     expect(aiRun).not.toHaveBeenCalled()
 
     const get = await authed(env, `/api/agent/sessions/${body.session.id}`)
-    const sessionBody = (await get.json()) as { messages: Array<{ content: string; observation: unknown }> }
+    const sessionBody = (await get.json()) as {
+      messages: Array<{ content: string; observation: unknown }>
+    }
     expect(JSON.stringify(sessionBody)).not.toContain("secret account content")
     expect(sessionBody.messages[0]?.observation).toBeNull()
   })
@@ -170,8 +240,8 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation,
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
+        cloudUse: { planning: true, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { provider: string; reply: string }
@@ -190,12 +260,19 @@ describe("/api/agent", () => {
     const res = await authed(env, "/api/agent/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "click save", observation })
+      body: JSON.stringify({ message: "click save", observation }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { cloudUse: { planning: boolean; vision: boolean; ocr: boolean }; provider: string }
+    const body = (await res.json()) as {
+      cloudUse: { planning: boolean; vision: boolean; ocr: boolean }
+      provider: string
+    }
     expect(body.provider).toBe("worker-deterministic")
-    expect(body.cloudUse).toEqual({ planning: false, vision: false, ocr: false })
+    expect(body.cloudUse).toEqual({
+      planning: false,
+      vision: false,
+      ocr: false,
+    })
     expect(aiRun).not.toHaveBeenCalled()
   })
 
@@ -205,8 +282,8 @@ describe("/api/agent", () => {
         status: "planning",
         nextStep: "click save",
         stopCondition: "saved",
-        reply: "Cloud plan OK"
-      })
+        reply: "Cloud plan OK",
+      }),
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -216,12 +293,18 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation,
-        cloudUse: { planning: true }  // vision and ocr are absent
-      })
+        cloudUse: { planning: true }, // vision and ocr are absent
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { cloudUse: { planning: boolean; vision: boolean; ocr: boolean } }
-    expect(body.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
+    const body = (await res.json()) as {
+      cloudUse: { planning: boolean; vision: boolean; ocr: boolean }
+    }
+    expect(body.cloudUse).toEqual({
+      planning: true,
+      vision: false,
+      ocr: false,
+    })
   })
 
   it("response includes model and gateway fields when cloud plan succeeds", async () => {
@@ -230,8 +313,8 @@ describe("/api/agent", () => {
         status: "planning",
         nextStep: "Proceed.",
         stopCondition: "Done.",
-        reply: "Cloud reply."
-      })
+        reply: "Cloud reply.",
+      }),
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -241,11 +324,15 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "click save",
         observation: { ...observation, visibleText: "cloud model page" },
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
+        cloudUse: { planning: true, vision: false, ocr: false },
+      }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { model: string; gateway: string; provider: string }
+    const body = (await res.json()) as {
+      model: string
+      gateway: string
+      provider: string
+    }
     expect(body.provider).toBe("cloudflare-ai-gateway")
     expect(typeof body.model).toBe("string")
     expect(body.model.length).toBeGreaterThan(0)
@@ -257,10 +344,14 @@ describe("/api/agent", () => {
     const res = await authed(env, "/api/agent/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "click save" })
+      body: JSON.stringify({ message: "click save" }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { model?: string; gateway?: string; provider: string }
+    const body = (await res.json()) as {
+      model?: string
+      gateway?: string
+      provider: string
+    }
     expect(body.provider).toBe("worker-deterministic")
     expect(body.model).toBeUndefined()
     expect(body.gateway).toBeUndefined()
@@ -269,26 +360,40 @@ describe("/api/agent", () => {
   it("AI Gateway receives the full observation JSON in the prompt when planning is enabled", async () => {
     const aiRun = vi.fn(async () => ({
       choices: [
-        { message: { content: JSON.stringify({ status: "planning", nextStep: "click", stopCondition: "done", reply: "ok" }) } }
-      ]
+        {
+          message: {
+            content: JSON.stringify({
+              status: "planning",
+              nextStep: "click",
+              stopCondition: "done",
+              reply: "ok",
+            }),
+          },
+        },
+      ],
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
-    const sensitiveObservation = { ...observation, visibleText: "unique-marker-xyz-789" }
+    const sensitiveObservation = {
+      ...observation,
+      visibleText: "unique-marker-xyz-789",
+    }
     const res = await authed(env, "/api/agent/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         message: "read page",
         observation: sensitiveObservation,
-        cloudUse: { planning: true }
-      })
+        cloudUse: { planning: true },
+      }),
     })
     expect(res.status).toBe(200)
     // The AI was called and the observation text was included in the prompt
     expect(aiRun).toHaveBeenCalledOnce()
-    const callArgs = JSON.stringify(aiRun.mock.calls[0])
-    expect(callArgs).toContain("unique-marker-xyz-789")
+    const payload = (aiRun.mock.calls[0] as unknown[])[1] as {
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(payload.messages[1]?.content).toContain("unique-marker-xyz-789")
   })
 
   it("uses choices[0].message.content format from AI response when response field absent", async () => {
@@ -300,11 +405,11 @@ describe("/api/agent", () => {
               status: "planning",
               nextStep: "type in search box",
               stopCondition: "search results shown",
-              reply: "Choices-format reply."
-            })
-          }
-        }
-      ]
+              reply: "Choices-format reply.",
+            }),
+          },
+        },
+      ],
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -314,8 +419,8 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "search for item",
         observation,
-        cloudUse: { planning: true }
-      })
+        cloudUse: { planning: true },
+      }),
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { reply: string; provider: string }
@@ -329,8 +434,8 @@ describe("/api/agent", () => {
         status: "planning",
         nextStep: "scroll down",
         stopCondition: "element visible",
-        reply: "Result-field reply."
-      })
+        reply: "Result-field reply.",
+      }),
     }))
     env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
 
@@ -340,8 +445,8 @@ describe("/api/agent", () => {
       body: JSON.stringify({
         message: "scroll to footer",
         observation,
-        cloudUse: { planning: true }
-      })
+        cloudUse: { planning: true },
+      }),
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { reply: string; provider: string }
@@ -353,13 +458,16 @@ describe("/api/agent", () => {
     const create = await authed(env, "/api/agent/sessions", {
       method: "POST",
 
-      body: JSON.stringify({ objective: "remember checkout" })
+      body: JSON.stringify({ objective: "remember checkout" }),
     })
     const { session } = (await create.json()) as { session: { id: string } }
     const remember = await authed(env, `/api/agent/sessions/${session.id}/memory`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: "checkout", value: "Reached payment step" })
+      body: JSON.stringify({
+        key: "checkout",
+        value: "Reached payment step",
+      }),
     })
     expect(remember.status).toBe(201)
 
@@ -372,25 +480,27 @@ describe("/api/agent", () => {
     const create = await authed(env, "/api/agent/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ objective: "remember path" })
+      body: JSON.stringify({ objective: "remember path" }),
     })
     const { session } = (await create.json()) as { session: { id: string } }
     await authed(env, `/api/agent/sessions/${session.id}/memory`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: "plain", value: "payment step" })
+      body: JSON.stringify({ key: "plain", value: "payment step" }),
     })
     await authed(env, `/api/agent/sessions/${session.id}/memory`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: "path", value: "C:\\Users\\Aloe" })
+      body: JSON.stringify({ key: "path", value: "C:\\Users\\Aloe" }),
     })
 
     const wildcard = await authed(env, `/api/agent/sessions/${session.id}/memory/search?q=%`)
     expect(((await wildcard.json()) as { results: unknown[] }).results).toEqual([])
 
     const backslash = await authed(env, `/api/agent/sessions/${session.id}/memory/search?q=${encodeURIComponent("\\")}`)
-    const body = (await backslash.json()) as { results: Array<{ key: string }> }
+    const body = (await backslash.json()) as {
+      results: Array<{ key: string }>
+    }
     expect(body.results.map((r) => r.key)).toEqual(["path"])
   })
 

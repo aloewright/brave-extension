@@ -223,8 +223,9 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
   // The component now stays mounted (see sidepanel.tsx) so this cleanup
   // is moot, but the intent of "kill on real sidepanel close" can't be
   // safely served from React anyway: in MV3 the sidepanel page is torn
-  // down abruptly and effect cleanup is best-effort. Sessions are reaped
-  // by the native host when its stdin EOFs (i.e. the SW dies).
+  // down abruptly and effect cleanup is best-effort. The background owns
+  // the native host connection and keeps it alive through the offscreen
+  // document while PTYs are active.
   useEffect(() => {
     if (!sectionActive) return
     function onKey(e: KeyboardEvent) {

@@ -34,6 +34,10 @@ import {
 } from "./background/recorder";
 import { RECORDER_TOOL_HANDLERS } from "./background/recorder-tools";
 import {
+  releaseOffscreenDocument,
+  retainOffscreenDocument,
+} from "./background/offscreen";
+import {
   requestConsent,
   handleConsentResponse,
   type ConsentResponseMessage,
@@ -89,6 +93,49 @@ chrome.runtime.onConnectExternal?.addListener((port) => {
 // instant the sidepanel disconnects and the next time it reconnects. We
 // observe the host's pty.* messages on their way through to update this set.
 const activePtySessions = new Set<string>();
+const TERMINAL_KEEPALIVE_START = "TERMINAL_KEEPALIVE_START";
+const TERMINAL_KEEPALIVE_STOP = "TERMINAL_KEEPALIVE_STOP";
+let terminalKeepAliveActive = false;
+
+async function postTerminalKeepAliveCommand(type: string) {
+  try {
+    await chrome.runtime.sendMessage({ type });
+  } catch {
+    // Offscreen may still be booting or may have just been closed.
+  }
+}
+
+async function startTerminalKeepAlive() {
+  if (!terminalKeepAliveActive) {
+    terminalKeepAliveActive = true;
+    try {
+      await retainOffscreenDocument("terminal-keepalive");
+    } catch (err) {
+      terminalKeepAliveActive = false;
+      safeRuntimeWarning("failed to start terminal keepalive offscreen", err);
+      return;
+    }
+  }
+  await postTerminalKeepAliveCommand(TERMINAL_KEEPALIVE_START);
+}
+
+async function stopTerminalKeepAlive() {
+  if (!terminalKeepAliveActive) return;
+  terminalKeepAliveActive = false;
+  await postTerminalKeepAliveCommand(TERMINAL_KEEPALIVE_STOP);
+  await releaseOffscreenDocument("terminal-keepalive");
+}
+
+function trackActivePtySession(sessionId: string) {
+  const before = activePtySessions.size;
+  activePtySessions.add(sessionId);
+  if (before === 0) void startTerminalKeepAlive();
+}
+
+function untrackActivePtySession(sessionId: string) {
+  activePtySessions.delete(sessionId);
+  if (activePtySessions.size === 0) void stopTerminalKeepAlive();
+}
 
 function connectNativeHost() {
   if (nativePort) return nativePort;
@@ -116,12 +163,12 @@ function connectNativeHost() {
       // Mirror PTY lifecycle into our local set so the heartbeat below
       // can keep the host alive while shells are still running.
       if (msg?.type === "pty.spawned" && typeof msg.sessionId === "string") {
-        activePtySessions.add(msg.sessionId);
+        trackActivePtySession(msg.sessionId);
       } else if (
         (msg?.type === "pty.exit" || msg?.type === "pty.error") &&
         typeof msg?.sessionId === "string"
       ) {
-        activePtySessions.delete(msg.sessionId);
+        untrackActivePtySession(msg.sessionId);
       }
 
       // Forward everything else to all connected sidebar ports.
@@ -141,6 +188,7 @@ function connectNativeHost() {
       // they're gone. Drop the tracking set so we don't keep the heartbeat
       // hot for sessions that no longer exist.
       activePtySessions.clear();
+      void stopTerminalKeepAlive();
 
       // Silent auto-reconnect for transient drops (typical: SW recycled,
       // host process EOF'd, then we wake on the next message). The host
@@ -178,12 +226,8 @@ if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
       // don't want a 30-second window where the host idles out and kills the
       // user's `npm run dev`.
       //
-      // Note: if the sidepanel is fully closed for a long time, MV3 will
-      // eventually GC the service worker regardless of this heartbeat. At
-      // that point the native port closes, the host's stdin EOFs, and the
-      // PTYs die. Surviving an extended sidepanel-closed window would need
-      // an offscreen-document-backed port; tracked separately.
       if (sidebarPorts.size === 0 && activePtySessions.size === 0) return;
+      if (activePtySessions.size > 0) void startTerminalKeepAlive();
       const port = nativePort ?? connectNativeHost();
       if (!port) return;
       try {
@@ -260,8 +304,29 @@ function broadcastRecordingState() {
 
 // Track sidebar connections
 const sidebarPorts = new Map<string, chrome.runtime.Port>();
+const terminalKeepAlivePorts = new Set<chrome.runtime.Port>();
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "terminal-keepalive") {
+    terminalKeepAlivePorts.add(port);
+
+    port.onMessage.addListener((msg: any) => {
+      if (msg?.type !== "terminal-keepalive-ping") return;
+      if (activePtySessions.size === 0) return;
+      const native = nativePort ?? connectNativeHost();
+      try {
+        native?.postMessage({ type: "ping" });
+      } catch {
+        // The native disconnect handler will rebuild the port if possible.
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      terminalKeepAlivePorts.delete(port);
+    });
+    return;
+  }
+
   if (port.name === "ai-dev-sidebar") {
     const id = crypto.randomUUID();
     sidebarPorts.set(id, port);
@@ -421,6 +486,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleRecorderReady((m) => {
       chrome.runtime.sendMessage(m).catch(() => {});
     });
+    if (activePtySessions.size > 0) void startTerminalKeepAlive();
   }
 
   if (message.type === "RECORDER_STARTED") {
@@ -570,11 +636,30 @@ function extractPageAgentAction(plan: any): PageAgentAction | null {
   };
 }
 
-function selectorForAgentAction(action: PageAgentAction, observation: any): string {
+function selectorForAgentAction(action: PageAgentAction, observation: any): string | null {
   const nodes = Array.isArray(observation?.nodes) ? observation.nodes : [];
   const ref = action.ref || "";
+  if (!ref) return null;
   const node = nodes.find((n: any) => n?.ref === ref);
-  return String(node?.selector || action.value || ref || "").trim();
+  const selector = typeof node?.selector === "string" ? node.selector.trim() : "";
+  return selector || null;
+}
+
+function skippedActionResult(action: PageAgentAction, reason: string) {
+  return {
+    kind: action.kind || "action",
+    ok: false,
+    skipped: true,
+    reason,
+  };
+}
+
+function friendlyPageAgentActionError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/no such rule/i.test(message)) {
+    return "the planned action did not match the current page observation";
+  }
+  return message || "the planned action could not be completed";
 }
 
 function parseToolJson(result: { content?: Array<{ text?: string }> }) {
@@ -616,17 +701,33 @@ async function executePageAgentAction(
     toolName = "browser_observe";
   } else if (action.kind === "click") {
     toolName = "click";
-    args.selector = selectorForAgentAction(action, observation);
+    const selector = selectorForAgentAction(action, observation);
+    if (!selector) {
+      return skippedActionResult(action, "planned click target is no longer in the page observation");
+    }
+    args.selector = selector;
   } else if (action.kind === "type") {
     toolName = "type";
-    args.selector = selectorForAgentAction(action, observation);
+    const selector = selectorForAgentAction(action, observation);
+    if (!selector) {
+      return skippedActionResult(action, "planned typing target is no longer in the page observation");
+    }
+    args.selector = selector;
     args.text = action.text || action.value || "";
   } else if (action.kind === "scroll") {
     toolName = "scroll_to";
-    args.selector = selectorForAgentAction(action, observation);
+    const selector = selectorForAgentAction(action, observation);
+    if (!selector) {
+      return skippedActionResult(action, "planned scroll target is no longer in the page observation");
+    }
+    args.selector = selector;
   } else if (action.kind === "wait") {
     toolName = "wait_for_selector";
-    args.selector = selectorForAgentAction(action, observation);
+    const selector = selectorForAgentAction(action, observation);
+    if (!selector) {
+      return skippedActionResult(action, "planned wait target is no longer in the page observation");
+    }
+    args.selector = selector;
     args.timeoutMs = 3000;
   } else if (action.kind === "navigate") {
     toolName = "navigate";
@@ -642,24 +743,34 @@ async function executePageAgentAction(
     };
   }
 
-  const decision = await requestConsent({ toolName, args });
-  if (decision === "deny") {
+  try {
+    const decision = await requestConsent({ toolName, args });
+    if (decision === "deny") {
+      return {
+        kind: action.kind,
+        toolName,
+        ok: false,
+        skipped: true,
+        reason: "user denied tool call or approval timed out",
+      };
+    }
+
+    const result = await DOM_TOOL_HANDLERS[toolName](args);
+    return {
+      kind: action.kind,
+      toolName,
+      ok: !result.isError,
+      result: parseToolJson(result),
+    };
+  } catch (err) {
     return {
       kind: action.kind,
       toolName,
       ok: false,
       skipped: true,
-      reason: "user denied tool call or approval timed out",
+      reason: friendlyPageAgentActionError(err),
     };
   }
-
-  const result = await DOM_TOOL_HANDLERS[toolName](args);
-  return {
-    kind: action.kind,
-    toolName,
-    ok: !result.isError,
-    result: parseToolJson(result),
-  };
 }
 
 function replyWithActionResult(base: string, actionResult: Awaited<ReturnType<typeof executePageAgentAction>>): string {
@@ -694,24 +805,28 @@ async function handlePageAgentMessage(input: {
 
   const settings = await getSettings();
   if (settings.sidebarSyncEnabled && settings.sidebarApiUrl) {
-    const client = createSidebarApiClient(
-      settings.sidebarApiToken,
-      settings.sidebarApiUrl,
-    );
-    const res = await client.agent.chat(buildBrowserAgentCloudChatPayload({
-      settings,
-      sessionId,
-      message: text,
-      objective: text,
-      observation,
-    }));
-    return {
-      sessionId: res.session.id,
-      reply: replyWithActionResult(localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply, actionResult),
-      provider: localPlan?.ok ? "foundation-models" : res.provider,
-      observation,
-      plan: localPlan?.plan || res.plan,
-    };
+    try {
+      const client = createSidebarApiClient(
+        settings.sidebarApiToken,
+        settings.sidebarApiUrl,
+      );
+      const res = await client.agent.chat(buildBrowserAgentCloudChatPayload({
+        settings,
+        sessionId,
+        message: text,
+        objective: text,
+        observation,
+      }));
+      return {
+        sessionId: res.session.id,
+        reply: replyWithActionResult(localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply, actionResult),
+        provider: localPlan?.ok ? "foundation-models" : res.provider,
+        observation,
+        plan: localPlan?.plan || res.plan,
+      };
+    } catch (err) {
+      safeRuntimeWarning("page agent cloud chat failed; using local fallback", err);
+    }
   }
 
   const nodes = Array.isArray((observation as any)?.nodes)

@@ -54,17 +54,22 @@ categorize.post("/", async (c) => {
         error: {
           code: "too_many_items",
           message: `at most ${MAX_BATCH} bookmarks per call (got ${items.length})`,
-          maxItems: MAX_BATCH
-        }
+          maxItems: MAX_BATCH,
+        },
       },
-      413
+      413,
     )
   }
   for (const it of items) {
     if (typeof it.id !== "string" || typeof it.title !== "string" || typeof it.url !== "string") {
       return c.json(
-        { error: { code: "bad_request", message: "each item needs {id, title, url}" } },
-        400
+        {
+          error: {
+            code: "bad_request",
+            message: "each item needs {id, title, url}",
+          },
+        },
+        400,
       )
     }
   }
@@ -74,7 +79,7 @@ categorize.post("/", async (c) => {
     title: trimText(it.title, 200),
     domain: safeDomain(it.url),
     folder: it.folder ? trimText(it.folder, 80) : undefined,
-    tags: Array.isArray(it.tags) ? it.tags.slice(0, 6).map((t) => trimText(t, 40)) : undefined
+    tags: Array.isArray(it.tags) ? it.tags.slice(0, 6).map((t) => trimText(t, 40)) : undefined,
   }))
 
   const prompt = buildPrompt(minimal)
@@ -90,20 +95,29 @@ categorize.post("/", async (c) => {
             content:
               "You categorize bookmarks. Respond with strict JSON: " +
               `{"proposals":[{"id":"...","category":"...","confidence":"low|medium|high"}]}.` +
-              ` Category strings should be short (1-3 words), title-cased, and consistent across the batch.`
+              ` Category strings should be short (1-3 words), title-cased, and consistent across the batch.`,
           },
-          { role: "user", content: prompt }
+          { role: "user", content: prompt },
         ],
-        max_tokens: 800
+        max_tokens: 800,
       },
-      { gateway: { id: AI_GATEWAY_ID } }
-    )) as { response?: string; result?: string; choices?: Array<{ message?: { content?: string } }> }
+      { gateway: { id: AI_GATEWAY_ID } },
+    )) as {
+      response?: string
+      result?: string
+      choices?: Array<{ message?: { content?: string } }>
+    }
     raw = extractText(res)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return c.json(
-      { error: { code: "gateway_error", message: `AI gateway call failed: ${msg}` } },
-      502
+      {
+        error: {
+          code: "gateway_error",
+          message: `AI gateway call failed: ${msg}`,
+        },
+      },
+      502,
     )
   }
 
@@ -142,14 +156,18 @@ function buildPrompt(items: MinimalItem[]): string {
     "'Recipes', 'Frontend', 'AI Research', 'Personal Finance'.",
     "Return strict JSON only, no commentary.",
     "Bookmarks:",
-    JSON.stringify(items, null, 0)
+    JSON.stringify(items, null, 0),
   ].join("\n")
 }
 
 function extractText(
   res:
-    | { response?: string; result?: string; choices?: Array<{ message?: { content?: string } }> }
-    | undefined
+    | {
+        response?: string
+        result?: string
+        choices?: Array<{ message?: { content?: string } }>
+      }
+    | undefined,
 ): string {
   if (!res) return ""
   if (typeof res.response === "string") return res.response
@@ -178,14 +196,15 @@ export function parseProposals(raw: string, inputs: IncomingItem[]): ProposedCat
   if (parsed && typeof parsed === "object" && Array.isArray((parsed as { proposals?: unknown[] }).proposals)) {
     for (const p of (parsed as { proposals: unknown[] }).proposals) {
       if (!p || typeof p !== "object") continue
-      const obj = p as { id?: unknown; category?: unknown; confidence?: unknown }
+      const obj = p as {
+        id?: unknown
+        category?: unknown
+        confidence?: unknown
+      }
       if (typeof obj.id !== "string" || typeof obj.category !== "string") continue
       const cat = trimText(obj.category, 60)
       if (!cat) continue
-      const conf =
-        obj.confidence === "high" || obj.confidence === "medium" || obj.confidence === "low"
-          ? obj.confidence
-          : "medium"
+      const conf = obj.confidence === "high" || obj.confidence === "medium" || obj.confidence === "low" ? obj.confidence : "medium"
       byId.set(obj.id, { id: obj.id, category: cat, confidence: conf })
     }
   }

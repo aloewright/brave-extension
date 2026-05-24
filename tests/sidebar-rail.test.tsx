@@ -65,4 +65,18 @@ describe("Bottom quick-action group composition", () => {
     expect(source).toContain('icon: "cloud"')
     expect(source.indexOf('label: "Save link"')).toBeLessThan(source.indexOf('label: "Page agent"'))
   })
+
+  it("renders quick-action loading and result feedback instead of swallowing clicks", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+
+    expect(source).toContain("setRunningAction(def.label)")
+    expect(source).toContain("aria-busy={isRunning ? true : undefined}")
+    expect(source).toContain("animate-spin")
+    expect(source).toContain('data-testid="sidebar-rail-feedback"')
+    expect(source).toContain("showFeedback(def.label, await def.run())")
+    expect(source).not.toContain("quick actions intentionally do not render rail feedback")
+  })
 })
