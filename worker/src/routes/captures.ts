@@ -108,11 +108,19 @@ captures.post("/", async (c) => {
     statusMessage = err instanceof Error ? err.message : String(err)
   }
 
+  const displayFilename =
+    kindRaw === "screenshot"
+      ? filenameFromUrlAndVisibleText(filename, sourceUrl, extractedText, ext)
+      : filename
+
   // Embed metadata + extracted text so the user can find the capture by
   // visible content OR by URL/title.
-  const embedText = [filename, sourceTitle, sourceUrl, extractedText]
-    .filter((s) => typeof s === "string" && s.length > 0)
-    .join("\n")
+  const embedText = captureSearchText({
+    filename: displayFilename,
+    sourceTitle,
+    sourceUrl,
+    extractedText
+  })
 
   let chunkCount = 0
   if (embedText.trim().length > 0) {
@@ -132,7 +140,7 @@ captures.post("/", async (c) => {
   const row: CaptureRow = {
     id,
     kind: kindRaw,
-    filename,
+    filename: displayFilename,
     source_url: sourceUrl,
     source_title: sourceTitle,
     mime_type: contentType,
@@ -151,7 +159,7 @@ captures.post("/", async (c) => {
     {
       id,
       kind: kindRaw,
-      filename,
+      filename: displayFilename,
       url: `/api/captures/${id}/blob`,
       sizeBytes: bytes.byteLength,
       createdAt: new Date(now).toISOString(),
@@ -228,6 +236,59 @@ captures.get("/:id", async (c) => {
   return c.json(row)
 })
 
+captures.patch("/:id", async (c) => {
+  const id = c.req.param("id")
+  const row = await getCapture(c.env, id)
+  if (!row) return c.json({ error: { code: "not_found", message: "no such capture" } }, 404)
+
+  let payload: { filename?: unknown }
+  try {
+    payload = await c.req.json()
+  } catch {
+    return c.json({ error: { code: "bad_request", message: "JSON body required" } }, 400)
+  }
+
+  if (typeof payload.filename !== "string") {
+    return c.json({ error: { code: "bad_request", message: "filename must be a string" } }, 400)
+  }
+
+  const filename = normalizeEditedFilename(payload.filename, row.filename, row.mime_type, row.kind)
+  if (!filename) {
+    return c.json({ error: { code: "bad_request", message: "filename must include visible text" } }, 400)
+  }
+
+  let chunkCount = row.chunk_count
+  const embedText = captureSearchText({
+    filename,
+    sourceTitle: row.source_title,
+    sourceUrl: row.source_url,
+    extractedText: row.extracted_text ?? ""
+  })
+  if (embedText.trim().length > 0) {
+    await deleteFor(c.env, "capture", id, row.chunk_count)
+    const r = await upsertFor(c.env, "capture", id, embedText, {
+      title: filename,
+      createdAt: row.created_at
+    })
+    chunkCount = r.chunkCount
+  }
+
+  const now = Date.now()
+  await updateCapture(c.env, id, { filename, chunk_count: chunkCount, updated_at: now })
+  return c.json({
+    id,
+    kind: row.kind,
+    filename,
+    sourceUrl: row.source_url,
+    sourceTitle: row.source_title,
+    sizeBytes: row.size_bytes,
+    mimeType: row.mime_type,
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString(),
+    blobUrl: `/api/captures/${id}/blob`
+  })
+})
+
 captures.get("/:id/blob", async (c) => {
   const row = await getCapture(c.env, c.req.param("id"))
   if (!row) return c.json({ error: { code: "not_found", message: "no such capture" } }, 404)
@@ -283,4 +344,88 @@ function encodeTime(t: number, len: number, alphabet: string): string {
     n = Math.floor(n / 32)
   }
   return s
+}
+
+function captureSearchText(input: {
+  filename: string
+  sourceTitle: string | null
+  sourceUrl: string | null
+  extractedText: string
+}): string {
+  return [input.filename, input.sourceTitle, input.sourceUrl, input.extractedText]
+    .filter((s) => typeof s === "string" && s.length > 0)
+    .join("\n")
+}
+
+function filenameFromUrlAndVisibleText(
+  originalFilename: string,
+  sourceUrl: string | null,
+  visibleText: string,
+  ext: string
+): string {
+  const urlPart = slugFromUrl(sourceUrl)
+  const visualPart = slugFromVisibleText(visibleText)
+  const stem = [urlPart, visualPart].filter(Boolean).join("-")
+  if (!stem) return originalFilename
+  return `${stem.slice(0, 96).replace(/-+$/g, "")}.${ext}`
+}
+
+function slugFromUrl(sourceUrl: string | null): string {
+  if (!sourceUrl) return ""
+  try {
+    const url = new URL(sourceUrl)
+    const host = url.hostname.replace(/^www\./i, "")
+    const pathParts = url.pathname
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .slice(-3)
+    return slugify([host, ...pathParts].join(" "))
+  } catch {
+    return slugify(sourceUrl)
+  }
+}
+
+function slugFromVisibleText(text: string): string {
+  const stopWords = new Set([
+    "and", "are", "but", "for", "from", "has", "have", "not", "the", "this",
+    "that", "with", "you", "your"
+  ])
+  const words = text
+    .toLowerCase()
+    .match(/[a-z0-9][a-z0-9'-]{2,}/g)
+    ?.map((word) => word.replace(/['-]+/g, ""))
+    .filter((word) => word.length >= 3 && !stopWords.has(word)) ?? []
+  return Array.from(new Set(words)).slice(0, 6).join("-")
+}
+
+function normalizeEditedFilename(
+  input: string,
+  currentFilename: string,
+  mimeType: string,
+  kind: CaptureKind
+): string | null {
+  const cleaned = input
+    .replace(/[\\/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!cleaned) return null
+
+  const currentExt = extensionFor(currentFilename, mimeType, kind)
+  const hasExt = /\.[a-z0-9]{2,5}$/i.test(cleaned)
+  const withExt = hasExt ? cleaned : `${cleaned}.${currentExt}`
+  return withExt.replace(/[<>:"|?*\u0000-\u001f]/g, "").slice(0, 160).trim() || null
+}
+
+function extensionFor(filename: string, mimeType: string, kind: CaptureKind): string {
+  const match = filename.match(/\.([a-z0-9]{2,5})$/i)
+  if (match) return match[1]!.toLowerCase()
+  return inferExt(kind, filename, mimeType)
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
 }

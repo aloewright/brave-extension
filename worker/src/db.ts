@@ -489,6 +489,7 @@ export async function updateCapture(
   env: Env,
   id: string,
   patch: {
+    filename?: string
     extracted_text?: string | null
     status?: CaptureStatus
     status_message?: string | null
@@ -498,6 +499,7 @@ export async function updateCapture(
 ): Promise<void> {
   const sets: string[] = []
   const binds: (string | number | null)[] = []
+  if (patch.filename !== undefined) { sets.push("filename = ?"); binds.push(patch.filename) }
   if (patch.extracted_text !== undefined) { sets.push("extracted_text = ?"); binds.push(patch.extracted_text) }
   if (patch.status !== undefined) { sets.push("status = ?"); binds.push(patch.status) }
   if (patch.status_message !== undefined) { sets.push("status_message = ?"); binds.push(patch.status_message) }

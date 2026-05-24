@@ -100,6 +100,23 @@ export async function deleteCapture(cfg: ClientConfig, id: string): Promise<void
   }
 }
 
+export async function renameCapture(
+  cfg: ClientConfig,
+  id: string,
+  filename: string
+): Promise<CaptureSummary> {
+  const f = cfg.fetchImpl ?? fetch
+  const res = await f(endpoint(cfg, `/api/captures/${id}`), {
+    method: "PATCH",
+    headers: headers(cfg, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ filename })
+  })
+  if (!res.ok) {
+    throw new CapturesClientError(`rename failed (${res.status})`, res.status)
+  }
+  return (await res.json()) as CaptureSummary
+}
+
 export async function fetchCaptureBlob(cfg: ClientConfig, blobUrl: string): Promise<Blob> {
   const f = cfg.fetchImpl ?? fetch
   const res = await f(absoluteBlobUrl(cfg, blobUrl), { headers: headers(cfg) })

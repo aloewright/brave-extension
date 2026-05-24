@@ -5,6 +5,7 @@ import {
   deleteCapture,
   fetchCaptureBlob,
   listCaptures,
+  renameCapture,
   searchCaptures
 } from "../src/lib/captures-client"
 
@@ -118,6 +119,36 @@ describe("captures-client (ALO-468)", () => {
     await deleteCapture({ ...cfg(), fetchImpl: f }, "01HX")
     expect(observed!.method).toBe("DELETE")
     expect(observed!.url).toContain("/api/captures/01HX")
+  })
+
+  it("renameCapture PATCHes the new filename and returns the updated capture", async () => {
+    let observed: Request | null = null
+    const f = makeFetch(async (req) => {
+      observed = req
+      return new Response(
+        JSON.stringify({
+          id: "01HX",
+          kind: "screenshot",
+          filename: "docs-visible-state.png",
+          sourceUrl: null,
+          sourceTitle: null,
+          sizeBytes: 100,
+          mimeType: "image/png",
+          status: "ready",
+          createdAt: "2026-05-20T00:00:00Z",
+          blobUrl: "/api/captures/01HX/blob"
+        }),
+        { headers: { "content-type": "application/json" } }
+      )
+    })
+
+    const renamed = await renameCapture({ ...cfg(), fetchImpl: f }, "01HX", "docs-visible-state")
+
+    expect(observed).not.toBeNull()
+    expect(observed!.method).toBe("PATCH")
+    expect(observed!.headers.get("Content-Type")).toBe("application/json")
+    expect(await observed!.json()).toEqual({ filename: "docs-visible-state" })
+    expect(renamed.filename).toBe("docs-visible-state.png")
   })
 
   it("fetchCaptureBlob fetches relative blob URLs with the sidebar token header", async () => {

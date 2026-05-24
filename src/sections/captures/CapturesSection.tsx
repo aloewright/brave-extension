@@ -7,6 +7,7 @@ import {
   deleteCapture,
   fetchCaptureBlob,
   listCaptures,
+  renameCapture,
   searchCaptures,
   type CaptureSearchHit,
   type CaptureSummary
@@ -33,6 +34,9 @@ export function CapturesSection() {
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [config, setConfig] = useState<CapturesConfig | null>(null)
 
@@ -114,6 +118,58 @@ export function CapturesSection() {
     }
   }
 
+  const beginRename = (item: VisibleCapture) => {
+    setEditingId(item.id)
+    setDraftName(item.filename)
+    setError(null)
+  }
+
+  const cancelRename = () => {
+    setEditingId(null)
+    setDraftName("")
+  }
+
+  const commitRename = async (item: VisibleCapture) => {
+    if (!config) return
+    const filename = draftName.trim()
+    if (!filename || filename === item.filename) {
+      cancelRename()
+      return
+    }
+    setRenamingId(item.id)
+    setError(null)
+    try {
+      const renamed = await renameCapture(config, item.id, filename)
+      setItems((current) =>
+        current?.map((capture) => (capture.id === renamed.id ? { ...capture, ...renamed } : capture)) ?? current
+      )
+      setSearchResults((current) =>
+        current?.map((capture) =>
+          capture.id === renamed.id
+            ? {
+                ...capture,
+                filename: renamed.filename,
+                sourceUrl: renamed.sourceUrl,
+                sourceTitle: renamed.sourceTitle,
+                blobUrl: renamed.blobUrl
+              }
+            : capture
+        ) ?? current
+      )
+      cancelRename()
+    } catch (err) {
+      setError(
+        err instanceof CapturesClientError
+          ? `Rename failed (${err.status})`
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      )
+    } finally {
+      setRenamingId(null)
+    }
+  }
+
   const openCapture = async (item: CaptureSummary | CaptureSearchHit) => {
     if (!config) return
     setOpeningId(item.id)
@@ -189,6 +245,8 @@ export function CapturesSection() {
         {visible.map((item) => {
           const isSearch = "score" in item
           const isOpening = openingId === item.id
+          const isEditing = editingId === item.id
+          const isRenaming = renamingId === item.id
           return (
             <div
               key={item.id}
@@ -197,15 +255,52 @@ export function CapturesSection() {
             >
               <CapturePreview item={item} config={config} />
               <div className="flex min-w-0 flex-col">
-                <button
-                  type="button"
-                  onClick={() => void openCapture(item)}
-                  disabled={busy || isOpening || !config}
-                  className="truncate text-left text-xs font-medium text-fg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                  title={item.filename}
-                >
-                  {isOpening ? "Opening…" : item.filename}
-                </button>
+                {isEditing ? (
+                  <form
+                    className="flex min-w-0 items-center gap-1"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void commitRename(item)
+                    }}
+                  >
+                    <input
+                      value={draftName}
+                      onChange={(event) => setDraftName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") cancelRename()
+                      }}
+                      autoFocus
+                      disabled={isRenaming}
+                      aria-label="Capture name"
+                      className="min-w-0 flex-1 rounded border border-border bg-input px-1.5 py-0.5 text-xs text-fg outline-none focus:border-primary/50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isRenaming}
+                      className="text-[10px] text-primary hover:text-primary/80 disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelRename}
+                      disabled={isRenaming}
+                      className="text-[10px] text-fg/40 hover:text-fg disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void openCapture(item)}
+                    disabled={busy || isOpening || !config}
+                    className="truncate text-left text-xs font-medium text-fg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    title={item.filename}
+                  >
+                    {isOpening ? "Opening…" : isRenaming ? "Renaming…" : item.filename}
+                  </button>
+                )}
                 {item.sourceTitle && (
                   <span className="truncate text-[10px] text-fg/50" title={item.sourceTitle}>
                     {item.sourceTitle}
@@ -229,6 +324,15 @@ export function CapturesSection() {
                 )}
               </div>
               <div className="ml-auto flex flex-shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => beginRename(item)}
+                  disabled={busy || isEditing}
+                  className="text-[10px] text-fg/40 hover:text-primary disabled:opacity-40"
+                  aria-label="Rename capture"
+                >
+                  Rename
+                </button>
                 <button
                   type="button"
                   onClick={() => onDelete(item.id)}

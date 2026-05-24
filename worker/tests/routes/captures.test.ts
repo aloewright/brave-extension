@@ -105,10 +105,11 @@ describe("POST /api/captures (ALO-468)", () => {
       env
     )
     expect(res.status).toBe(201)
-    const body = (await res.json()) as { id: string; kind: string; status: string }
+    const body = (await res.json()) as { id: string; kind: string; status: string; filename: string }
     expect(body.kind).toBe("screenshot")
     expect(body.status).toBe("ready")
     expect(body.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/i)
+    expect(body.filename).toBe("example-com-page-visible-text-page.png")
 
     // OCR + embedding were both called
     const models = aiRun.mock.calls.map((c) => c[0])
@@ -125,8 +126,43 @@ describe("POST /api/captures (ALO-468)", () => {
       captures: Array<{ id: string; filename: string; sourceUrl: string | null; sourceTitle: string | null }>
     }
     expect(listBody.captures).toHaveLength(1)
+    expect(listBody.captures[0]!.filename).toBe("example-com-page-visible-text-page.png")
     expect(listBody.captures[0]!.sourceUrl).toBe("https://example.com/page")
     expect(listBody.captures[0]!.sourceTitle).toBe("Example Page")
+  })
+
+  it("PATCH /:id renames a capture and keeps the extension when omitted", async () => {
+    const env = makeEnv()
+    stubAi(env, "visible text")
+    const post = await app.fetch(
+      uploadRequest({
+        kind: "screenshot",
+        filename: "shot.png",
+        body: new Uint8Array([1, 2, 3]),
+        pageUrl: "https://example.com/app"
+      }),
+      env
+    )
+    const { id } = (await post.json()) as { id: string }
+
+    const patch = await app.fetch(
+      new Request(`http://x/api/captures/${id}`, {
+        method: "PATCH",
+        headers: { ...TOKEN_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify({ filename: "review queue" })
+      }),
+      env
+    )
+
+    expect(patch.status).toBe(200)
+    const body = (await patch.json()) as { filename: string }
+    expect(body.filename).toBe("review queue.png")
+
+    const blob = await app.fetch(
+      new Request(`http://x/api/captures/${id}/blob`, { headers: TOKEN_HEADERS }),
+      env
+    )
+    expect(blob.headers.get("content-disposition")).toContain("review queue.png")
   })
 
   it("keeps the row even when OCR throws — status='failed' but R2/D1 are written", async () => {
