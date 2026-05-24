@@ -25,7 +25,7 @@ interface SiteIpInfo {
   org?: string
 }
 
-interface FeedInfo {
+export interface FeedInfo {
   url: string
   title: string
   type: "rss" | "atom" | "json"
@@ -246,7 +246,18 @@ export function TechPanel({ techs }: { techs: TechInfo[] }) {
   )
 }
 
-export function RssPanel({ feeds, onCopy, onSaveFeed }: { feeds: FeedInfo[]; onCopy: (text: string, label: string) => void; onSaveFeed?: (feed: FeedInfo) => void }) {
+export function RssPanel({
+  feeds,
+  allFeeds,
+  onCopy,
+  onSaveFeed
+}: {
+  feeds: FeedInfo[]
+  allFeeds?: FeedInfo[]
+  onCopy: (text: string, label: string) => void
+  onSaveFeed?: (feed: FeedInfo) => void | Promise<void>
+}) {
+  const saveAllFeeds = allFeeds ?? feeds
   return (
     <div className="border-b border-border">
       {feeds.length > 0 ? (
@@ -266,11 +277,11 @@ export function RssPanel({ feeds, onCopy, onSaveFeed }: { feeds: FeedInfo[]; onC
               <CopyBtn onClick={() => onCopy(f.url, "Feed URL copied")} />
             </div>
           ))}
-          {onSaveFeed && feeds.length > 1 && (
+          {onSaveFeed && saveAllFeeds.length > 1 && (
             <button
-              onClick={() => feeds.forEach((f) => onSaveFeed(f))}
+              onClick={() => void saveFeeds(saveAllFeeds, onSaveFeed)}
               className="w-full text-[10px] py-1 mt-1 rounded bg-chart-1/10 text-chart-1 hover:bg-chart-1/20 transition-colors">
-              Save all {feeds.length} feeds
+              Save all {saveAllFeeds.length} feeds
             </button>
           )}
         </div>
@@ -279,6 +290,15 @@ export function RssPanel({ feeds, onCopy, onSaveFeed }: { feeds: FeedInfo[]; onC
       )}
     </div>
   )
+}
+
+async function saveFeeds(
+  feeds: FeedInfo[],
+  onSaveFeed: (feed: FeedInfo) => void | Promise<void>
+) {
+  for (const feed of feeds) {
+    await onSaveFeed(feed)
+  }
 }
 
 function CopyBtn({ onClick }: { onClick: () => void }) {

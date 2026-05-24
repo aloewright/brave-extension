@@ -324,6 +324,8 @@ export interface RecordingMetadata {
   mimeType: RecordingMimeType
   /** OS-side filename, e.g. "recording-2026-04-29T12-34-56.mp4". */
   filename: string
+  /** Deterministic pre-AI filename, when cloud renaming changed the saved name. */
+  originalFilename?: string
   /** ISO timestamp at stop. */
   createdAt: string
   /** Tab URL captured at start, only for source==="tab". */

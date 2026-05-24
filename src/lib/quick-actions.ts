@@ -21,6 +21,7 @@ import {
   dataUrlToBlob,
   uploadCapture
 } from "./capture-upload"
+import { suggestMediaFilename } from "./ai-rename"
 
 export type QuickActionResult =
   | { kind: "success"; message: string }
@@ -40,7 +41,16 @@ export async function runScreenshotQuickAction(): Promise<QuickActionResult> {
     const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
     const baseFilename = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`
     const settings = await getSettings()
-    const { destination, fallbackReason } = resolveCaptureDestination(baseFilename, settings)
+    const filename = await suggestMediaFilename({
+      settings,
+      fallbackFilename: baseFilename,
+      mediaKind: "image",
+      mimeType: "image/png",
+      sourceUrl: tab?.url,
+      sourceTitle: tab?.title,
+      createdAt: new Date().toISOString()
+    })
+    const { destination, fallbackReason } = resolveCaptureDestination(filename, settings)
 
     if (destination.kind === "cloud") {
       try {
@@ -62,7 +72,7 @@ export async function runScreenshotQuickAction(): Promise<QuickActionResult> {
             : `Cloud upload failed: ${err instanceof Error ? err.message : String(err)}`
         await chrome.downloads.download({
           url: result.dataUrl,
-          filename: baseFilename,
+          filename,
           saveAs: false
         })
         return { kind: "error", message: msg }

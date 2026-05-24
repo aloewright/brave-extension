@@ -4,6 +4,7 @@ import {
   type RecorderSource,
   type RecordingMetadata,
 } from "../../types";
+import { openPopupWindow } from "../../lib/popup-window";
 
 interface RecState {
   active: boolean;
@@ -169,17 +170,34 @@ export function RecorderSection() {
         {history.length === 0 ? (
           <div className="text-xs text-fg/40">No recordings yet.</div>
         ) : (
-          <ul className="flex flex-col gap-1 text-xs">
+          <ul className="grid gap-2 text-xs">
             {history.slice(0, 10).map((r) => (
               <li
                 key={r.id}
-                className="flex justify-between gap-2 text-fg/70 font-mono"
+                className="rounded border border-border bg-card/25 p-2 text-fg/70"
               >
-                <span className="truncate">{r.filename}</span>
-                <span className="shrink-0">
-                  {r.source} · {formatDuration(r.durationMs)} ·{" "}
-                  {formatBytes(r.sizeBytes)}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => void openRecordingPreview(r)}
+                  className="flex w-full items-center gap-2 text-left"
+                  aria-label={`Open recording preview ${r.filename}`}
+                >
+                  <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded bg-accent/50 text-[10px] uppercase text-fg/45">
+                    Video
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono">{r.filename}</span>
+                    {r.originalFilename && (
+                      <span className="block truncate text-[10px] text-fg/35">
+                        {r.originalFilename}
+                      </span>
+                    )}
+                    <span className="block truncate text-[10px] text-fg/45">
+                      {r.source} · {formatDuration(r.durationMs)} ·{" "}
+                      {formatBytes(r.sizeBytes)}
+                    </span>
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -187,6 +205,13 @@ export function RecorderSection() {
       </div>
     </div>
   );
+}
+
+async function openRecordingPreview(recording: RecordingMetadata) {
+  const url = chrome.runtime.getURL(
+    `media-preview.html?id=${encodeURIComponent(recording.id)}`
+  )
+  await openPopupWindow(url, 760, 560)
 }
 
 function elapsedRecordingMs(state: RecState, now: number): number {

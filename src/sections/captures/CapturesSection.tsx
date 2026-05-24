@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { LeoButton } from "../../components/leo"
 import { openExternalLink } from "../../lib/open-url"
+import { openPopupWindow } from "../../lib/popup-window"
 import { getSettings } from "../../storage"
 import {
   absoluteBlobUrl,
@@ -169,15 +170,29 @@ export function CapturesSection() {
               className="flex items-start gap-2 rounded border border-border/60 bg-card/20 px-2.5 py-2 hover:border-border"
               data-testid="capture-row"
             >
-              <div className="flex-shrink-0 mt-0.5 rounded bg-accent/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-fg/60">
-                {item.kind}
-              </div>
+              {item.kind === "screenshot" ? (
+                <button
+                  type="button"
+                  onClick={() => void openPopupWindow(url)}
+                  className="h-12 w-16 flex-shrink-0 overflow-hidden rounded border border-border bg-accent/30"
+                  aria-label="Open capture preview"
+                >
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                </button>
+              ) : (
+                <div className="flex-shrink-0 mt-0.5 rounded bg-accent/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-fg/60">
+                  {item.kind}
+                </div>
+              )}
               <div className="flex min-w-0 flex-col">
                 <a
                   href={url}
                   target="_blank"
                   rel="noreferrer"
-                  onClick={openExternalLink(url)}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void openPopupWindow(url)
+                  }}
                   className="truncate text-xs font-medium text-fg hover:text-primary"
                   title={item.filename}
                 >

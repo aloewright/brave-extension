@@ -6,6 +6,7 @@ import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
+import { PasswordsSection } from "./sections/passwords/PasswordsSection";
 import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
 import { CapturesSection } from "./sections/captures/CapturesSection";
@@ -66,6 +67,7 @@ function SidePanel() {
           {active === "extensions" && <ExtensionsSection />}
           {active === "tech" && <TechSection />}
           {active === "session" && <SessionSection />}
+          {active === "passwords" && <PasswordsSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}

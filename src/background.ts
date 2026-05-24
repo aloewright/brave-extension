@@ -8,6 +8,11 @@ import {
   addSessionSnippet,
   copyToClipboardViaTab,
 } from "./lib/session-snippets";
+import {
+  getMatchingPasswordLogins,
+  PASSWORD_SELECTED_LOGIN_KEY,
+  type PasswordLogin,
+} from "./lib/passwords";
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools";
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools";
 import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools";
@@ -59,10 +64,13 @@ const HOST_NAME = "com.aidev.sidebar";
 const HEARTBEAT_ALARM = "native-heartbeat";
 const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
+const RSS_FEED_MENU_ID = "save-rss-feed";
+const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
 const pendingNativeRequests = new Map<string, (msg: any) => void>();
+const rssFeedContextMenuCache = new Map<number, FeedInfo[]>();
 
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(
@@ -685,18 +693,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "SAVE_LINK") {
-    saveLinkToLibrary(message.url, message.title).then(() =>
+    saveLinkToLibrary(message.url, message.title, message.tags).then(() =>
       sendResponse({ ok: true }),
     );
     return true;
   }
 
   if (message.type === "GET_FEEDS") {
-    // Forwarded to the page's content script if any has registered for feeds.
-    // We don't yet ship a feed-detector content script in this repo, so fall
-    // back to "no feeds" so the UI doesn't hang. Wire a real detector later.
-    sendResponse({ feeds: [] });
-    return false;
+    const requestedTabId =
+      typeof message.tabId === "number" ? message.tabId : sender.tab?.id;
+    if (typeof requestedTabId !== "number") {
+      sendResponse({ feeds: [] });
+      return false;
+    }
+    chrome.tabs.sendMessage(requestedTabId, { type: "GET_FEEDS" }, (response) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ feeds: [] });
+        return;
+      }
+      sendResponse({ feeds: normalizeFeeds(response?.feeds) });
+    });
+    return true;
+  }
+
+  if (message.type === "PASSWORDS_MATCH_LOGINS") {
+    const pageUrl =
+      typeof message.url === "string" ? message.url : sender.tab?.url || "";
+    getAutofillMatches(pageUrl).then((matches) => sendResponse({ matches }));
+    return true;
   }
 
   if (message.type === "TECH_DETECTED") {
@@ -980,11 +1004,18 @@ async function resolveHostname(hostname: string): Promise<string | null> {
   }
 }
 
-async function saveLinkToLibrary(url: string, title: string): Promise<void> {
+async function saveLinkToLibrary(
+  url: string,
+  title: string,
+  extraTags: unknown = [],
+): Promise<void> {
   const key = "lx_collectedLinks";
   const cur = await chrome.storage.local.get(key);
   const links: any[] = Array.isArray(cur[key]) ? cur[key] : [];
-  const tags: string[] = [];
+  const requestedTags = Array.isArray(extraTags) ? extraTags : [];
+  const tags = Array.from(
+    new Set(requestedTags.filter((tag) => typeof tag === "string" && tag.trim())),
+  );
 
   let host = "";
   try {
@@ -1020,6 +1051,97 @@ async function saveLinkToLibrary(url: string, title: string): Promise<void> {
     date: new Date().toISOString(),
   });
   await chrome.storage.local.set({ [key]: links });
+}
+
+type FeedInfo = { url: string; title: string; type: "rss" | "atom" | "json" };
+
+function normalizeFeeds(feeds: unknown): FeedInfo[] {
+  if (!Array.isArray(feeds)) return [];
+  return feeds
+    .map((feed) => {
+      if (!feed || typeof feed !== "object") return null;
+      const candidate = feed as Partial<FeedInfo>;
+      if (!candidate.url || typeof candidate.url !== "string") return null;
+      const type =
+        candidate.type === "atom" || candidate.type === "json" ? candidate.type : "rss";
+      return {
+        url: candidate.url,
+        title:
+          typeof candidate.title === "string" && candidate.title.trim()
+            ? candidate.title.trim()
+            : candidate.url,
+        type,
+      };
+    })
+    .filter((feed): feed is FeedInfo => Boolean(feed));
+}
+
+async function getFeedsForTab(tabId: number): Promise<FeedInfo[]> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: "GET_FEEDS" }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve([]);
+        return;
+      }
+      resolve(normalizeFeeds(response?.feeds));
+    });
+  });
+}
+
+async function getAutofillMatches(pageUrl: string): Promise<PasswordLogin[]> {
+  if (!/^https?:\/\//i.test(pageUrl)) return [];
+  const matches = await getMatchingPasswordLogins(pageUrl);
+  if (matches.length <= 1) return matches;
+  const selected = await chrome.storage.local.get(PASSWORD_SELECTED_LOGIN_KEY);
+  const selectedId = selected[PASSWORD_SELECTED_LOGIN_KEY];
+  if (typeof selectedId !== "string") return matches.map(withoutPassword);
+  const selectedMatch = matches.find((match) => match.id === selectedId);
+  return selectedMatch ? [selectedMatch] : matches.map(withoutPassword);
+}
+
+function withoutPassword(login: PasswordLogin): PasswordLogin {
+  return { ...login, password: "" };
+}
+
+async function rebuildRssFeedContextMenu(tabId: number) {
+  const feeds = await getFeedsForTab(tabId);
+  rssFeedContextMenuCache.set(tabId, feeds);
+  await removeRssFeedContextMenuItems();
+  if (feeds.length === 0) {
+    chrome.contextMenus.create({
+      id: `${RSS_FEED_MENU_PREFIX}none`,
+      parentId: RSS_FEED_MENU_ID,
+      title: "No RSS feeds found",
+      contexts: ["page"],
+      enabled: false,
+    });
+  } else {
+    feeds.slice(0, 20).forEach((feed, index) => {
+      chrome.contextMenus.create({
+        id: `${RSS_FEED_MENU_PREFIX}${index}`,
+        parentId: RSS_FEED_MENU_ID,
+        title: feed.title || feed.url,
+        contexts: ["page"],
+      });
+    });
+  }
+  (chrome.contextMenus as any).refresh?.();
+}
+
+async function removeRssFeedContextMenuItems() {
+  await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      removeContextMenuItem(`${RSS_FEED_MENU_PREFIX}${index}`),
+    ).concat(removeContextMenuItem(`${RSS_FEED_MENU_PREFIX}none`)),
+  );
+}
+
+async function removeContextMenuItem(id: string) {
+  try {
+    await chrome.contextMenus.remove(id);
+  } catch {
+    // Dynamic RSS child menu items may not exist yet.
+  }
 }
 
 // Console error tracking per tab
@@ -1293,18 +1415,23 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["page"],
     });
     chrome.contextMenus.create({
-      id: "send-selection",
-      title: "Send selection to Brave Dev",
+      id: "save-highlight",
+      title: "Save snippet",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
-      id: "save-highlight",
-      title: "Save highlight for review",
-      contexts: ["selection"],
+      id: RSS_FEED_MENU_ID,
+      title: "Save RSS feed...",
+      contexts: ["page"],
     });
   } catch (err) {
     safeRuntimeWarning("failed to create context menus", err);
   }
+});
+
+(chrome.contextMenus as any).onShown?.addListener((info: { contexts?: string[] }, tab?: chrome.tabs.Tab) => {
+  if (!info.contexts?.includes("page") || typeof tab?.id !== "number") return;
+  void rebuildRssFeedContextMenu(tab.id);
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -1314,15 +1441,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const result = await scrapeTab(tab.id);
     for (const [, port] of sidebarPorts) {
       postToSidebar(port, { type: "scrape-result", payload: result });
-    }
-  }
-
-  if (info.menuItemId === "send-selection") {
-    for (const [, port] of sidebarPorts) {
-      postToSidebar(port, {
-        type: "selection",
-        payload: { text: info.selectionText, url: tab.url },
-      });
     }
   }
 
@@ -1359,6 +1477,28 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }, 1200);
     } catch (err) {
       console.warn("save-highlight failed:", err);
+    }
+  }
+
+  if (typeof info.menuItemId === "string" && info.menuItemId.startsWith(RSS_FEED_MENU_PREFIX)) {
+    try {
+      const feedIndex = Number.parseInt(
+        info.menuItemId.slice(RSS_FEED_MENU_PREFIX.length),
+        10,
+      );
+      const selectedFeed = rssFeedContextMenuCache.get(tab.id)?.[feedIndex];
+      if (!selectedFeed) return;
+      await saveLinkToLibrary(selectedFeed.url, selectedFeed.title, [
+        "feed",
+        selectedFeed.type,
+      ]);
+      chrome.action.setBadgeText({ text: "RSS" });
+      chrome.action.setBadgeBackgroundColor({ color: "#f97316" });
+      setTimeout(() => {
+        if (!recorderState.active) chrome.action.setBadgeText({ text: "" });
+      }, 1200);
+    } catch (err) {
+      console.warn("save-rss-feed failed:", err);
     }
   }
 });
