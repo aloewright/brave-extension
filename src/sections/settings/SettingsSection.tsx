@@ -8,6 +8,7 @@ import type { DopplerStatus, MCPServer, MCPStatus } from "../../types"
 const SIDEBAR_API_SECRET_NAMES = ["SIDEBAR_API_URL", "SIDEBAR_API_TOKEN", "SIDEBAR_TOKEN"]
 const ACTION_LOADING_DELAY_MS = 700
 const ACTION_TIMEOUT_MS = 45_000
+const DOPPLER_LOGIN_TIMEOUT_MS = 5 * 60_000
 
 type PendingAction =
   | "mcp.rotateToken"
@@ -72,9 +73,10 @@ export function SettingsSection() {
       if (!pendingActionsRef.current[action]) return
       setLoadingActions((prev) => ({ ...prev, [action]: true }))
     }, ACTION_LOADING_DELAY_MS)
+    const timeoutMs = action === "doppler.login" ? DOPPLER_LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS
     pendingTimeoutTimers.current[action] = setTimeout(() => {
       clearPendingAction(action)
-    }, ACTION_TIMEOUT_MS)
+    }, timeoutMs)
   }
   const clearMcpPendingForType = (type: string, ok: boolean) => {
     if (type === "mcp.status") clearPendingAction("mcp.refresh")

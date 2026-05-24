@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-import { BACKEND_INFO } from "../src/types"
-import type { CLIBackend } from "../src/types"
+import React from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { act } from "react-dom/test-utils"
+import { BACKEND_INFO, DEFAULT_SETTINGS } from "../src/types"
+import type { CLIBackend, DopplerStatus, MCPStatus } from "../src/types"
 
 // PDX-124 regression: SettingsPanel previously set `ringColor` inline,
 // which is not a valid React.CSSProperties key. The fix routes the active
@@ -39,21 +40,111 @@ describe("SettingsPanel — active backend ring color (PDX-124)", () => {
   })
 })
 
-const settingsPanelSource = () =>
-  readFileSync(join(process.cwd(), "src/components/SettingsPanel.tsx"), "utf8")
+const mcpStatus: MCPStatus = {
+  port: 9101,
+  sessions: 1,
+  registered: true,
+  claudeJsonStatus: "registered",
+  terminalPathStatus: "disabled",
+  hasRcBlock: false,
+  hasWrapper: false,
+  tokenSet: true,
+  tools: 12,
+  resources: 2
+}
+
+const dopplerStatus: DopplerStatus = {
+  cliAvailable: true,
+  cliVersion: "Doppler CLI 3.75.1",
+  tokenSet: false,
+  tokenSource: "none",
+  tokenPreview: null,
+  workplaceName: null,
+  workplaceSlug: null,
+  authType: null,
+  tokenName: null,
+  defaults: { project: "", config: "", scope: "/" },
+  tokenScope: null,
+  lastCheckedAt: "2026-05-24T00:00:00.000Z",
+  error: null
+}
+
+async function renderSettingsPanel() {
+  ;(globalThis as typeof globalThis & { React: typeof React }).React = React
+  const { SettingsPanel } = await import("../src/components/SettingsPanel")
+  const host = document.createElement("div")
+  document.body.append(host)
+  let root: Root | null = null
+  await act(async () => {
+    root = createRoot(host)
+    root.render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onUpdate={() => {}}
+        onClose={() => {}}
+        nativeHost={{
+          connected: true,
+          getMCPServers: () => {},
+          addMCPServer: () => {}
+        }}
+        mcpServers={[]}
+        sidebarSync={{ lastSyncAt: null, lastError: null, pending: false, flush: () => {} }}
+        mcp={{
+          status: mcpStatus,
+          refresh: () => {},
+          rotateToken: () => {},
+          resetRegistration: () => {},
+          setTerminalPath: () => {},
+          pending: { terminalPath: true },
+          loading: { terminalPath: true },
+          toast: null
+        }}
+        doppler={{
+          status: dopplerStatus,
+          refresh: () => {},
+          login: () => {},
+          saveDefaults: () => {},
+          pending: { login: true },
+          loading: { login: true },
+          toast: null
+        }}
+      />
+    )
+  })
+  return {
+    host,
+    cleanup: () => {
+      act(() => root?.unmount())
+      host.remove()
+    }
+  }
+}
 
 describe("SettingsPanel — async action feedback", () => {
-  it("shows a loading glyph for the terminal availability toggle", () => {
-    const source = settingsPanelSource()
-    expect(source).toContain("mcp.loading?.terminalPath")
-    expect(source).toContain('${label} loading')
-    expect(source).toContain("cursor-wait")
+  it("renders a loading glyph and disables the terminal availability toggle", async () => {
+    const { host, cleanup } = await renderSettingsPanel()
+    try {
+      const status = host.querySelector('[aria-label="Available in any terminal loading"]')
+      const input = host.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      expect(status).not.toBeNull()
+      expect(status?.className).toContain("animate-spin")
+      expect(input?.disabled).toBe(true)
+    } finally {
+      cleanup()
+    }
   })
 
-  it("shows a loading glyph for Doppler OAuth login", () => {
-    const source = settingsPanelSource()
-    expect(source).toContain("doppler.loading?.login")
-    expect(source).toContain("Connecting Doppler OAuth")
-    expect(source).toContain("animate-spin")
+  it("renders a loading glyph and disables Doppler OAuth login", async () => {
+    const { host, cleanup } = await renderSettingsPanel()
+    try {
+      const button = Array.from(host.querySelectorAll<HTMLButtonElement>("button"))
+        .find((node) => node.textContent?.includes("OAuth login"))
+      const status = host.querySelector('[aria-label="Connecting Doppler OAuth"]')
+      expect(button?.disabled).toBe(true)
+      expect(status).not.toBeNull()
+      expect(status?.className).toContain("animate-spin")
+    } finally {
+      cleanup()
+    }
   })
 })
