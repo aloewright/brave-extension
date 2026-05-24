@@ -33,6 +33,10 @@ describe("extension page privacy", () => {
       join(process.cwd(), "src/contents/picker.ts"),
       "utf8",
     );
+    const pageAgentSource = readFileSync(
+      join(process.cwd(), "src/contents/page-agent.ts"),
+      "utf8",
+    );
 
     expect(inspectorSource).toContain("ACTIVE_ATTR");
     expect(pickerSource).toContain("ACTIVE_ATTR");
@@ -40,5 +44,7 @@ describe("extension page privacy", () => {
     expect(inspectorSource).not.toContain("data-alexometer-active");
     expect(pickerSource).not.toContain("ai-dev-picker-overlay");
     expect(pickerSource).not.toContain("data-ai-dev-picker");
+    expect(pageAgentSource).not.toContain("data-ai-dev");
+    expect(pageAgentSource).not.toContain("alexometer");
   });
 });

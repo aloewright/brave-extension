@@ -4,6 +4,7 @@ import conversations from "./routes/conversations"
 import links from "./routes/links"
 import bookmarks from "./routes/bookmarks"
 import captures from "./routes/captures"
+import agent from "./routes/agent"
 import categorize from "./routes/categorize"
 import recordings from "./routes/recordings"
 import pdfs from "./routes/pdfs"
@@ -26,6 +27,7 @@ app.route("/api/links", links)
 app.route("/api/bookmarks", bookmarks)
 app.route("/api/bookmarks/categorize", categorize)
 app.route("/api/captures", captures)
+app.route("/api/agent", agent)
 app.route("/api/recordings", recordings)
 app.route("/api/pdfs", pdfs)
 app.route("/api/search", search)

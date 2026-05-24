@@ -1,6 +1,8 @@
 import { ulid } from "./lib/ulid";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
+import { getSettings } from "./storage";
+import { createSidebarApiClient } from "./lib/sidebar-api";
 import {
   addSessionSnippet,
   copyToClipboardViaTab,
@@ -52,6 +54,7 @@ const HEARTBEAT_ALARM = "native-heartbeat";
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
+const pendingNativeRequests = new Map<string, (msg: any) => void>();
 
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(
@@ -92,6 +95,15 @@ function connectNativeHost() {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
 
     nativePort.onMessage.addListener((msg: any) => {
+      if (typeof msg?.requestId === "string") {
+        const pending = pendingNativeRequests.get(msg.requestId);
+        if (pending) {
+          pendingNativeRequests.delete(msg.requestId);
+          pending(msg);
+          return;
+        }
+      }
+
       // Tool-call bridge from MCP server → background. Currently only a tiny
       // surface (tabs_list) lands here; M4/M5 expand it. Replies are sent
       // back over the same native port using mcp.tool.result.
@@ -207,6 +219,29 @@ function sendToNative(msg: any) {
   }
 }
 
+function requestNative(payload: any, timeoutMs = 2500): Promise<any> {
+  const port = connectNativeHost();
+  if (!port) return Promise.reject(new Error("native host not connected"));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingNativeRequests.delete(requestId);
+      reject(new Error(`${payload.type || "native request"} timed out`));
+    }, timeoutMs);
+    pendingNativeRequests.set(requestId, (msg) => {
+      clearTimeout(timer);
+      resolve(msg);
+    });
+    try {
+      port.postMessage({ ...payload, requestId });
+    } catch (err) {
+      clearTimeout(timer);
+      pendingNativeRequests.delete(requestId);
+      reject(err);
+    }
+  });
+}
+
 // ─── Recorder state broadcasting ──────────────────────────────────────
 // Recorder lifecycle lives in src/background/recorder.ts. We just wire
 // runtime messages and broadcast state to connected sidebars.
@@ -273,6 +308,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "SCRAPE_TAB") {
     scrapeTab(message.tabId).then((result) => sendResponse(result));
+    return true;
+  }
+
+  if (message.type === "PAGE_AGENT_OBSERVE") {
+    const tabId = sender.tab?.id;
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, error: "tabId unavailable" });
+      return;
+    }
+    pageAgentObserve(tabId)
+      .then((observation) => sendResponse({ ok: true, observation }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
+  if (message.type === "PAGE_AGENT_MESSAGE") {
+    const tabId = sender.tab?.id;
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, error: "tabId unavailable" });
+      return;
+    }
+    handlePageAgentMessage({
+      tabId,
+      sessionId: typeof message.sessionId === "string" ? message.sessionId : undefined,
+      text: String(message.text || ""),
+    })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     return true;
   }
 
@@ -466,6 +539,203 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Tiny in-memory caches + helpers for the quick-actions bar.
 const cachedTech = new Map<string, { techs: any[]; ts: number }>();
+
+async function pageAgentObserve(tabId: number): Promise<unknown> {
+  const result = await DOM_TOOL_HANDLERS.browser_observe({ tabId });
+  if (result.isError) throw new Error(result.content[0]?.text || "observe failed");
+  return JSON.parse(result.content[0]?.text || "null");
+}
+
+type PageAgentAction = {
+  kind?: string;
+  ref?: string;
+  value?: string;
+  text?: string;
+  reason?: string;
+};
+
+function extractPageAgentAction(plan: any): PageAgentAction | null {
+  const action = plan?.action || plan?.plan?.action;
+  if (!action || typeof action !== "object") return null;
+  const kind = String(action.kind || action.type || "").trim().toLowerCase();
+  if (!kind) return null;
+  return {
+    kind,
+    ref: typeof action.ref === "string" ? action.ref : undefined,
+    value: typeof action.value === "string" ? action.value : undefined,
+    text: typeof action.text === "string" ? action.text : undefined,
+    reason: typeof action.reason === "string" ? action.reason : undefined,
+  };
+}
+
+function selectorForAgentAction(action: PageAgentAction, observation: any): string {
+  const nodes = Array.isArray(observation?.nodes) ? observation.nodes : [];
+  const ref = action.ref || "";
+  const node = nodes.find((n: any) => n?.ref === ref);
+  return String(node?.selector || action.value || ref || "").trim();
+}
+
+function parseToolJson(result: { content?: Array<{ text?: string }> }) {
+  const text = result.content?.[0]?.text || "";
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { text };
+  }
+}
+
+async function executePageAgentAction(
+  tabId: number,
+  observation: unknown,
+  plan: unknown,
+): Promise<null | {
+  kind: string;
+  toolName?: string;
+  ok: boolean;
+  skipped?: boolean;
+  reason?: string;
+  result?: any;
+}> {
+  const action = extractPageAgentAction(plan);
+  if (!action?.kind) return null;
+  if (["ask_user", "done", "remember", "compact"].includes(action.kind)) {
+    return {
+      kind: action.kind,
+      ok: action.kind === "done",
+      skipped: true,
+      reason: action.reason || "no browser action required",
+    };
+  }
+
+  let toolName: keyof typeof DOM_TOOL_HANDLERS | null = null;
+  let args: Record<string, unknown> = { tabId };
+
+  if (action.kind === "observe") {
+    toolName = "browser_observe";
+  } else if (action.kind === "click") {
+    toolName = "click";
+    args.selector = selectorForAgentAction(action, observation);
+  } else if (action.kind === "type") {
+    toolName = "type";
+    args.selector = selectorForAgentAction(action, observation);
+    args.text = action.text || action.value || "";
+  } else if (action.kind === "scroll") {
+    toolName = "scroll_to";
+    args.selector = selectorForAgentAction(action, observation);
+  } else if (action.kind === "wait") {
+    toolName = "wait_for_selector";
+    args.selector = selectorForAgentAction(action, observation);
+    args.timeoutMs = 3000;
+  } else if (action.kind === "navigate") {
+    toolName = "navigate";
+    args.url = action.value || action.text || "";
+  }
+
+  if (!toolName) {
+    return {
+      kind: action.kind,
+      ok: false,
+      skipped: true,
+      reason: "unsupported planned action",
+    };
+  }
+
+  const decision = await requestConsent({ toolName, args });
+  if (decision === "deny") {
+    return {
+      kind: action.kind,
+      toolName,
+      ok: false,
+      skipped: true,
+      reason: "user denied tool call or approval timed out",
+    };
+  }
+
+  const result = await DOM_TOOL_HANDLERS[toolName](args);
+  return {
+    kind: action.kind,
+    toolName,
+    ok: !result.isError,
+    result: parseToolJson(result),
+  };
+}
+
+function replyWithActionResult(base: string, actionResult: Awaited<ReturnType<typeof executePageAgentAction>>): string {
+  if (!actionResult) return base;
+  if (actionResult.skipped) {
+    return `${base}\nAction: ${actionResult.kind} skipped - ${actionResult.reason || "not needed"}`;
+  }
+  return `${base}\nAction: ${actionResult.kind} ${actionResult.ok ? "completed" : "failed"}.`;
+}
+
+async function handlePageAgentMessage(input: {
+  tabId: number;
+  sessionId?: string;
+  text: string;
+}): Promise<{
+  sessionId: string;
+  reply: string;
+  provider: string;
+  observation: unknown;
+  plan?: unknown;
+}> {
+  const text = input.text.trim();
+  if (!text) throw new Error("message required");
+  let observation = await pageAgentObserve(input.tabId);
+  const sessionId = input.sessionId || `page_${crypto.randomUUID()}`;
+  const localPlan = await requestNative(
+    { type: "foundationModels.plan", objective: text, observation },
+    15000,
+  ).catch(() => null);
+  const actionResult = await executePageAgentAction(input.tabId, observation, localPlan);
+  if (actionResult?.result?.observation) observation = actionResult.result.observation;
+
+  const settings = await getSettings();
+  if (settings.sidebarSyncEnabled && settings.sidebarApiUrl) {
+    const client = createSidebarApiClient(
+      settings.sidebarApiToken,
+      settings.sidebarApiUrl,
+    );
+    const res = await client.agent.chat({
+      sessionId,
+      message: text,
+      objective: text,
+      observation,
+    });
+    return {
+      sessionId: res.session.id,
+      reply: replyWithActionResult(localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply, actionResult),
+      provider: localPlan?.ok ? "foundation-models" : res.provider,
+      observation,
+      plan: localPlan?.plan || res.plan,
+    };
+  }
+
+  const nodes = Array.isArray((observation as any)?.nodes)
+    ? (observation as any).nodes.length
+    : 0;
+  const reply =
+    localPlan?.ok && localPlan.reply
+      ? localPlan.reply
+      : [
+          `Objective: ${text}`,
+          `Status: observed ${nodes} visible page node${nodes === 1 ? "" : "s"}.`,
+          "Plan: choose one safe browser action, request consent for write actions, then observe again.",
+          "Next step: configure sidebar-api sync for persistent memory or continue locally from this page observation.",
+        ].join("\n");
+  return {
+    sessionId,
+    reply: replyWithActionResult(reply, actionResult),
+    provider: localPlan?.ok ? "foundation-models" : "local-deterministic",
+    observation,
+    plan: localPlan?.plan || {
+      objective: text,
+      status: "planning",
+      nextStep: "Use browser_observe output to choose one consent-gated action.",
+      actionResult,
+    },
+  };
+}
 
 async function resolveHostname(hostname: string): Promise<string | null> {
   try {
