@@ -767,7 +767,6 @@ async function executePageAgentAction(
       kind: action.kind,
       toolName,
       ok: false,
-      skipped: true,
       reason: friendlyPageAgentActionError(err),
     };
   }
@@ -778,7 +777,10 @@ function replyWithActionResult(base: string, actionResult: Awaited<ReturnType<ty
   if (actionResult.skipped) {
     return `${base}\nAction: ${actionResult.kind} skipped - ${actionResult.reason || "not needed"}`;
   }
-  return `${base}\nAction: ${actionResult.kind} ${actionResult.ok ? "completed" : "failed"}.`;
+  if (!actionResult.ok) {
+    return `${base}\nAction: ${actionResult.kind} failed - ${actionResult.reason || "execution failed"}`;
+  }
+  return `${base}\nAction: ${actionResult.kind} completed.`;
 }
 
 async function handlePageAgentMessage(input: {

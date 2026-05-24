@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const source = (path: string) =>
   readFileSync(join(process.cwd(), path), "utf8");
@@ -38,6 +38,49 @@ describe("terminal native-host keepalive", () => {
     expect(recorder).toContain('releaseOffscreenDocument("recorder")');
     expect(recorder).not.toContain("chrome.offscreen.closeDocument()");
     expect(manager).toContain("activeUses.size > 0");
+    expect(manager).toContain("activeUses.delete(use)");
     expect(manager).toContain('"USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "WORKERS"');
+  });
+
+  it("rolls back failed offscreen retain calls before later release checks", async () => {
+    vi.resetModules();
+    const chromeMock = (globalThis as any).chrome;
+    const originalRuntime = chromeMock.runtime;
+    const originalOffscreen = chromeMock.offscreen;
+    const closeDocument = vi.fn(async () => undefined);
+
+    chromeMock.runtime = {
+      getURL: (path: string) => `chrome-extension://test/${path}`,
+      getContexts: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ documentUrl: "tabs/offscreen.html" }]),
+    };
+    chromeMock.offscreen = {
+      createDocument: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("startup race"))
+        .mockResolvedValueOnce(undefined),
+      closeDocument,
+    };
+
+    try {
+      const {
+        retainOffscreenDocument,
+        releaseOffscreenDocument,
+      } = await import("../src/background/offscreen");
+
+      await expect(
+        retainOffscreenDocument("terminal-keepalive"),
+      ).rejects.toThrow("startup race");
+      await retainOffscreenDocument("recorder");
+      await releaseOffscreenDocument("recorder");
+
+      expect(closeDocument).toHaveBeenCalledTimes(1);
+    } finally {
+      chromeMock.runtime = originalRuntime;
+      chromeMock.offscreen = originalOffscreen;
+    }
   });
 });

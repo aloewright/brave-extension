@@ -114,23 +114,6 @@ function BookmarkRow({
   );
 }
 
-function markBookmarkNotFavorite(
-  snapshot: BookmarkSnapshot,
-  bookmarkId: string,
-): BookmarkSnapshot {
-  return {
-    ...snapshot,
-    bookmarks: snapshot.bookmarks.map((bookmark) =>
-      bookmark.id === bookmarkId
-        ? {
-            ...bookmark,
-            isFavorite: false,
-          }
-        : bookmark,
-    ),
-  };
-}
-
 function persistBookmarkSnapshot(snapshot: BookmarkSnapshot) {
   void chrome.storage.local.set({ [BOOKMARK_SNAPSHOT_KEY]: snapshot });
 }
@@ -262,12 +245,6 @@ export function BookmarksSection() {
     void chrome.storage.local.set({
       [BOOKMARK_HIDDEN_FAVORITES_KEY]: [...nextHidden],
     });
-
-    if (snapshot) {
-      const nextSnapshot = markBookmarkNotFavorite(snapshot, bookmark.id);
-      setSnapshot(nextSnapshot);
-      persistBookmarkSnapshot(nextSnapshot);
-    }
   };
 
   const runCategorize = async () => {
@@ -326,7 +303,6 @@ export function BookmarksSection() {
             ...bookmark,
             category: proposed.category,
             path: [proposed.category],
-            isFavorite: true,
           };
         }),
       };

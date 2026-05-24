@@ -201,6 +201,8 @@ describe("page agent UI", () => {
     expect(background).not.toContain("node?.selector || action.value || ref")
     expect(background).toContain("planned click target is no longer in the page observation")
     expect(background).toContain("friendlyPageAgentActionError")
+    expect(background).toContain('Action: ${actionResult.kind} failed - ${actionResult.reason || "execution failed"}')
+    expect(background).not.toContain("skipped: true,\n      reason: friendlyPageAgentActionError(err)")
   })
 
   it("falls back locally when cloud page-agent chat fails", () => {

@@ -17,20 +17,25 @@ export async function hasOffscreenDocument(): Promise<boolean> {
 
 export async function retainOffscreenDocument(use: OffscreenUse): Promise<void> {
   activeUses.add(use);
-  if (await hasOffscreenDocument()) return;
-  if (!createPromise) {
-    createPromise = (chrome.offscreen as any)
-      .createDocument({
-        url: OFFSCREEN_URL,
-        reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "WORKERS"],
-        justification:
-          "Record media and keep terminal native messaging sessions connected while the sidebar is closed.",
-      })
-      .finally(() => {
-        createPromise = null;
-      });
+  try {
+    if (await hasOffscreenDocument()) return;
+    if (!createPromise) {
+      createPromise = (chrome.offscreen as any)
+        .createDocument({
+          url: OFFSCREEN_URL,
+          reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "WORKERS"],
+          justification:
+            "Record media and keep terminal native messaging sessions connected while the sidebar is closed.",
+        })
+        .finally(() => {
+          createPromise = null;
+        });
+    }
+    await createPromise;
+  } catch (err) {
+    activeUses.delete(use);
+    throw err;
   }
-  await createPromise;
 }
 
 export async function releaseOffscreenDocument(use: OffscreenUse): Promise<void> {
