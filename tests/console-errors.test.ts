@@ -11,11 +11,15 @@ import {
 describe("console error filtering", () => {
   it("keeps page-error capture from monkey-patching console or reusing the stale entry URL", () => {
     const source = readFileSync("src/contents/page-errors.ts", "utf-8")
+    const background = readFileSync("src/background.ts", "utf-8")
 
     expect(existsSync("src/contents/error-capture.ts")).toBe(false)
     expect(source).not.toContain("console.error =")
     expect(source).not.toContain("console.warn =")
     expect(source).toContain("unhandledrejection")
+    expect(background).toContain("reloadTabsOnceForStaleErrorCapture")
+    expect(background).toContain("maintenance.errorCaptureCleanup.v1")
+    expect(background).toContain("chrome.tabs.reload")
   })
 
   it("drops generated Parcel bundle payloads from the page-error feed", () => {

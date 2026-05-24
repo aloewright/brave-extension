@@ -57,6 +57,8 @@ import type {
 
 const HOST_NAME = "com.aidev.sidebar";
 const HEARTBEAT_ALARM = "native-heartbeat";
+const STALE_ERROR_CAPTURE_CLEANUP_KEY =
+  "maintenance.errorCaptureCleanup.v1";
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
@@ -97,6 +99,31 @@ void ensureThirdPartyCookieRules().catch((err) => {
 void ensureBookmarkSnapshot().catch((err) => {
   safeRuntimeWarning("failed to initialize bookmark snapshot", err);
 });
+
+async function reloadTabsOnceForStaleErrorCapture() {
+  try {
+    const stored = await chrome.storage.local.get(STALE_ERROR_CAPTURE_CLEANUP_KEY);
+    if (stored?.[STALE_ERROR_CAPTURE_CLEANUP_KEY] === true) return;
+    await chrome.storage.local.set({ [STALE_ERROR_CAPTURE_CLEANUP_KEY]: true });
+
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (typeof tab.id !== "number") return;
+        if (!/^https?:\/\//i.test(tab.url || "")) return;
+        try {
+          await chrome.tabs.reload(tab.id);
+        } catch (err) {
+          safeRuntimeWarning("failed to reload tab for stale content-script cleanup", err);
+        }
+      }),
+    );
+  } catch (err) {
+    safeRuntimeWarning("failed to run stale error-capture cleanup", err);
+  }
+}
+
+void reloadTabsOnceForStaleErrorCapture();
 
 chrome.runtime.onMessageExternal?.addListener(
   (_message, _sender, sendResponse) => {
