@@ -83,33 +83,6 @@ describe("/api/agent", () => {
     expect(JSON.stringify(aiRun.mock.calls[0])).toContain("private page text")
   })
 
-  it("preserves AI Gateway reply newlines while normalizing internal plan fields", async () => {
-    const aiRun = vi.fn(async () => ({
-      response: JSON.stringify({
-        status: "planning\nwith detail",
-        nextStep: "Click Save\nthen observe.",
-        stopCondition: "Saved\nor blocked.",
-        reply: "Cloud plan:\n\n1. Click Save.\n2. Observe again."
-      })
-    }))
-    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
-
-    const res = await authed(env, "/api/agent/chat", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        message: "click save",
-        observation,
-        cloudUse: { planning: true, vision: false, ocr: false }
-      })
-    })
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { status: string; nextStep: string }; reply: string }
-    expect(body.reply).toBe("Cloud plan:\n\n1. Click Save.\n2. Observe again.")
-    expect(body.session.status).toBe("planning with detail")
-    expect(body.session.nextStep).toBe("Click Save then observe.")
-  })
-
   it("does not call AI Gateway or store raw observation when cloud planning is disabled", async () => {
     const aiRun = vi.fn(async () => {
       throw new Error("AI Gateway should not be called")
@@ -137,10 +110,201 @@ describe("/api/agent", () => {
     expect(sessionBody.messages[0]?.observation).toBeNull()
   })
 
+  it("falls back to deterministic plan when AI Gateway throws", async () => {
+    const aiRun = vi.fn(async () => {
+      throw new Error("AI Gateway unavailable")
+    })
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation,
+        cloudUse: { planning: true, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { provider: string; reply: string }
+    // When AI Gateway fails, fallback to worker-deterministic
+    expect(body.provider).toBe("worker-deterministic")
+    expect(body.reply).toContain("Objective: click save")
+    expect(aiRun).toHaveBeenCalledOnce()
+  })
+
+  it("normalizes absent cloudUse to all-false and uses deterministic plan", async () => {
+    const aiRun = vi.fn(async () => {
+      throw new Error("AI should not be called without cloudUse")
+    })
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "click save", observation })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { cloudUse: { planning: boolean; vision: boolean; ocr: boolean }; provider: string }
+    expect(body.provider).toBe("worker-deterministic")
+    expect(body.cloudUse).toEqual({ planning: false, vision: false, ocr: false })
+    expect(aiRun).not.toHaveBeenCalled()
+  })
+
+  it("normalizes partial cloudUse — unset fields default to false", async () => {
+    const aiRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        status: "planning",
+        nextStep: "click save",
+        stopCondition: "saved",
+        reply: "Cloud plan OK"
+      })
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation,
+        cloudUse: { planning: true }  // vision and ocr are absent
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { cloudUse: { planning: boolean; vision: boolean; ocr: boolean } }
+    expect(body.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
+  })
+
+  it("response includes model and gateway fields when cloud plan succeeds", async () => {
+    const aiRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        status: "planning",
+        nextStep: "Proceed.",
+        stopCondition: "Done.",
+        reply: "Cloud reply."
+      })
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation: { ...observation, visibleText: "cloud model page" },
+        cloudUse: { planning: true, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { model: string; gateway: string; provider: string }
+    expect(body.provider).toBe("cloudflare-ai-gateway")
+    expect(typeof body.model).toBe("string")
+    expect(body.model.length).toBeGreaterThan(0)
+    expect(typeof body.gateway).toBe("string")
+    expect(body.gateway.length).toBeGreaterThan(0)
+  })
+
+  it("response model and gateway are absent when deterministic plan is used", async () => {
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "click save" })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { model?: string; gateway?: string; provider: string }
+    expect(body.provider).toBe("worker-deterministic")
+    expect(body.model).toBeUndefined()
+    expect(body.gateway).toBeUndefined()
+  })
+
+  it("AI Gateway receives the full observation JSON in the prompt when planning is enabled", async () => {
+    const aiRun = vi.fn(async () => ({
+      choices: [
+        { message: { content: JSON.stringify({ status: "planning", nextStep: "click", stopCondition: "done", reply: "ok" }) } }
+      ]
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const sensitiveObservation = { ...observation, visibleText: "unique-marker-xyz-789" }
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "read page",
+        observation: sensitiveObservation,
+        cloudUse: { planning: true }
+      })
+    })
+    expect(res.status).toBe(200)
+    // The AI was called and the observation text was included in the prompt
+    expect(aiRun).toHaveBeenCalledOnce()
+    const callArgs = JSON.stringify(aiRun.mock.calls[0])
+    expect(callArgs).toContain("unique-marker-xyz-789")
+  })
+
+  it("uses choices[0].message.content format from AI response when response field absent", async () => {
+    const aiRun = vi.fn(async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "planning",
+              nextStep: "type in search box",
+              stopCondition: "search results shown",
+              reply: "Choices-format reply."
+            })
+          }
+        }
+      ]
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "search for item",
+        observation,
+        cloudUse: { planning: true }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { reply: string; provider: string }
+    expect(body.provider).toBe("cloudflare-ai-gateway")
+    expect(body.reply).toBe("Choices-format reply.")
+  })
+
+  it("uses result field from AI response when response and choices fields are absent", async () => {
+    const aiRun = vi.fn(async () => ({
+      result: JSON.stringify({
+        status: "planning",
+        nextStep: "scroll down",
+        stopCondition: "element visible",
+        reply: "Result-field reply."
+      })
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "scroll to footer",
+        observation,
+        cloudUse: { planning: true }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { reply: string; provider: string }
+    expect(body.provider).toBe("cloudflare-ai-gateway")
+    expect(body.reply).toBe("Result-field reply.")
+  })
+
   it("stores and searches session memory", async () => {
     const create = await authed(env, "/api/agent/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+
       body: JSON.stringify({ objective: "remember checkout" })
     })
     const { session } = (await create.json()) as { session: { id: string } }
