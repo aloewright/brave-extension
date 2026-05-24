@@ -34,6 +34,18 @@ export function SettingsPanel({
     rotateToken: () => void
     resetRegistration: () => void
     setTerminalPath: (enabled: boolean) => void
+    pending?: {
+      refresh?: boolean
+      rotateToken?: boolean
+      resetRegistration?: boolean
+      terminalPath?: boolean
+    }
+    loading?: {
+      refresh?: boolean
+      rotateToken?: boolean
+      resetRegistration?: boolean
+      terminalPath?: boolean
+    }
     toast: string | null
   }
   doppler?: {
@@ -41,6 +53,16 @@ export function SettingsPanel({
     refresh: () => void
     login: () => void
     saveDefaults: () => void
+    pending?: {
+      refresh?: boolean
+      login?: boolean
+      saveDefaults?: boolean
+    }
+    loading?: {
+      refresh?: boolean
+      login?: boolean
+      saveDefaults?: boolean
+    }
     toast: string | null
   }
 }) {
@@ -257,28 +279,35 @@ export function SettingsPanel({
                 label="Available in any terminal"
                 description="Adds ~/.config/ai-dev-sidebar to PATH via ~/.zshrc / ~/.bashrc and drops a `claude` wrapper that loads the MCP token."
                 checked={mcp.status?.terminalPathStatus === "enabled"}
+                disabled={mcp.pending?.terminalPath}
+                loading={mcp.loading?.terminalPath}
                 onChange={(v) => mcp.setTerminalPath(v)}
               />
 
               <div className="flex gap-1.5 pt-1">
                 <button
                   onClick={mcp.rotateToken}
-                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30"
+                  disabled={mcp.pending?.rotateToken}
+                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center gap-1.5"
                 >
+                  {mcp.loading?.rotateToken && <LoadingGlyph label="Rotating token" />}
                   Rotate token
                 </button>
                 <button
                   onClick={mcp.resetRegistration}
-                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60"
+                  disabled={mcp.pending?.resetRegistration}
+                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center gap-1.5"
                 >
+                  {mcp.loading?.resetRegistration && <LoadingGlyph label="Resetting registration" />}
                   Reset registration
                 </button>
                 <button
                   onClick={mcp.refresh}
-                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50"
+                  disabled={mcp.pending?.refresh}
+                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center min-w-7"
                   title="Refresh status"
                 >
-                  ↻
+                  {mcp.loading?.refresh ? <LoadingGlyph label="Refreshing MCP status" /> : "↻"}
                 </button>
               </div>
               {mcp.toast && (
@@ -384,25 +413,27 @@ export function SettingsPanel({
               <div className="flex gap-1.5 pt-1">
                 <button
                   onClick={doppler.login}
-                  disabled={!nativeHost.connected}
-                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40"
+                  disabled={!nativeHost.connected || doppler.pending?.login}
+                  className="flex-1 text-[10px] py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center gap-1.5"
                 >
+                  {doppler.loading?.login && <LoadingGlyph label="Connecting Doppler OAuth" />}
                   OAuth login
                 </button>
                 <button
                   onClick={doppler.saveDefaults}
-                  disabled={!nativeHost.connected}
-                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 disabled:opacity-40"
+                  disabled={!nativeHost.connected || doppler.pending?.saveDefaults}
+                  className="flex-1 text-[10px] py-1 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center gap-1.5"
                 >
+                  {doppler.loading?.saveDefaults && <LoadingGlyph label="Saving Doppler defaults" />}
                   Save defaults
                 </button>
                 <button
                   onClick={doppler.refresh}
-                  disabled={!nativeHost.connected}
-                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50 disabled:opacity-40"
+                  disabled={!nativeHost.connected || doppler.pending?.refresh}
+                  className="text-[10px] py-1 px-2 rounded bg-secondary/30 text-fg/60 hover:bg-secondary/50 disabled:opacity-40 disabled:cursor-wait inline-flex items-center justify-center min-w-7"
                   title="Refresh Doppler status"
                 >
-                  ↻
+                  {doppler.loading?.refresh ? <LoadingGlyph label="Refreshing Doppler status" /> : "↻"}
                 </button>
               </div>
 
@@ -666,11 +697,15 @@ function Toggle({
   label,
   description,
   checked,
+  disabled = false,
+  loading = false,
   onChange
 }: {
   label: string
   description: string
   checked: boolean
+  disabled?: boolean
+  loading?: boolean
   onChange: (v: boolean) => void
 }) {
   return (
@@ -679,15 +714,27 @@ function Toggle({
         <div className="text-[11px] text-fg/70">{label}</div>
         <div className="text-[9px] text-fg/30">{description}</div>
       </div>
-      <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+      {loading && <LoadingGlyph label={`${label} loading`} />}
+      <label className={`relative inline-flex items-center flex-shrink-0 ${disabled ? "cursor-wait opacity-70" : "cursor-pointer"}`}>
         <input
           type="checkbox"
           checked={checked}
+          disabled={disabled}
           onChange={() => onChange(!checked)}
           className="sr-only peer"
         />
         <div className="w-7 h-4 rounded-full border border-border bg-secondary/50 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-success/40 peer-checked:border-success/70 peer-checked:bg-success/80 after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:h-2.5 after:w-2.5 after:rounded-full after:bg-fg/55 after:shadow-sm after:transition-all after:duration-150 peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
       </label>
     </div>
+  )
+}
+
+function LoadingGlyph({ label }: { label: string }) {
+  return (
+    <span
+      role="status"
+      aria-label={label}
+      className="inline-block h-3 w-3 flex-shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+    />
   )
 }

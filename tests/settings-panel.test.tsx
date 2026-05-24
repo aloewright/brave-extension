@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { BACKEND_INFO } from "../src/types"
 import type { CLIBackend } from "../src/types"
 
@@ -34,5 +36,24 @@ describe("SettingsPanel — active backend ring color (PDX-124)", () => {
   it("non-active backend leaves borderColor transparent", () => {
     const style = activeBackendStyle("claude", "gemini")
     expect(style.borderColor).toBe("transparent")
+  })
+})
+
+const settingsPanelSource = () =>
+  readFileSync(join(process.cwd(), "src/components/SettingsPanel.tsx"), "utf8")
+
+describe("SettingsPanel — async action feedback", () => {
+  it("shows a loading glyph for the terminal availability toggle", () => {
+    const source = settingsPanelSource()
+    expect(source).toContain("mcp.loading?.terminalPath")
+    expect(source).toContain('${label} loading')
+    expect(source).toContain("cursor-wait")
+  })
+
+  it("shows a loading glyph for Doppler OAuth login", () => {
+    const source = settingsPanelSource()
+    expect(source).toContain("doppler.loading?.login")
+    expect(source).toContain("Connecting Doppler OAuth")
+    expect(source).toContain("animate-spin")
   })
 })
