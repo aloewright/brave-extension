@@ -13,8 +13,10 @@ import {
   type RecordingMetadata,
 } from "../types";
 import { ulid } from "../lib/ulid";
-
-const OFFSCREEN_URL = "tabs/offscreen.html";
+import {
+  releaseOffscreenDocument,
+  retainOffscreenDocument,
+} from "./offscreen";
 
 export interface RecorderState {
   active: boolean;
@@ -103,34 +105,12 @@ export function notifyRecorderFinalized(meta: RecordingMetadata | null) {
   }
 }
 
-async function hasOffscreen(): Promise<boolean> {
-  // @ts-ignore — chrome.runtime.getContexts is MV3 only and may be missing
-  // from older @types/chrome
-  const existing = await (chrome.runtime as any).getContexts?.({
-    contextTypes: ["OFFSCREEN_DOCUMENT"],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)],
-  });
-  return Array.isArray(existing) && existing.length > 0;
-}
-
 async function ensureOffscreen() {
-  if (await hasOffscreen()) return;
-  // @ts-ignore — older @types/chrome may not include DISPLAY_MEDIA reason
-  await (chrome.offscreen as any).createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ["USER_MEDIA", "DISPLAY_MEDIA"],
-    justification: "Record tab/screen/camera video",
-  });
+  await retainOffscreenDocument("recorder");
 }
 
 async function closeOffscreen() {
-  if (!(await hasOffscreen())) return;
-  try {
-    // @ts-ignore
-    await chrome.offscreen.closeDocument();
-  } catch {
-    // ignore
-  }
+  await releaseOffscreenDocument("recorder");
 }
 
 export function getRecordingElapsedMs(now = Date.now()): number {

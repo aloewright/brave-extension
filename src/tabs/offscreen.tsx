@@ -14,6 +14,7 @@
  *   off → { type: "RECORDER_MIRROR_CHUNK",  id, base64 }      // many of these
  *   off → { type: "RECORDER_MIRROR_FINISH", id }
  *   off → { type: "RECORDER_ERROR", error }
+ *   bg  → { type: "TERMINAL_KEEPALIVE_START" | "TERMINAL_KEEPALIVE_STOP" }
  *
  * Memory note: instead of sending a giant base64 string back to the SW, we
  * create a Blob URL here (background just downloads it) and stream the
@@ -41,6 +42,9 @@ type StopMsg = { type: "RECORDER_STOP" };
 type PauseMsg = { type: "RECORDER_PAUSE" };
 type ResumeMsg = { type: "RECORDER_RESUME" };
 type ControlMsg = StopMsg | PauseMsg | ResumeMsg;
+type TerminalKeepAliveMsg =
+  | { type: "TERMINAL_KEEPALIVE_START" }
+  | { type: "TERMINAL_KEEPALIVE_STOP" };
 
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
@@ -52,6 +56,66 @@ let startedAt = 0;
 let elapsedBeforePauseMs = 0;
 let lastResumeAt = 0;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
+let terminalKeepAliveEnabled = false;
+let terminalKeepAlivePort: chrome.runtime.Port | null = null;
+let terminalKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+const TERMINAL_KEEPALIVE_INTERVAL_MS = 15_000;
+const TERMINAL_KEEPALIVE_PORT_NAME = "terminal-keepalive";
+
+function connectTerminalKeepAlivePort() {
+  if (!terminalKeepAliveEnabled || terminalKeepAlivePort) return;
+  try {
+    const port = chrome.runtime.connect({ name: TERMINAL_KEEPALIVE_PORT_NAME });
+    terminalKeepAlivePort = port;
+    port.onDisconnect.addListener(() => {
+      if (terminalKeepAlivePort === port) terminalKeepAlivePort = null;
+      if (terminalKeepAliveEnabled) {
+        setTimeout(sendTerminalKeepAlivePing, 250);
+      }
+    });
+  } catch {
+    terminalKeepAlivePort = null;
+  }
+}
+
+function sendTerminalKeepAlivePing() {
+  if (!terminalKeepAliveEnabled) return;
+  connectTerminalKeepAlivePort();
+  try {
+    terminalKeepAlivePort?.postMessage({
+      type: "terminal-keepalive-ping",
+      at: Date.now(),
+    });
+  } catch {
+    terminalKeepAlivePort = null;
+  }
+}
+
+function startTerminalKeepAlive() {
+  terminalKeepAliveEnabled = true;
+  sendTerminalKeepAlivePing();
+  if (!terminalKeepAliveTimer) {
+    terminalKeepAliveTimer = setInterval(
+      sendTerminalKeepAlivePing,
+      TERMINAL_KEEPALIVE_INTERVAL_MS,
+    );
+  }
+}
+
+function stopTerminalKeepAlive() {
+  terminalKeepAliveEnabled = false;
+  if (terminalKeepAliveTimer) {
+    clearInterval(terminalKeepAliveTimer);
+    terminalKeepAliveTimer = null;
+  }
+  try {
+    terminalKeepAlivePort?.disconnect();
+  } catch {
+    // ignore
+  }
+  terminalKeepAlivePort = null;
+}
 
 export function chooseRecorderMimeType(
   isTypeSupported: (mimeType: string) => boolean,
@@ -354,15 +418,20 @@ function resumeRecording() {
 
 export default function Offscreen() {
   useEffect(() => {
-    const handler = (msg: StartMsg | ControlMsg) => {
+    const handler = (msg: StartMsg | ControlMsg | TerminalKeepAliveMsg) => {
       if (msg.type === "RECORDER_START") void startRecording(msg);
       if (msg.type === "RECORDER_STOP") stopRecording();
       if (msg.type === "RECORDER_PAUSE") pauseRecording();
       if (msg.type === "RECORDER_RESUME") resumeRecording();
+      if (msg.type === "TERMINAL_KEEPALIVE_START") startTerminalKeepAlive();
+      if (msg.type === "TERMINAL_KEEPALIVE_STOP") stopTerminalKeepAlive();
     };
     chrome.runtime.onMessage.addListener(handler);
     chrome.runtime.sendMessage({ type: "RECORDER_READY" });
-    return () => chrome.runtime.onMessage.removeListener(handler);
+    return () => {
+      chrome.runtime.onMessage.removeListener(handler);
+      stopTerminalKeepAlive();
+    };
   }, []);
   return null;
 }

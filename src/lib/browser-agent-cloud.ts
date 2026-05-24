@@ -7,12 +7,7 @@ export interface BrowserAgentCloudUse {
 }
 
 export interface BrowserAgentCloudChatInput {
-  settings: Pick<
-    Settings,
-    | "browserAgentCloudPlanningEnabled"
-    | "browserAgentCloudVisionEnabled"
-    | "browserAgentCloudOcrEnabled"
-  >
+  settings: Pick<Settings, "browserAgentCloudPlanningEnabled" | "browserAgentCloudVisionEnabled" | "browserAgentCloudOcrEnabled">
   sessionId: string
   message: string
   objective?: string
@@ -31,9 +26,7 @@ const MAX_VISIBLE_TEXT_CHARS = 4_000
 const MAX_NODE_TEXT_CHARS = 500
 const MAX_NODES = 50
 
-export function browserAgentCloudUseFromSettings(
-  settings: BrowserAgentCloudChatInput["settings"],
-): BrowserAgentCloudUse {
+export function browserAgentCloudUseFromSettings(settings: BrowserAgentCloudChatInput["settings"]): BrowserAgentCloudUse {
   return {
     planning: settings.browserAgentCloudPlanningEnabled === true,
     vision: settings.browserAgentCloudVisionEnabled === true,
@@ -41,16 +34,17 @@ export function browserAgentCloudUseFromSettings(
   }
 }
 
-export function buildBrowserAgentCloudChatPayload(
-  input: BrowserAgentCloudChatInput,
-): BrowserAgentCloudChatPayload {
+export function buildBrowserAgentCloudChatPayload(input: BrowserAgentCloudChatInput): BrowserAgentCloudChatPayload {
+  const message = input.message.trim()
+  if (!message) throw new Error("message required")
   const cloudUse = browserAgentCloudUseFromSettings(input.settings)
   const payload: BrowserAgentCloudChatPayload = {
     sessionId: input.sessionId,
-    message: input.message,
+    message,
     cloudUse,
   }
-  if (input.objective !== undefined) payload.objective = input.objective
+  const objective = input.objective?.trim()
+  if (objective) payload.objective = objective
   const boundedObservation = buildBoundedObservation(input.observation)
   if (cloudUse.planning && boundedObservation) payload.observation = boundedObservation
   return payload
@@ -59,19 +53,13 @@ export function buildBrowserAgentCloudChatPayload(
 function buildBoundedObservation(observation: unknown): Record<string, unknown> | undefined {
   if (!observation || typeof observation !== "object" || Array.isArray(observation)) return undefined
   const src = observation as Record<string, unknown>
-  const nodes = Array.isArray(src.nodes)
-    ? src.nodes.slice(0, MAX_NODES).map((node) => boundNode(node))
-    : undefined
+  const nodes = Array.isArray(src.nodes) ? src.nodes.slice(0, MAX_NODES).map((node) => boundNode(node)) : undefined
   return {
     ...(typeof src.url === "string" ? { url: src.url } : {}),
     ...(typeof src.title === "string" ? { title: src.title } : {}),
-    ...(typeof src.visibleText === "string"
-      ? { visibleText: src.visibleText.slice(0, MAX_VISIBLE_TEXT_CHARS) }
-      : {}),
+    ...(typeof src.visibleText === "string" ? { visibleText: src.visibleText.slice(0, MAX_VISIBLE_TEXT_CHARS) } : {}),
     ...(nodes ? { nodes } : {}),
-    ...(src.limits && typeof src.limits === "object" && !Array.isArray(src.limits)
-      ? { limits: src.limits }
-      : {}),
+    ...(src.limits && typeof src.limits === "object" && !Array.isArray(src.limits) ? { limits: src.limits } : {}),
   }
 }
 

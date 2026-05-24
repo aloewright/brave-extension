@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from "react"
 import type { SectionId } from "../sections/types"
 import { SECTIONS } from "../sections/types"
 import { LeoIcon, type LeoIconName } from "./leo"
 import {
   runPageAgentQuickAction,
   runPipQuickAction,
+  type QuickActionResult,
   runSaveLinkQuickAction,
   runScreenshotQuickAction
 } from "../lib/quick-actions"
@@ -35,8 +37,10 @@ const NORD_BLUE = "#88C0D0"
 interface QuickActionDef {
   label: string
   icon: LeoIconName
-  run: () => Promise<unknown>
+  run: () => Promise<QuickActionResult>
 }
+
+type QuickActionFeedback = QuickActionResult & { label: string }
 
 const QUICK_ACTIONS: QuickActionDef[] = [
   { label: "Screenshot visible area", icon: "screenshot", run: runScreenshotQuickAction },
@@ -46,17 +50,41 @@ const QUICK_ACTIONS: QuickActionDef[] = [
 ]
 
 export function SidebarRail({ active, onChange }: Props) {
+  const [runningAction, setRunningAction] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<QuickActionFeedback | null>(null)
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
+    }
+  }, [])
+
+  const showFeedback = (label: string, result: QuickActionResult) => {
+    setFeedback({ ...result, label })
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 3000)
+  }
+
   const handleQuickAction = async (def: QuickActionDef) => {
+    if (runningAction) return
+    setRunningAction(def.label)
+    setFeedback(null)
     try {
-      await def.run()
-    } catch {
-      /* quick actions intentionally do not render rail feedback */
+      showFeedback(def.label, await def.run())
+    } catch (err) {
+      showFeedback(def.label, {
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      setRunningAction(null)
     }
   }
 
   return (
     <nav
-      className="flex flex-col items-center justify-between gap-1 px-1.5 py-2 border-r border-border bg-bg/50"
+      className="relative flex flex-col items-center justify-between gap-1 px-1.5 py-2 border-r border-border bg-bg/50"
       data-testid="sidebar-rail"
     >
       <div className="flex flex-col items-center gap-1" data-testid="sidebar-rail-sections">
@@ -85,19 +113,47 @@ export function SidebarRail({ active, onChange }: Props) {
         className="flex flex-col items-center gap-1 pt-2 border-t border-border/50 w-full"
         data-testid="sidebar-rail-quick-actions"
       >
-        {QUICK_ACTIONS.map((def) => (
-          <button
-            key={def.label}
-            type="button"
-            onClick={() => handleQuickAction(def)}
-            title={def.label}
-            aria-label={def.label}
-            className={`p-2 rounded transition-colors hover:bg-[${NORD_BLUE}]/15`}
-            style={{ color: NORD_BLUE }}
+        {QUICK_ACTIONS.map((def) => {
+          const isRunning = runningAction === def.label
+          return (
+            <button
+              key={def.label}
+              type="button"
+              onClick={() => handleQuickAction(def)}
+              title={def.label}
+              aria-label={def.label}
+              aria-busy={isRunning ? true : undefined}
+              className={`p-2 rounded transition-colors hover:bg-[${NORD_BLUE}]/15`}
+              style={{
+                color: NORD_BLUE,
+                backgroundColor: isRunning ? "rgba(136, 192, 208, 0.16)" : undefined
+              }}
+            >
+              {isRunning ? (
+                <span
+                  aria-hidden="true"
+                  className="block h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin"
+                />
+              ) : (
+                <LeoIcon name={def.icon} size={16} />
+              )}
+            </button>
+          )
+        })}
+        {feedback && (
+          <div
+            role={feedback.kind === "error" ? "alert" : "status"}
+            data-testid="sidebar-rail-feedback"
+            data-kind={feedback.kind}
+            className={`absolute bottom-2 left-full z-50 ml-2 w-56 rounded-md border px-2.5 py-2 text-xs leading-snug shadow-lg ${
+              feedback.kind === "error"
+                ? "border-red-400/40 bg-red-950 text-red-100"
+                : "border-border bg-bg text-fg"
+            }`}
           >
-            <LeoIcon name={def.icon} size={16} />
-          </button>
-        ))}
+            {feedback.message}
+          </div>
+        )}
       </div>
     </nav>
   )

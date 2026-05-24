@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest"
-import {
-  buildBrowserAgentCloudChatPayload,
-  browserAgentCloudUseFromSettings,
-} from "../src/lib/browser-agent-cloud"
+import { buildBrowserAgentCloudChatPayload, browserAgentCloudUseFromSettings } from "../src/lib/browser-agent-cloud"
 
 const observation = {
   url: "https://secret.example/account",
   title: "Secret Billing Page",
   visibleText: "Internal account token XYZ-TEST-01",
-  nodes: [{ ref: "el1", name: "Pay now", text: "Internal account token XYZ-TEST-01", selector: "#pay" }],
+  nodes: [
+    {
+      ref: "el1",
+      name: "Pay now",
+      text: "Internal account token XYZ-TEST-01",
+      selector: "#pay",
+    },
+  ],
 }
 
 const baseSettings = {
@@ -27,7 +31,11 @@ describe("browser agent cloud routing payloads", () => {
       observation,
     })
 
-    expect(payload.cloudUse).toEqual({ planning: false, vision: false, ocr: false })
+    expect(payload.cloudUse).toEqual({
+      planning: false,
+      vision: false,
+      ocr: false,
+    })
     expect(payload).not.toHaveProperty("observation")
     expect(JSON.stringify(payload)).not.toContain("XYZ-TEST-01")
     expect(JSON.stringify(payload)).not.toContain("secret.example")
@@ -42,7 +50,11 @@ describe("browser agent cloud routing payloads", () => {
       observation,
     })
 
-    expect(payload.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
+    expect(payload.cloudUse).toEqual({
+      planning: true,
+      vision: false,
+      ocr: false,
+    })
     expect(payload.observation).toEqual(observation)
     expect(payload.observation).not.toBe(observation)
   })
@@ -66,7 +78,11 @@ describe("browser agent cloud routing payloads", () => {
       },
     })
 
-    const bounded = payload.observation as { visibleText: string; nodes: Array<{ name: string; text: string }>; unexpectedSecret?: string }
+    const bounded = payload.observation as {
+      visibleText: string
+      nodes: Array<{ name: string; text: string }>
+      unexpectedSecret?: string
+    }
     expect(bounded.visibleText).toHaveLength(4_000)
     expect(bounded.nodes).toHaveLength(50)
     expect(bounded.nodes[0].name).toHaveLength(500)
@@ -87,7 +103,11 @@ describe("browser agent cloud routing payloads", () => {
       observation,
     })
 
-    expect(payload.cloudUse).toEqual({ planning: false, vision: true, ocr: true })
+    expect(payload.cloudUse).toEqual({
+      planning: false,
+      vision: true,
+      ocr: true,
+    })
     expect(payload).not.toHaveProperty("observation")
     expect(JSON.stringify(payload)).not.toContain("Internal account token")
   })
@@ -112,6 +132,29 @@ describe("browser agent cloud routing payloads", () => {
     })
 
     expect(payload).toHaveProperty("objective", "click pay")
+  })
+
+  it("rejects empty messages before they reach a model API", () => {
+    expect(() =>
+      buildBrowserAgentCloudChatPayload({
+        settings: { ...baseSettings, browserAgentCloudPlanningEnabled: true },
+        sessionId: "s1",
+        message: "   ",
+        observation,
+      }),
+    ).toThrow("message required")
+  })
+
+  it("trims message and omits blank objective values", () => {
+    const payload = buildBrowserAgentCloudChatPayload({
+      settings: baseSettings,
+      sessionId: "s1",
+      message: "  click pay  ",
+      objective: "   ",
+    })
+
+    expect(payload.message).toBe("click pay")
+    expect(payload).not.toHaveProperty("objective")
   })
 })
 
@@ -216,7 +259,11 @@ describe("buildBrowserAgentCloudChatPayload additional edge cases", () => {
       message: "click pay",
       observation,
     })
-    expect(payload.cloudUse).toEqual({ planning: true, vision: true, ocr: true })
+    expect(payload.cloudUse).toEqual({
+      planning: true,
+      vision: true,
+      ocr: true,
+    })
     expect(payload.observation).toEqual(observation)
     expect(payload.observation).not.toBe(observation)
   })

@@ -189,4 +189,27 @@ describe("page agent UI", () => {
     expect(pageAgent).toContain("M60 120C45 120 35 105 40 90")
     expect(pageAgent).not.toContain(">AI</button>")
   })
+
+  it("does not execute page-agent DOM actions against raw unmapped refs", () => {
+    const background = readFileSync(
+      join(process.cwd(), "src/background.ts"),
+      "utf8"
+    )
+
+    expect(background).toContain("function selectorForAgentAction(action: PageAgentAction, observation: any): string | null")
+    expect(background).toContain("if (!ref) return null")
+    expect(background).not.toContain("node?.selector || action.value || ref")
+    expect(background).toContain("planned click target is no longer in the page observation")
+    expect(background).toContain("friendlyPageAgentActionError")
+  })
+
+  it("falls back locally when cloud page-agent chat fails", () => {
+    const background = readFileSync(
+      join(process.cwd(), "src/background.ts"),
+      "utf8"
+    )
+
+    expect(background).toContain("page agent cloud chat failed; using local fallback")
+    expect(background).toContain("local-deterministic")
+  })
 })
