@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, it, expect } from "vitest"
 import { SECTIONS, type SectionId } from "../src/sections/types"
 
@@ -9,7 +11,7 @@ import { SECTIONS, type SectionId } from "../src/sections/types"
 //
 //   1. Tech is a dedicated section (not a sub-tab of Extensions).
 //   2. Session replaces Library as the snippets/links/feeds surface.
-//   3. The bottom quick-action group covers Screenshot / PiP / Save link.
+//   3. The bottom quick-action group covers Screenshot / PiP / Save link / Page agent.
 //
 // We verify (1) and (2) via SECTIONS, and (3) via the lib that backs the
 // rail's bottom group.
@@ -51,5 +53,16 @@ describe("Bottom quick-action group composition", () => {
     expect(typeof mod.runScreenshotQuickAction).toBe("function")
     expect(typeof mod.runPipQuickAction).toBe("function")
     expect(typeof mod.runSaveLinkQuickAction).toBe("function")
+    expect(typeof mod.runPageAgentQuickAction).toBe("function")
+  })
+
+  it("keeps the Page agent toggle at the bottom of the rail actions", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+    expect(source).toContain('label: "Page agent"')
+    expect(source).toContain('icon: "cloud"')
+    expect(source.indexOf('label: "Save link"')).toBeLessThan(source.indexOf('label: "Page agent"'))
   })
 })

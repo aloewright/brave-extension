@@ -2,6 +2,7 @@ import type { SectionId } from "../sections/types"
 import { SECTIONS } from "../sections/types"
 import { LeoIcon, type LeoIconName } from "./leo"
 import {
+  runPageAgentQuickAction,
   runPipQuickAction,
   runSaveLinkQuickAction,
   runScreenshotQuickAction
@@ -40,7 +41,8 @@ interface QuickActionDef {
 const QUICK_ACTIONS: QuickActionDef[] = [
   { label: "Screenshot visible area", icon: "screenshot", run: runScreenshotQuickAction },
   { label: "Picture-in-picture", icon: "picture-in-picture", run: runPipQuickAction },
-  { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction }
+  { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction },
+  { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction }
 ]
 
 export function SidebarRail({ active, onChange }: Props) {

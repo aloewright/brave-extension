@@ -120,3 +120,27 @@ export async function runSaveLinkQuickAction(): Promise<QuickActionResult> {
     )
   })
 }
+
+/**
+ * Ask the active page-agent content script to toggle its popout.
+ */
+export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+  if (!win?.id) return { kind: "error", message: "No active window" }
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
+  if (!tab?.id) return { kind: "error", message: "No active tab" }
+  try {
+    const res = await chrome.tabs.sendMessage(tab.id, { type: "PAGE_AGENT_TOGGLE" }) as
+      | { ok?: boolean; open?: boolean }
+      | undefined
+    if (res?.ok) {
+      return { kind: "success", message: res.open ? "Page agent shown" : "Page agent hidden" }
+    }
+    return { kind: "error", message: "Page agent unavailable" }
+  } catch (err) {
+    return {
+      kind: "error",
+      message: err instanceof Error ? err.message : "Page agent unavailable"
+    }
+  }
+}
