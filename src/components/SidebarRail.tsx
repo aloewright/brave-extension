@@ -63,7 +63,7 @@ export function SidebarRail({ active, onChange }: Props) {
   const showFeedback = (label: string, result: QuickActionResult) => {
     setFeedback({ ...result, label })
     if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
-    feedbackTimer.current = setTimeout(() => setFeedback(null), 3000)
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 1400)
   }
 
   const handleQuickAction = async (def: QuickActionDef) => {
@@ -124,7 +124,7 @@ export function SidebarRail({ active, onChange }: Props) {
               aria-label={def.label}
               aria-busy={isRunning ? true : undefined}
               disabled={runningAction !== null}
-              className="grid h-8 w-8 place-items-center rounded transition-all duration-150 ease-out hover:-translate-y-0.5 hover:scale-110 hover:bg-[rgba(136,192,208,0.15)] hover:shadow-[0_0_0_1px_rgba(136,192,208,0.22)] active:translate-y-0 active:scale-95 disabled:cursor-wait disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:scale-100"
+              className="grid h-8 w-8 place-items-center rounded transition-colors duration-150 hover:bg-[rgba(136,192,208,0.15)] active:bg-[rgba(136,192,208,0.22)] disabled:cursor-wait disabled:opacity-60"
               style={{
                 color: NORD_BLUE,
                 backgroundColor: isRunning ? "rgba(136, 192, 208, 0.16)" : undefined
@@ -145,15 +145,20 @@ export function SidebarRail({ active, onChange }: Props) {
           <div
             role={feedback.kind === "error" ? "alert" : "status"}
             aria-live="polite"
-            data-testid="sidebar-rail-toast"
+            aria-label={feedback.message}
+            title={feedback.message}
+            data-testid="sidebar-rail-feedback"
             data-kind={feedback.kind}
-            className={`max-w-[60px] animate-fade-in break-words px-1 text-center text-[8px] leading-tight ${
+            className={`pointer-events-none absolute bottom-3 left-full z-50 ml-2 grid h-7 w-7 place-items-center rounded-full shadow-lg ring-1 ring-white/20 animate-fade-in ${
               feedback.kind === "error"
-                ? "text-red-300"
-                : "text-fg/70"
+                ? "bg-error text-bg"
+                : "bg-success text-bg"
             }`}
           >
-            {feedback.message}
+            <LeoIcon
+              name={feedback.kind === "error" ? "warning-triangle-outline" : "check-normal"}
+              size={14}
+            />
           </div>
         )}
       </div>

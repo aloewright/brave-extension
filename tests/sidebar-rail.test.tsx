@@ -75,22 +75,26 @@ describe("Bottom quick-action group composition", () => {
     expect(source).toContain("setRunningAction(def.label)")
     expect(source).toContain("aria-busy={isRunning ? true : undefined}")
     expect(source).toContain("animate-spin")
-    expect(source).toContain('data-testid="sidebar-rail-toast"')
-    expect(source).toContain("max-w-[60px]")
+    expect(source).toContain('data-testid="sidebar-rail-feedback"')
+    expect(source).toContain("left-full")
+    expect(source).toContain("setTimeout(() => setFeedback(null), 1400)")
+    expect(source).toContain('name={feedback.kind === "error" ? "warning-triangle-outline" : "check-normal"}')
     expect(source).toContain("showFeedback(def.label, await def.run())")
     expect(source).not.toContain("quick actions intentionally do not render rail feedback")
   })
 
-  it("keeps animated hover and active feedback on bottom rail buttons", () => {
+  it("keeps bottom rail hover feedback simple and layout-neutral", () => {
     const source = readFileSync(
       join(process.cwd(), "src/components/SidebarRail.tsx"),
       "utf8"
     )
 
-    expect(source).toContain("transition-all duration-150 ease-out")
-    expect(source).toContain("hover:-translate-y-0.5")
-    expect(source).toContain("hover:scale-110")
-    expect(source).toContain("active:scale-95")
+    expect(source).toContain("transition-colors duration-150")
+    expect(source).toContain("active:bg-[rgba(136,192,208,0.22)]")
     expect(source).toContain("disabled:cursor-wait")
+    expect(source).not.toContain("hover:-translate-y")
+    expect(source).not.toContain("hover:scale")
+    expect(source).not.toContain("active:scale")
+    expect(source).not.toContain('data-testid="sidebar-rail-toast"')
   })
 })
