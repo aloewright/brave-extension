@@ -19,11 +19,13 @@ afterEach(() => {
 const EXPECTED_TOOLS = [
   "echo",
   "tabs_list",
+  "browser_observe",
   "query_selector",
   "click",
   "type",
   "scroll_to",
   "wait_for_selector",
+  "navigate",
   "screenshot",
   "screenshot_element",
   "get_dom",
