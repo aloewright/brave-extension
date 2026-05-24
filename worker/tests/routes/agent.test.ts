@@ -71,6 +71,32 @@ describe("/api/agent", () => {
     expect(body.results[0]?.key).toBe("checkout")
   })
 
+  it("escapes wildcard and backslash characters in memory search", async () => {
+    const create = await authed(env, "/api/agent/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ objective: "remember path" })
+    })
+    const { session } = (await create.json()) as { session: { id: string } }
+    await authed(env, `/api/agent/sessions/${session.id}/memory`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: "plain", value: "payment step" })
+    })
+    await authed(env, `/api/agent/sessions/${session.id}/memory`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: "path", value: "C:\\Users\\Aloe" })
+    })
+
+    const wildcard = await authed(env, `/api/agent/sessions/${session.id}/memory/search?q=%`)
+    expect(((await wildcard.json()) as { results: unknown[] }).results).toEqual([])
+
+    const backslash = await authed(env, `/api/agent/sessions/${session.id}/memory/search?q=${encodeURIComponent("\\")}`)
+    const body = (await backslash.json()) as { results: Array<{ key: string }> }
+    expect(body.results.map((r) => r.key)).toEqual(["path"])
+  })
+
   it("requires auth", async () => {
     const res = await app.fetch(new Request("http://x/api/agent/sessions"), env)
     expect(res.status).toBe(401)

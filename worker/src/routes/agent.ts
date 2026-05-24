@@ -186,7 +186,7 @@ agent.get("/sessions/:id/memory/search", async (c) => {
   if (!session) return c.json({ error: { code: "not_found", message: "no such agent session" } }, 404)
   const q = cleanText(c.req.query("q") || "", 200)
   if (!q) return c.json({ results: [] })
-  const like = `%${q.replace(/[%_]/g, "\\$&")}%`
+  const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`
   const { results } = await c.env.DB.prepare(
     `SELECT id, key, value, created_at
        FROM browser_agent_memories
