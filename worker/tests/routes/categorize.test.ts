@@ -85,17 +85,16 @@ describe("POST /api/bookmarks/categorize", () => {
     const call = aiRun.mock.calls[0]!
     const model = call[0] as string
     const payload = call[1] as {
-      messages: Array<{ role: string; content: string }>
+      instructions: string
+      input: string
+      messages?: unknown
     }
     const opts = call[2] as { gateway: { id: string } }
     expect(model).toBe("@cf/openai/gpt-oss-120b")
     expect(opts.gateway.id).toBe("x")
-    expect(payload.messages[0]).toMatchObject({
-      role: "system",
-      content: expect.stringContaining("You categorize bookmarks"),
-    })
-    expect(payload.messages[1]?.role).toBe("user")
-    const prompt = payload.messages[1]?.content ?? ""
+    expect(payload.messages).toBeUndefined()
+    expect(payload.instructions).toContain("You categorize bookmarks")
+    const prompt = payload.input
     expect(prompt.length).toBeGreaterThan(0)
     // Minimal-fields rule: outgoing prompt must not include URLs raw — only
     // domain — and must not include browser-extension internal fields.

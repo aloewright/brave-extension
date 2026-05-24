@@ -89,16 +89,11 @@ categorize.post("/", async (c) => {
     const res = (await c.env.AI.run(
       MODEL_ID,
       {
-        messages: [
-          {
-            role: "system",
-            content:
-              "You categorize bookmarks. Respond with strict JSON: " +
-              `{"proposals":[{"id":"...","category":"...","confidence":"low|medium|high"}]}.` +
-              ` Category strings should be short (1-3 words), title-cased, and consistent across the batch.`,
-          },
-          { role: "user", content: prompt },
-        ],
+        instructions:
+          "You categorize bookmarks. Respond with strict JSON: " +
+          `{"proposals":[{"id":"...","category":"...","confidence":"low|medium|high"}]}.` +
+          ` Category strings should be short (1-3 words), title-cased, and consistent across the batch.`,
+        input: prompt,
         max_tokens: 800,
       },
       { gateway: { id: AI_GATEWAY_ID } },
