@@ -69,6 +69,27 @@ function safeRuntimeWarning(message: string, err?: unknown) {
   );
 }
 
+function postToSidebar(port: chrome.runtime.Port, message: unknown) {
+  try {
+    port.postMessage(message);
+    return true;
+  } catch (err) {
+    safeRuntimeWarning("failed to post message to sidebar port", err);
+    return false;
+  }
+}
+
+function postToNative(port: chrome.runtime.Port, message: unknown) {
+  try {
+    port.postMessage(message);
+    return true;
+  } catch (err) {
+    safeRuntimeWarning("failed to post message to native host", err);
+    if (nativePort === port) nativePort = null;
+    return false;
+  }
+}
+
 void ensureThirdPartyCookieRules().catch((err) => {
   safeRuntimeWarning("failed to initialize third-party cookie rules", err);
 });
@@ -141,11 +162,7 @@ async function stopTerminalKeepAlive() {
 function pingNativeHost() {
   const port = nativePort ?? connectNativeHost();
   if (!port) return;
-  try {
-    port.postMessage({ type: "ping" });
-  } catch {
-    // postMessage on a torn-down port throws; the disconnect handler reconnects.
-  }
+  postToNative(port, { type: "ping" });
 }
 
 function reconcileTerminalKeepAlive() {
@@ -227,7 +244,7 @@ function connectNativeHost() {
 
       // Forward everything else to all connected sidebar ports.
       for (const [, port] of sidebarPorts) {
-        port.postMessage({ type: "native-response", payload: msg });
+        postToSidebar(port, { type: "native-response", payload: msg });
       }
     });
 
@@ -254,7 +271,7 @@ function connectNativeHost() {
       if (reconnected && (sinceLast > 5000 || sidebarPorts.size === 0)) return;
 
       for (const [, port] of sidebarPorts) {
-        port.postMessage({ type: "native-disconnected", error: err });
+        postToSidebar(port, { type: "native-disconnected", error: err });
       }
     });
 
@@ -295,11 +312,11 @@ if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
 function sendToNative(msg: any) {
   const port = connectNativeHost();
   if (port) {
-    port.postMessage(msg);
+    postToNative(port, msg);
   } else {
     // Notify sidebars about connection failure
     for (const [, p] of sidebarPorts) {
-      p.postMessage({
+      postToSidebar(p, {
         type: "native-response",
         payload: {
           type: "error",
@@ -323,12 +340,10 @@ function requestNative(payload: any, timeoutMs = 2500): Promise<any> {
       clearTimeout(timer);
       resolve(msg);
     });
-    try {
-      port.postMessage({ ...payload, requestId });
-    } catch (err) {
+    if (!postToNative(port, { ...payload, requestId })) {
       clearTimeout(timer);
       pendingNativeRequests.delete(requestId);
-      reject(err);
+      reject(new Error("native host port is disconnected"));
     }
   });
 }
@@ -340,11 +355,7 @@ function requestNative(payload: any, timeoutMs = 2500): Promise<any> {
 function broadcastRecordingState() {
   const payload = { type: "recording-state", state: { ...recorderState } };
   for (const [, port] of sidebarPorts) {
-    try {
-      port.postMessage(payload);
-    } catch {
-      // ignore
-    }
+    postToSidebar(port, payload);
   }
 }
 
@@ -374,6 +385,9 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "ai-dev-sidebar") {
     const id = crypto.randomUUID();
     sidebarPorts.set(id, port);
+    void syncNormalBrowserWindows().then(() => {
+      reconcileTerminalKeepAlive();
+    });
 
     port.onMessage.addListener((msg: any) => {
       if (msg.type === "native-send") {
@@ -433,7 +447,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "NATIVE_STATUS") {
-    sendResponse({ connected: !!nativePort });
+    sendResponse({ connected: !!(nativePort ?? connectNativeHost()) });
   }
 
   if (message.type === "SCRAPE_TAB") {
@@ -1272,13 +1286,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "scrape-page") {
     const result = await scrapeTab(tab.id);
     for (const [, port] of sidebarPorts) {
-      port.postMessage({ type: "scrape-result", payload: result });
+      postToSidebar(port, { type: "scrape-result", payload: result });
     }
   }
 
   if (info.menuItemId === "send-selection") {
     for (const [, port] of sidebarPorts) {
-      port.postMessage({
+      postToSidebar(port, {
         type: "selection",
         payload: { text: info.selectionText, url: tab.url },
       });
@@ -1397,7 +1411,7 @@ async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
   if (!port) return;
   try {
     if (!handler) {
-      port.postMessage({
+      postToNative(port, {
         type: "mcp.tool.result",
         id: msg.id,
         error: `unknown tool ${msg.name}`,
@@ -1412,7 +1426,7 @@ async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
       args: msg.args,
     });
     if (decision === "deny") {
-      port.postMessage({
+      postToNative(port, {
         type: "mcp.tool.result",
         id: msg.id,
         result: {
@@ -1423,9 +1437,9 @@ async function handleMcpToolCall(msg: { id: number; name: string; args: any }) {
       return;
     }
     const result = await handler(msg.args || {});
-    port.postMessage({ type: "mcp.tool.result", id: msg.id, result });
+    postToNative(port, { type: "mcp.tool.result", id: msg.id, result });
   } catch (err) {
-    port.postMessage({
+    postToNative(port, {
       type: "mcp.tool.result",
       id: msg.id,
       error: err instanceof Error ? err.message : String(err),

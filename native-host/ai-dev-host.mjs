@@ -47,9 +47,28 @@ mcp.setToolRequestBridge((name, args) => {
   }))
 })
 
-mcp.start().catch((err) => {
+let mcpStartError = null
+const mcpReady = mcp.start().catch((err) => {
+  mcpStartError = err
   sendMessage({ type: "stderr", data: `[mcp] failed to start: ${err.message}` })
 })
+
+async function waitForMcpReady() {
+  try {
+    await mcpReady
+    return true
+  } catch {
+    return false
+  }
+}
+
+function sendMcpStatus() {
+  sendMessage({
+    type: "mcp.status",
+    ...mcp.getStatus(),
+    error: mcpStartError?.message
+  })
+}
 
 /**
  * `hasSession` tracks whether each backend has an active session to continue.
@@ -679,6 +698,7 @@ async function main() {
       }
 
       case "pty.spawn": {
+        await waitForMcpReady()
         const merged = {
           ...msg,
           env: { ...(msg.env || {}), ...mcp.ptyEnv() }
@@ -703,16 +723,18 @@ async function main() {
       }
 
       case "mcp.status": {
-        sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+        await waitForMcpReady()
+        sendMcpStatus()
         break
       }
 
       case "mcp.rotate-token": {
+        await waitForMcpReady()
         try {
           const r = mcp.rotateToken()
           sendMessage({ type: "mcp.rotate-token", ok: true, rotatedAt: r.rotatedAt })
           // Broadcast updated status so the panel can refresh.
-          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+          sendMcpStatus()
         } catch (err) {
           sendMessage({ type: "mcp.rotate-token", ok: false, error: err.message })
         }
@@ -720,10 +742,11 @@ async function main() {
       }
 
       case "mcp.register": {
+        await waitForMcpReady()
         try {
           mcp.registerClaudeJson()
           sendMessage({ type: "mcp.register", ok: true })
-          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+          sendMcpStatus()
         } catch (err) {
           sendMessage({ type: "mcp.register", ok: false, error: err.message })
         }
@@ -731,10 +754,11 @@ async function main() {
       }
 
       case "mcp.unregister": {
+        await waitForMcpReady()
         try {
           mcp.unregisterClaudeJson()
           sendMessage({ type: "mcp.unregister", ok: true })
-          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+          sendMcpStatus()
         } catch (err) {
           sendMessage({ type: "mcp.unregister", ok: false, error: err.message })
         }
@@ -742,6 +766,7 @@ async function main() {
       }
 
       case "mcp.terminal-path.set": {
+        await waitForMcpReady()
         try {
           const results = mcp.setTerminalPath(!!msg.enabled)
           sendMessage({
@@ -750,7 +775,7 @@ async function main() {
             enabled: !!msg.enabled,
             results
           })
-          sendMessage({ type: "mcp.status", ...mcp.getStatus() })
+          sendMcpStatus()
         } catch (err) {
           sendMessage({ type: "mcp.terminal-path.set", ok: false, error: err.message })
         }
