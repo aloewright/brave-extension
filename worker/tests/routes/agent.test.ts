@@ -83,6 +83,54 @@ describe("/api/agent", () => {
     expect(JSON.stringify(aiRun.mock.calls[0])).toContain("private page text")
   })
 
+  it("preserves AI Gateway reply newlines while normalizing internal plan fields", async () => {
+    const aiRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        status: "planning\nwith detail",
+        nextStep: "Click Save\nthen observe.",
+        stopCondition: "Saved\nor blocked.",
+        reply: "Cloud plan:\n\n1. Click Save.\n2. Observe again."
+      })
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation,
+        cloudUse: { planning: true, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { session: { status: string; nextStep: string }; reply: string }
+    expect(body.reply).toBe("Cloud plan:\n\n1. Click Save.\n2. Observe again.")
+    expect(body.session.status).toBe("planning with detail")
+    expect(body.session.nextStep).toBe("Click Save then observe.")
+  })
+
+  it("uses deterministic metadata when AI Gateway output has no usable plan fields", async () => {
+    const aiRun = vi.fn(async () => ({ response: "not json" }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation,
+        cloudUse: { planning: true, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { provider: string; model?: string; gateway?: string; reply: string }
+    expect(body.provider).toBe("worker-deterministic")
+    expect(body.model).toBeUndefined()
+    expect(body.gateway).toBeUndefined()
+    expect(body.reply).toContain("Objective: click save")
+  })
+
   it("does not call AI Gateway or store raw observation when cloud planning is disabled", async () => {
     const aiRun = vi.fn(async () => {
       throw new Error("AI Gateway should not be called")

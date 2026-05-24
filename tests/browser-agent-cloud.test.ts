@@ -7,8 +7,8 @@ import {
 const observation = {
   url: "https://secret.example/account",
   title: "Secret Billing Page",
-  visibleText: "Card number 4242 4242 4242 4242",
-  nodes: [{ ref: "el1", name: "Pay now", text: "Pay now", selector: "#pay" }],
+  visibleText: "Internal account token XYZ-TEST-01",
+  nodes: [{ ref: "el1", name: "Pay now", text: "Internal account token XYZ-TEST-01", selector: "#pay" }],
 }
 
 const baseSettings = {
@@ -29,11 +29,11 @@ describe("browser agent cloud routing payloads", () => {
 
     expect(payload.cloudUse).toEqual({ planning: false, vision: false, ocr: false })
     expect(payload).not.toHaveProperty("observation")
-    expect(JSON.stringify(payload)).not.toContain("4242")
+    expect(JSON.stringify(payload)).not.toContain("XYZ-TEST-01")
     expect(JSON.stringify(payload)).not.toContain("secret.example")
   })
 
-  it("includes capped observation only after explicit cloud planning opt-in", () => {
+  it("includes bounded observation only after explicit cloud planning opt-in", () => {
     const payload = buildBrowserAgentCloudChatPayload({
       settings: { ...baseSettings, browserAgentCloudPlanningEnabled: true },
       sessionId: "s1",
@@ -43,7 +43,35 @@ describe("browser agent cloud routing payloads", () => {
     })
 
     expect(payload.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
-    expect(payload.observation).toBe(observation)
+    expect(payload.observation).toEqual(observation)
+    expect(payload.observation).not.toBe(observation)
+  })
+
+  it("caps cloud observation text and nodes", () => {
+    const payload = buildBrowserAgentCloudChatPayload({
+      settings: { ...baseSettings, browserAgentCloudPlanningEnabled: true },
+      sessionId: "s1",
+      message: "click pay",
+      objective: "click pay",
+      observation: {
+        ...observation,
+        visibleText: "x".repeat(4_500),
+        nodes: Array.from({ length: 55 }, (_, index) => ({
+          ref: `el${index}`,
+          name: "n".repeat(600),
+          text: "t".repeat(600),
+          selector: `#el${index}`,
+        })),
+        unexpectedSecret: "do-not-send",
+      },
+    })
+
+    const bounded = payload.observation as { visibleText: string; nodes: Array<{ name: string; text: string }>; unexpectedSecret?: string }
+    expect(bounded.visibleText).toHaveLength(4_000)
+    expect(bounded.nodes).toHaveLength(50)
+    expect(bounded.nodes[0].name).toHaveLength(500)
+    expect(bounded.nodes[0].text).toHaveLength(500)
+    expect(bounded).not.toHaveProperty("unexpectedSecret")
   })
 
   it("does not send DOM text for vision/OCR-only cloud opt-ins", () => {
@@ -61,7 +89,29 @@ describe("browser agent cloud routing payloads", () => {
 
     expect(payload.cloudUse).toEqual({ planning: false, vision: true, ocr: true })
     expect(payload).not.toHaveProperty("observation")
-    expect(JSON.stringify(payload)).not.toContain("Card number")
+    expect(JSON.stringify(payload)).not.toContain("Internal account token")
+  })
+
+  it("omits objective and observation keys when they are not provided", () => {
+    const payload = buildBrowserAgentCloudChatPayload({
+      settings: { ...baseSettings, browserAgentCloudPlanningEnabled: true },
+      sessionId: "s1",
+      message: "click pay",
+    })
+
+    expect(payload).not.toHaveProperty("objective")
+    expect(payload).not.toHaveProperty("observation")
+  })
+
+  it("includes objective key only when provided", () => {
+    const payload = buildBrowserAgentCloudChatPayload({
+      settings: baseSettings,
+      sessionId: "s1",
+      message: "click pay",
+      objective: "click pay",
+    })
+
+    expect(payload).toHaveProperty("objective", "click pay")
   })
 })
 
@@ -143,16 +193,15 @@ describe("buildBrowserAgentCloudChatPayload additional edge cases", () => {
     expect(payload.objective).toBe("complete checkout")
   })
 
-  it("includes observation even when observation is undefined and planning is enabled", () => {
+  it("omits observation when observation is undefined and planning is enabled", () => {
     const payload = buildBrowserAgentCloudChatPayload({
       settings: { ...baseSettings, browserAgentCloudPlanningEnabled: true },
       sessionId: "s1",
       message: "click pay",
       observation: undefined,
     })
-    // observation key is set (to undefined) because planning is true
     expect(payload.cloudUse.planning).toBe(true)
-    expect(payload.observation).toBeUndefined()
+    expect(payload).not.toHaveProperty("observation")
   })
 
   it("all cloud features enabled - observation is included (planning drives the gate)", () => {
@@ -168,7 +217,8 @@ describe("buildBrowserAgentCloudChatPayload additional edge cases", () => {
       observation,
     })
     expect(payload.cloudUse).toEqual({ planning: true, vision: true, ocr: true })
-    expect(payload.observation).toBe(observation)
+    expect(payload.observation).toEqual(observation)
+    expect(payload.observation).not.toBe(observation)
   })
 
   it("serialized payload does not leak sensitive data when all cloud features disabled", () => {

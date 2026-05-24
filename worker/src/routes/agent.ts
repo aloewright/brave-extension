@@ -352,10 +352,16 @@ async function buildCloudPlan(
     reply?: string
   } | null
   const deterministic = buildDeterministicPlan(message, observationJson, session)
-  const status = cleanText(parsed?.status || deterministic.status, 80) || "planning"
-  const nextStep = cleanText(parsed?.nextStep || deterministic.nextStep, 500)
-  const stopCondition = cleanText(parsed?.stopCondition || deterministic.stopCondition, 500)
-  const reply = preserveText(parsed?.reply || raw || deterministic.reply, 2000)
+  const hasUsableCloudPlan = Boolean(
+    parsed && (parsed.status || parsed.nextStep || parsed.stopCondition || parsed.reply)
+  )
+  if (!hasUsableCloudPlan) {
+    return deterministic
+  }
+  const status = cleanText(parsed!.status || deterministic.status, 80) || "planning"
+  const nextStep = cleanText(parsed!.nextStep || deterministic.nextStep, 500)
+  const stopCondition = cleanText(parsed!.stopCondition || deterministic.stopCondition, 500)
+  const reply = preserveText(parsed!.reply || raw || deterministic.reply, 2000)
 
   return {
     status,

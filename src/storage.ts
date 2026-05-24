@@ -6,7 +6,7 @@ import type {
   ScanResult,
   Settings
 } from "./types"
-import { DEFAULT_INSPECTOR_SETTINGS } from "./types"
+import { DEFAULT_INSPECTOR_SETTINGS, DEFAULT_SETTINGS } from "./types"
 
 const KEYS = {
   settings: "ai-dev-settings",
@@ -370,34 +370,5 @@ export async function clearScanCache(): Promise<void> {
 }
 
 function defaultSettings(): Settings {
-  return {
-    backend: "claude",
-    workingDirectory: "~",
-    claudeConfigPath: "~/.claude.json",
-    autoScrape: false,
-    captureConsole: true,
-    captureNetwork: false,
-    theme: "dark",
-    captureSaveLocation: "downloads",
-    captureSubfolder: "ai-dev-sidebar",
-    cloudCapturesEnabled: false,
-    sidebarSyncEnabled: false,
-    sidebarApiUrl: "https://sidebar.pdx.software",
-    sidebarApiToken: "",
-    sidebarPruneAfterSync: false,
-    cloudosSyncEnabled: false,
-    cloudosNotesUrl: "https://notes.pdx.software/api/notes",
-    cloudosServiceToken: "",
-    cloudosPruneAfterSync: false,
-    allowEvalJs: false,
-    allowExtensionUninstall: false,
-    cookiesAllowAll: false,
-    browserAgentCloudPlanningEnabled: false,
-    browserAgentCloudVisionEnabled: false,
-    browserAgentCloudOcrEnabled: false,
-    braveSearchApiKey: "",
-    dopplerProject: "",
-    dopplerConfig: "",
-    dopplerScope: "/"
-  }
+  return { ...DEFAULT_SETTINGS }
 }
