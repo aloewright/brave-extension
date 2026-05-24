@@ -88,6 +88,11 @@ describe("POST /api/bookmarks/categorize", () => {
     // Minimal-fields rule: outgoing prompt must not include URLs raw — only
     // domain — and must not include browser-extension internal fields.
     const userMsg = payload.messages.find((m) => m.role === "user")!
+    const systemMsg = payload.messages.find((m) => m.role === "system")!
+    expect(systemMsg.content).toContain("type of website")
+    expect(systemMsg.content).toContain("reusable folders")
+    expect(userMsg.content).toContain("infer the type of website")
+    expect(userMsg.content).toContain("Use the same folder name")
     expect(userMsg.content).toContain("news.ycombinator.com")
     expect(userMsg.content).toContain("allrecipes.com")
     expect(userMsg.content).not.toContain("https://news.ycombinator.com")

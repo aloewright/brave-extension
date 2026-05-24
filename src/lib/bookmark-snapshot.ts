@@ -8,6 +8,7 @@ export interface StoredBookmark {
   category: string;
   path: string[];
   isFavorite: boolean;
+  favoriteOrder?: number;
   dateAdded?: number;
   index?: number;
 }
@@ -33,18 +34,142 @@ export function applyBookmarkCategoryProposals(
   );
   if (byId.size === 0) return snapshot;
 
+  const nextBookmarks = snapshot.bookmarks.map((bookmark) => {
+    const category = byId.get(bookmark.id);
+    if (!category) return bookmark;
+    return {
+      ...bookmark,
+      category,
+      isFavorite: true,
+    };
+  });
+
+  return {
+    ...snapshot,
+    bookmarks: assignMissingFavoriteOrders(nextBookmarks),
+  };
+}
+
+export function moveFavoriteBookmarkToCategory(
+  snapshot: BookmarkSnapshot,
+  id: string,
+  category: string,
+): BookmarkSnapshot {
+  const clean = category.trim() || "Unfiled";
+  const maxOrder = Math.max(
+    -1,
+    ...snapshot.bookmarks
+      .filter((bookmark) => bookmark.isFavorite && bookmark.category === clean && bookmark.id !== id)
+      .map((bookmark) => bookmark.favoriteOrder ?? 0),
+  );
+
+  return {
+    ...snapshot,
+    bookmarks: snapshot.bookmarks.map((bookmark) =>
+      bookmark.id === id
+        ? {
+            ...bookmark,
+            category: clean,
+            isFavorite: true,
+            favoriteOrder: maxOrder + 1,
+          }
+        : bookmark,
+    ),
+  };
+}
+
+export function removeBookmarkFromFavorites(
+  snapshot: BookmarkSnapshot,
+  id: string,
+): BookmarkSnapshot {
+  return {
+    ...snapshot,
+    bookmarks: snapshot.bookmarks.map((bookmark) =>
+      bookmark.id === id
+        ? {
+            ...bookmark,
+            isFavorite: false,
+          }
+        : bookmark,
+    ),
+  };
+}
+
+export function moveFavoriteBookmark(
+  snapshot: BookmarkSnapshot,
+  id: string,
+  direction: "up" | "down",
+): BookmarkSnapshot {
+  const current = snapshot.bookmarks.find((bookmark) => bookmark.id === id);
+  if (!current?.isFavorite) return snapshot;
+
+  const ordered = snapshot.bookmarks
+    .filter(
+      (bookmark) =>
+        bookmark.isFavorite && bookmark.category === current.category,
+    )
+    .sort(compareFavoriteBookmarks);
+  const index = ordered.findIndex((bookmark) => bookmark.id === id);
+  const swapIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) {
+    return snapshot;
+  }
+
+  const orderById = new Map(
+    ordered.map((bookmark, order) => [bookmark.id, order] as const),
+  );
+  const currentOrder = orderById.get(ordered[index].id);
+  const swapOrder = orderById.get(ordered[swapIndex].id);
+  if (currentOrder === undefined || swapOrder === undefined) return snapshot;
+  orderById.set(ordered[index].id, swapOrder);
+  orderById.set(ordered[swapIndex].id, currentOrder);
+
   return {
     ...snapshot,
     bookmarks: snapshot.bookmarks.map((bookmark) => {
-      const category = byId.get(bookmark.id);
-      if (!category) return bookmark;
-      return {
-        ...bookmark,
-        category,
-        isFavorite: true,
-      };
+      const favoriteOrder = orderById.get(bookmark.id);
+      return favoriteOrder === undefined
+        ? bookmark
+        : { ...bookmark, favoriteOrder };
     }),
   };
+}
+
+export function compareFavoriteBookmarks(
+  a: StoredBookmark,
+  b: StoredBookmark,
+): number {
+  return (
+    (a.favoriteOrder ?? Number.MAX_SAFE_INTEGER) -
+      (b.favoriteOrder ?? Number.MAX_SAFE_INTEGER) ||
+    (a.index ?? Number.MAX_SAFE_INTEGER) - (b.index ?? Number.MAX_SAFE_INTEGER) ||
+    a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
+    a.url.localeCompare(b.url)
+  );
+}
+
+function assignMissingFavoriteOrders(bookmarks: StoredBookmark[]): StoredBookmark[] {
+  const nextOrderByCategory = new Map<string, number>();
+  for (const bookmark of bookmarks) {
+    if (!bookmark.isFavorite) continue;
+    const existing = nextOrderByCategory.get(bookmark.category) ?? 0;
+    nextOrderByCategory.set(
+      bookmark.category,
+      Math.max(existing, (bookmark.favoriteOrder ?? -1) + 1),
+    );
+  }
+
+  return bookmarks.map((bookmark) => {
+    if (!bookmark.isFavorite || bookmark.favoriteOrder !== undefined) {
+      return bookmark;
+    }
+    const nextOrder = nextOrderByCategory.get(bookmark.category) ?? 0;
+    nextOrderByCategory.set(bookmark.category, nextOrder + 1);
+    return {
+      ...bookmark,
+      favoriteOrder: nextOrder,
+    };
+  });
 }
 
 function titleOrHost(title: string, url: string): string {

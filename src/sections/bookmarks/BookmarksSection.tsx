@@ -3,6 +3,10 @@ import { LeoButton, LeoTabButton } from "../../components/leo";
 import {
   applyBookmarkCategoryProposals,
   BOOKMARK_SNAPSHOT_KEY,
+  compareFavoriteBookmarks,
+  moveFavoriteBookmark,
+  moveFavoriteBookmarkToCategory,
+  removeBookmarkFromFavorites,
   type BookmarkSnapshot,
   type StoredBookmark,
 } from "../../lib/bookmark-snapshot";
@@ -45,6 +49,31 @@ function groupByCategory(bookmarks: StoredBookmark[]) {
     );
 }
 
+function groupFavoriteBookmarks(bookmarks: StoredBookmark[]) {
+  const groups = new Map<string, StoredBookmark[]>();
+  for (const bookmark of bookmarks) {
+    if (!bookmark.isFavorite) continue;
+    const key = bookmark.category || "Unfiled";
+    groups.set(key, [...(groups.get(key) ?? []), bookmark]);
+  }
+  return [...groups.entries()]
+    .map(([category, items]) => ({
+      category,
+      items: [...items].sort(compareFavoriteBookmarks),
+    }))
+    .sort((a, b) =>
+      a.category.localeCompare(b.category, undefined, { sensitivity: "base" }),
+    );
+}
+
+function bookmarkHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function BookmarkRow({
   bookmark,
   proposedCategory,
@@ -52,12 +81,7 @@ function BookmarkRow({
   bookmark: StoredBookmark;
   proposedCategory?: ProposedCategory;
 }) {
-  let host = bookmark.url;
-  try {
-    host = new URL(bookmark.url).hostname.replace(/^www\./, "");
-  } catch {
-    // Keep the raw URL if parsing fails.
-  }
+  const host = bookmarkHost(bookmark.url);
 
   // ALO-469: clicking a row opens the bookmark in a new tab via
   // chrome.tabs.create — keeps the sidebar open instead of navigating it
@@ -85,6 +109,105 @@ function BookmarkRow({
         )}
       </span>
     </button>
+  );
+}
+
+function FavoriteBookmarkRow({
+  bookmark,
+  categoryOptions,
+  isFirst,
+  isLast,
+  proposedCategory,
+  onMove,
+  onMoveToCategory,
+  onRemove,
+}: {
+  bookmark: StoredBookmark;
+  categoryOptions: string[];
+  isFirst: boolean;
+  isLast: boolean;
+  proposedCategory?: ProposedCategory;
+  onMove: (id: string, direction: "up" | "down") => void;
+  onMoveToCategory: (id: string, category: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const host = bookmarkHost(bookmark.url);
+
+  const onOpen = () => {
+    chrome.tabs.create({ url: bookmark.url, active: true });
+  };
+
+  return (
+    <div className="rounded border border-border/60 bg-card/20 px-2.5 py-2">
+      <div className="flex min-w-0 items-start gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          title={bookmark.url}
+          className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <div className="truncate text-sm font-medium text-fg hover:text-primary">
+            {bookmark.title}
+          </div>
+          <div className="truncate text-xs text-fg/45">
+            {host}
+            {proposedCategory && (
+              <span className="ml-2 inline-flex items-center rounded bg-primary/20 px-1.5 text-[10px] text-primary">
+                AI: {proposedCategory.category} ({proposedCategory.confidence})
+              </span>
+            )}
+          </div>
+        </button>
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button
+            type="button"
+            disabled={isFirst}
+            onClick={() => onMove(bookmark.id, "up")}
+            className="rounded bg-accent/45 px-1.5 py-1 text-[10px] text-fg/60 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label={`Move ${bookmark.title} up`}
+            title="Move up"
+          >
+            Up
+          </button>
+          <button
+            type="button"
+            disabled={isLast}
+            onClick={() => onMove(bookmark.id, "down")}
+            className="rounded bg-accent/45 px-1.5 py-1 text-[10px] text-fg/60 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label={`Move ${bookmark.title} down`}
+            title="Move down"
+          >
+            Down
+          </button>
+          <button
+            type="button"
+            onClick={() => onRemove(bookmark.id)}
+            className="rounded bg-accent/35 px-1.5 py-1 text-[10px] text-fg/45 hover:bg-error/15 hover:text-error"
+            aria-label={`Remove ${bookmark.title} from favorites`}
+            title="Remove from Favorites"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+      <label className="mt-2 flex items-center gap-2 text-[10px] text-fg/45">
+        <span className="flex-shrink-0 uppercase tracking-wide">Folder</span>
+        <select
+          value={bookmark.category || "Unfiled"}
+          onChange={(event) =>
+            onMoveToCategory(bookmark.id, event.currentTarget.value)
+          }
+          className="min-w-0 flex-1 rounded border border-border bg-input px-2 py-1 text-xs text-fg outline-none focus:border-primary/50"
+          aria-label={`Move ${bookmark.title} to folder`}
+        >
+          {categoryOptions.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -138,6 +261,11 @@ export function BookmarksSection() {
 
   const bookmarks = snapshot?.bookmarks ?? [];
 
+  const persistSnapshot = async (next: BookmarkSnapshot) => {
+    setSnapshot(next);
+    await chrome.storage.local.set({ [BOOKMARK_SNAPSHOT_KEY]: next });
+  };
+
   const runCategorize = async () => {
     setCategorizing(true);
     setCategorizeError(null);
@@ -174,8 +302,7 @@ export function BookmarksSection() {
           snapshot,
           Object.values(merged),
         );
-        setSnapshot(next);
-        await chrome.storage.local.set({ [BOOKMARK_SNAPSHOT_KEY]: next });
+        await persistSnapshot(next);
         setView("favorites");
       }
       setProposedCategories(merged);
@@ -205,13 +332,36 @@ export function BookmarksSection() {
     () =>
       bookmarks
         .filter((bookmark) => bookmark.isFavorite)
-        .sort(compareBookmarks),
+        .sort(compareFavoriteBookmarks),
     [bookmarks],
   );
+  const favoriteGroups = useMemo(() => groupFavoriteBookmarks(bookmarks), [bookmarks]);
+  const categoryOptions = useMemo(() => {
+    const set = new Set(bookmarks.map((bookmark) => bookmark.category || "Unfiled"));
+    set.add("Unfiled");
+    return [...set].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [bookmarks]);
   const categories = useMemo(() => groupByCategory(bookmarks), [bookmarks]);
   const pulledLabel = snapshot?.pulledAt
     ? new Date(snapshot.pulledAt).toLocaleString()
     : "Not pulled yet";
+
+  const moveFavorite = (id: string, direction: "up" | "down") => {
+    if (!snapshot) return;
+    void persistSnapshot(moveFavoriteBookmark(snapshot, id, direction));
+  };
+
+  const moveFavoriteToCategory = (id: string, category: string) => {
+    if (!snapshot) return;
+    void persistSnapshot(moveFavoriteBookmarkToCategory(snapshot, id, category));
+  };
+
+  const removeFavorite = (id: string) => {
+    if (!snapshot) return;
+    void persistSnapshot(removeBookmarkFromFavorites(snapshot, id));
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden text-fg">
@@ -302,14 +452,36 @@ export function BookmarksSection() {
         )}
 
         {view === "favorites" && (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             {favorites.length > 0 ? (
-              favorites.map((bookmark) => (
-                <BookmarkRow
-                  key={bookmark.id}
-                  bookmark={bookmark}
-                  proposedCategory={proposedCategories[bookmark.id]}
-                />
+              favoriteGroups.map((group) => (
+                <details
+                  key={group.category}
+                  open
+                  className="rounded border border-border/70 bg-card/10"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-fg/55">
+                    <span className="truncate">{group.category}</span>
+                    <span className="rounded bg-accent/50 px-1.5 py-0.5 text-[10px] text-fg/45">
+                      {group.items.length}
+                    </span>
+                  </summary>
+                  <div className="flex flex-col gap-1.5 border-t border-border/50 p-2">
+                    {group.items.map((bookmark, index) => (
+                      <FavoriteBookmarkRow
+                        key={bookmark.id}
+                        bookmark={bookmark}
+                        categoryOptions={categoryOptions}
+                        isFirst={index === 0}
+                        isLast={index === group.items.length - 1}
+                        proposedCategory={proposedCategories[bookmark.id]}
+                        onMove={moveFavorite}
+                        onMoveToCategory={moveFavoriteToCategory}
+                        onRemove={removeFavorite}
+                      />
+                    ))}
+                  </div>
+                </details>
               ))
             ) : (
               <div className="rounded border border-border p-4 text-sm text-fg/50">

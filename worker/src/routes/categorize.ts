@@ -88,9 +88,9 @@ categorize.post("/", async (c) => {
           {
             role: "system",
             content:
-              "You categorize bookmarks. Respond with strict JSON: " +
+              "You identify the type of website each bookmark points to and categorize bookmarks into reusable folders. Respond with strict JSON: " +
               `{"proposals":[{"id":"...","category":"...","confidence":"low|medium|high"}]}.` +
-              ` Category strings should be short (1-3 words), title-cased, and consistent across the batch.`
+              ` Category strings should be short (1-3 words), title-cased, based on the website type or primary topic, and consistent across the batch.`
           },
           { role: "user", content: prompt }
         ],
@@ -138,8 +138,9 @@ interface MinimalItem {
 
 function buildPrompt(items: MinimalItem[]): string {
   return [
-    "Categorize each bookmark into a short topical category like 'Tech News',",
-    "'Recipes', 'Frontend', 'AI Research', 'Personal Finance'.",
+    "For each bookmark, infer the type of website associated with the link from its title, domain, existing folder, and tags.",
+    "Group related websites into short folder categories like 'Tech News', 'Recipes', 'Frontend', 'AI Research', 'Personal Finance', 'Shopping', or 'Design'.",
+    "Use the same folder name for related bookmarks across the batch.",
     "Return strict JSON only, no commentary.",
     "Bookmarks:",
     JSON.stringify(items, null, 0)
