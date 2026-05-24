@@ -6,25 +6,99 @@ import { useEffect, useRef, useState } from "react"
 import type { DopplerStatus, MCPServer, MCPStatus } from "../../types"
 
 const SIDEBAR_API_SECRET_NAMES = ["SIDEBAR_API_URL", "SIDEBAR_API_TOKEN", "SIDEBAR_TOKEN"]
+const ACTION_LOADING_DELAY_MS = 700
+const ACTION_TIMEOUT_MS = 45_000
+const DOPPLER_LOGIN_TIMEOUT_MS = 5 * 60_000
+
+type PendingAction =
+  | "mcp.rotateToken"
+  | "mcp.resetRegistration"
+  | "mcp.refresh"
+  | "mcp.terminalPath"
+  | "doppler.login"
+  | "doppler.saveDefaults"
+  | "doppler.refresh"
+
+type PendingActionState = Partial<Record<PendingAction, boolean>>
 
 export function SettingsSection() {
   const { settings, update } = useSettings()
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpStatus, setMcpStatus] = useState<MCPStatus | null>(null)
   const [dopplerStatus, setDopplerStatus] = useState<DopplerStatus | null>(null)
+  const [pendingActions, setPendingActions] = useState<PendingActionState>({})
+  const [loadingActions, setLoadingActions] = useState<PendingActionState>({})
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingActionsRef = useRef<PendingActionState>({})
+  const loadingDelayTimers = useRef<Partial<Record<PendingAction, ReturnType<typeof setTimeout>>>>({})
+  const pendingTimeoutTimers = useRef<Partial<Record<PendingAction, ReturnType<typeof setTimeout>>>>({})
   const sidebarSecretRequestRef = useRef<string | null>(null)
   const showToast = (text: string) => {
     setToast(text)
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), 4000)
   }
+  const updatePendingAction = (action: PendingAction, pending: boolean) => {
+    pendingActionsRef.current = { ...pendingActionsRef.current, [action]: pending }
+    setPendingActions((prev) => ({ ...prev, [action]: pending }))
+  }
+  const clearPendingAction = (action: PendingAction) => {
+    const loadingDelay = loadingDelayTimers.current[action]
+    if (loadingDelay) clearTimeout(loadingDelay)
+    const timeout = pendingTimeoutTimers.current[action]
+    if (timeout) clearTimeout(timeout)
+    delete loadingDelayTimers.current[action]
+    delete pendingTimeoutTimers.current[action]
+    updatePendingAction(action, false)
+    setLoadingActions((prev) => ({ ...prev, [action]: false }))
+  }
+  const clearAllPendingActions = () => {
+    for (const timer of Object.values(loadingDelayTimers.current)) {
+      if (timer) clearTimeout(timer)
+    }
+    for (const timer of Object.values(pendingTimeoutTimers.current)) {
+      if (timer) clearTimeout(timer)
+    }
+    loadingDelayTimers.current = {}
+    pendingTimeoutTimers.current = {}
+    pendingActionsRef.current = {}
+    setPendingActions({})
+    setLoadingActions({})
+  }
+  const beginPendingAction = (action: PendingAction) => {
+    clearPendingAction(action)
+    updatePendingAction(action, true)
+    loadingDelayTimers.current[action] = setTimeout(() => {
+      if (!pendingActionsRef.current[action]) return
+      setLoadingActions((prev) => ({ ...prev, [action]: true }))
+    }, ACTION_LOADING_DELAY_MS)
+    const timeoutMs = action === "doppler.login" ? DOPPLER_LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS
+    pendingTimeoutTimers.current[action] = setTimeout(() => {
+      clearPendingAction(action)
+    }, timeoutMs)
+  }
+  const clearMcpPendingForType = (type: string, ok: boolean) => {
+    if (type === "mcp.status") clearPendingAction("mcp.refresh")
+    if (type === "mcp.rotate-token") clearPendingAction("mcp.rotateToken")
+    if (type === "mcp.terminal-path.set") clearPendingAction("mcp.terminalPath")
+    if (type === "mcp.register") clearPendingAction("mcp.resetRegistration")
+    if (type === "mcp.unregister" && !ok) clearPendingAction("mcp.resetRegistration")
+  }
+  const clearDopplerPendingForType = (type: string) => {
+    if (type === "doppler.status") clearPendingAction("doppler.refresh")
+    if (type === "doppler.login") clearPendingAction("doppler.login")
+    if (type === "doppler.defaults.set") clearPendingAction("doppler.saveDefaults")
+  }
 
   const nativeHost = useNativeHost({
     onMcpList: (servers) => setMcpServers(servers as MCPServer[]),
-    onMcpStatus: (s) => setMcpStatus(s),
+    onMcpStatus: (s) => {
+      setMcpStatus(s)
+      clearMcpPendingForType("mcp.status", true)
+    },
     onMcpRpcResult: (msg) => {
+      clearMcpPendingForType(msg.type, msg.ok)
       if (!msg.ok) {
         showToast(`Error: ${msg.error || msg.type}`)
         return
@@ -48,8 +122,12 @@ export function SettingsSection() {
           break
       }
     },
-    onDopplerStatus: (s) => setDopplerStatus(s),
+    onDopplerStatus: (s) => {
+      setDopplerStatus(s)
+      clearDopplerPendingForType("doppler.status")
+    },
     onDopplerRpcResult: (msg) => {
+      clearDopplerPendingForType(msg.type)
       if (!msg.ok) {
         if (msg.silent) return
         showToast(`Doppler: ${msg.error || msg.type}`)
@@ -82,6 +160,21 @@ export function SettingsSection() {
     }
   } as any)
   const sidebarSync = useSidebarSync({ settings, messages: [] })
+
+  useEffect(() => {
+    if (!nativeHost.connected) clearAllPendingActions()
+  }, [nativeHost.connected])
+
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(loadingDelayTimers.current)) {
+        if (timer) clearTimeout(timer)
+      }
+      for (const timer of Object.values(pendingTimeoutTimers.current)) {
+        if (timer) clearTimeout(timer)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (settings && nativeHost.connected) {
@@ -151,28 +244,69 @@ export function SettingsSection() {
       sidebarSync={sidebarSync}
       mcp={{
         status: mcpStatus,
-        refresh: () => nativeHost.mcpStatus(),
-        rotateToken: () => nativeHost.mcpRotateToken(),
+        refresh: () => {
+          beginPendingAction("mcp.refresh")
+          nativeHost.mcpStatus()
+        },
+        rotateToken: () => {
+          beginPendingAction("mcp.rotateToken")
+          nativeHost.mcpRotateToken()
+        },
         resetRegistration: () => {
+          beginPendingAction("mcp.resetRegistration")
           nativeHost.mcpUnregister()
           // Re-register after a tick so unregister flushes first.
           setTimeout(() => nativeHost.mcpRegister(), 250)
         },
-        setTerminalPath: (enabled: boolean) => nativeHost.mcpSetTerminalPath(enabled),
+        setTerminalPath: (enabled: boolean) => {
+          beginPendingAction("mcp.terminalPath")
+          nativeHost.mcpSetTerminalPath(enabled)
+        },
+        pending: {
+          refresh: !!pendingActions["mcp.refresh"],
+          rotateToken: !!pendingActions["mcp.rotateToken"],
+          resetRegistration: !!pendingActions["mcp.resetRegistration"],
+          terminalPath: !!pendingActions["mcp.terminalPath"]
+        },
+        loading: {
+          refresh: !!loadingActions["mcp.refresh"],
+          rotateToken: !!loadingActions["mcp.rotateToken"],
+          resetRegistration: !!loadingActions["mcp.resetRegistration"],
+          terminalPath: !!loadingActions["mcp.terminalPath"]
+        },
         toast
       }}
       doppler={{
         status: dopplerStatus,
-        refresh: () => nativeHost.dopplerStatus(),
-        login: () => nativeHost.dopplerLogin({
-          scope: settings.dopplerScope || "/",
-          overwrite: true
-        }),
-        saveDefaults: () => nativeHost.dopplerSetDefaults({
-          project: settings.dopplerProject,
-          config: settings.dopplerConfig,
-          scope: settings.dopplerScope || "/"
-        }),
+        refresh: () => {
+          beginPendingAction("doppler.refresh")
+          nativeHost.dopplerStatus()
+        },
+        login: () => {
+          beginPendingAction("doppler.login")
+          nativeHost.dopplerLogin({
+            scope: settings.dopplerScope || "/",
+            overwrite: true
+          })
+        },
+        saveDefaults: () => {
+          beginPendingAction("doppler.saveDefaults")
+          nativeHost.dopplerSetDefaults({
+            project: settings.dopplerProject,
+            config: settings.dopplerConfig,
+            scope: settings.dopplerScope || "/"
+          })
+        },
+        pending: {
+          refresh: !!pendingActions["doppler.refresh"],
+          login: !!pendingActions["doppler.login"],
+          saveDefaults: !!pendingActions["doppler.saveDefaults"]
+        },
+        loading: {
+          refresh: !!loadingActions["doppler.refresh"],
+          login: !!loadingActions["doppler.login"],
+          saveDefaults: !!loadingActions["doppler.saveDefaults"]
+        },
         toast
       }}
     />
