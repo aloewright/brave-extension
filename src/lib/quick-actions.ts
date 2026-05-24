@@ -26,6 +26,8 @@ export type QuickActionResult =
   | { kind: "success"; message: string }
   | { kind: "error"; message: string }
 
+const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
+
 /**
  * Capture the visible tab (or, when activeTab isn't available, prompt the
  * user to pick a window/tab). Routes through the configured capture
@@ -122,25 +124,33 @@ export async function runSaveLinkQuickAction(): Promise<QuickActionResult> {
 }
 
 /**
- * Ask the active page-agent content script to toggle its popout.
+ * Hide/show the page-agent launcher globally. Content scripts listen to the
+ * stored visibility flag, so this works even when the active tab cannot receive
+ * extension messages.
  */
 export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
-  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
-  if (!win?.id) return { kind: "error", message: "No active window" }
-  const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
-  if (!tab?.id) return { kind: "error", message: "No active tab" }
+  const result = await chrome.storage.local.get(PAGE_AGENT_VISIBLE_KEY)
+  const current =
+    typeof result?.[PAGE_AGENT_VISIBLE_KEY] === "boolean"
+      ? result[PAGE_AGENT_VISIBLE_KEY]
+      : true
+  const visible = !current
+  await chrome.storage.local.set({ [PAGE_AGENT_VISIBLE_KEY]: visible })
+
   try {
-    const res = await chrome.tabs.sendMessage(tab.id, { type: "PAGE_AGENT_TOGGLE" }) as
-      | { ok?: boolean; open?: boolean }
-      | undefined
-    if (res?.ok) {
-      return { kind: "success", message: res.open ? "Page agent shown" : "Page agent hidden" }
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+    if (win?.id) {
+      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, {
+          type: "PAGE_AGENT_TOGGLE",
+          visible
+        })
+      }
     }
-    return { kind: "error", message: "Page agent unavailable" }
-  } catch (err) {
-    return {
-      kind: "error",
-      message: err instanceof Error ? err.message : "Page agent unavailable"
-    }
+  } catch {
+    // The storage flag is the source of truth; messaging is only an immediate
+    // refresh for tabs that already have the content script loaded.
   }
+  return { kind: "success", message: visible ? "Page agent shown" : "Page agent hidden" }
 }

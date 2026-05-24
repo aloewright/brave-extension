@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LeoButton, LeoTabButton } from "../../components/leo";
+import { LeoButton, LeoIconButton, LeoTabButton } from "../../components/leo";
 import {
   BOOKMARK_SNAPSHOT_KEY,
   type BookmarkSnapshot,
@@ -20,6 +20,14 @@ const VIEWS: { id: BookmarkView; label: string }[] = [
   { id: "favorites", label: "Favorites" },
   { id: "categories", label: "Categories" },
 ];
+
+const BOOKMARK_HIDDEN_FAVORITES_KEY = "bookmarks.hiddenFavorites.v1";
+
+function sanitizeBookmarkIds(input: unknown): string[] {
+  return Array.isArray(input)
+    ? input.filter((id): id is string => typeof id === "string")
+    : [];
+}
 
 function compareBookmarks(a: StoredBookmark, b: StoredBookmark) {
   return (
@@ -47,9 +55,11 @@ function groupByCategory(bookmarks: StoredBookmark[]) {
 function BookmarkRow({
   bookmark,
   proposedCategory,
+  onRemoveFromFavorites,
 }: {
   bookmark: StoredBookmark;
   proposedCategory?: ProposedCategory;
+  onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
 }) {
   let host = bookmark.url;
   try {
@@ -66,24 +76,111 @@ function BookmarkRow({
     chrome.tabs.create({ url: bookmark.url, active: true });
   };
 
+  const canRemoveFromFavorites = bookmark.isFavorite && onRemoveFromFavorites;
+
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <div
       title={bookmark.url}
-      className="flex min-w-0 flex-col gap-0.5 rounded border border-transparent px-2.5 py-2 text-left text-sm hover:border-border hover:bg-accent/60 focus-visible:border-primary focus-visible:bg-accent focus-visible:outline-none"
+      className="group flex min-w-0 items-center rounded border border-transparent hover:border-border hover:bg-accent/60 focus-within:border-primary focus-within:bg-accent"
     >
-      <span className="truncate font-medium text-fg">{bookmark.title}</span>
-      <span className="truncate text-xs text-fg/45">
-        {host}
-        {bookmark.category ? ` · ${bookmark.category}` : ""}
-        {proposedCategory && (
-          <span className="ml-2 inline-flex items-center rounded bg-primary/20 px-1.5 text-[10px] text-primary">
-            AI: {proposedCategory.category} ({proposedCategory.confidence})
-          </span>
-        )}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 text-left text-sm focus-visible:outline-none"
+      >
+        <span className="truncate font-medium text-fg">{bookmark.title}</span>
+        <span className="truncate text-xs text-fg/45">
+          {host}
+          {bookmark.category ? ` · ${bookmark.category}` : ""}
+          {proposedCategory && (
+            <span className="ml-2 inline-flex items-center rounded bg-primary/20 px-1.5 text-[10px] text-primary">
+              AI: {proposedCategory.category} ({proposedCategory.confidence})
+            </span>
+          )}
+        </span>
+      </button>
+      {canRemoveFromFavorites && (
+        <LeoIconButton
+          aria-label={`Remove ${bookmark.title} from Favorites`}
+          className="mr-1 shrink-0 text-fg/45 hover:text-destructive focus-visible:text-destructive"
+          icon="close"
+          iconSize={12}
+          onClick={() => onRemoveFromFavorites(bookmark)}
+          title={`Remove ${bookmark.title} from Favorites`}
+          variant="ghost"
+        />
+      )}
+    </div>
+  );
+}
+
+function markBookmarkNotFavorite(
+  snapshot: BookmarkSnapshot,
+  bookmarkId: string,
+): BookmarkSnapshot {
+  return {
+    ...snapshot,
+    bookmarks: snapshot.bookmarks.map((bookmark) =>
+      bookmark.id === bookmarkId
+        ? {
+            ...bookmark,
+            isFavorite: false,
+          }
+        : bookmark,
+    ),
+  };
+}
+
+function persistBookmarkSnapshot(snapshot: BookmarkSnapshot) {
+  void chrome.storage.local.set({ [BOOKMARK_SNAPSHOT_KEY]: snapshot });
+}
+
+function EmptyState({ children }: { children: string }) {
+  return (
+    <div className="rounded border border-border p-4 text-sm text-fg/50">
+      {children}
+    </div>
+  );
+}
+
+function BookmarkGroup({
+  category,
+  items,
+  proposedCategories,
+  onRemoveFromFavorites,
+}: {
+  category: string;
+  items: StoredBookmark[];
+  proposedCategories: Record<string, ProposedCategory>;
+  onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section className="min-w-0 rounded border border-border/60">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="truncate text-xs font-semibold uppercase tracking-wide text-fg/60">
+          {category}
+        </span>
+        <span className="text-[11px] text-fg/35">{items.length}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-1 border-t border-border/50 p-1.5">
+          {items.map((bookmark) => (
+            <BookmarkRow
+              key={bookmark.id}
+              bookmark={bookmark}
+              proposedCategory={proposedCategories[bookmark.id]}
+              onRemoveFromFavorites={onRemoveFromFavorites}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -95,6 +192,9 @@ export function BookmarksSection() {
   const [proposedCategories, setProposedCategories] = useState<
     Record<string, ProposedCategory>
   >({});
+  const [hiddenFavoriteIds, setHiddenFavoriteIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [categorizing, setCategorizing] = useState(false);
   const [categorizeError, setCategorizeError] = useState<string | null>(null);
 
@@ -115,27 +215,60 @@ export function BookmarksSection() {
   };
 
   useEffect(() => {
-    chrome.storage.local.get(BOOKMARK_SNAPSHOT_KEY).then((got) => {
-      const stored = got[BOOKMARK_SNAPSHOT_KEY] as BookmarkSnapshot | undefined;
-      if (stored?.bookmarks) setSnapshot(stored);
-      else syncBookmarks(false);
-    });
+    chrome.storage.local
+      .get([BOOKMARK_SNAPSHOT_KEY, BOOKMARK_HIDDEN_FAVORITES_KEY])
+      .then((got) => {
+        const stored = got[BOOKMARK_SNAPSHOT_KEY] as
+          | BookmarkSnapshot
+          | undefined;
+        setHiddenFavoriteIds(
+          new Set(sanitizeBookmarkIds(got[BOOKMARK_HIDDEN_FAVORITES_KEY])),
+        );
+        if (stored?.bookmarks) setSnapshot(stored);
+        else syncBookmarks(false);
+      });
 
     const onChange = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: string,
     ) => {
-      if (area !== "local" || !(BOOKMARK_SNAPSHOT_KEY in changes)) return;
-      const next = changes[BOOKMARK_SNAPSHOT_KEY].newValue as
-        | BookmarkSnapshot
-        | undefined;
-      if (next?.bookmarks) setSnapshot(next);
+      if (area !== "local") return;
+      if (BOOKMARK_SNAPSHOT_KEY in changes) {
+        const next = changes[BOOKMARK_SNAPSHOT_KEY].newValue as
+          | BookmarkSnapshot
+          | undefined;
+        if (next?.bookmarks) setSnapshot(next);
+      }
+      if (BOOKMARK_HIDDEN_FAVORITES_KEY in changes) {
+        setHiddenFavoriteIds(
+          new Set(
+            sanitizeBookmarkIds(
+              changes[BOOKMARK_HIDDEN_FAVORITES_KEY].newValue,
+            ),
+          ),
+        );
+      }
     };
     chrome.storage.onChanged.addListener(onChange);
     return () => chrome.storage.onChanged.removeListener(onChange);
   }, []);
 
   const bookmarks = snapshot?.bookmarks ?? [];
+
+  const removeFromFavorites = (bookmark: StoredBookmark) => {
+    const nextHidden = new Set(hiddenFavoriteIds);
+    nextHidden.add(bookmark.id);
+    setHiddenFavoriteIds(nextHidden);
+    void chrome.storage.local.set({
+      [BOOKMARK_HIDDEN_FAVORITES_KEY]: [...nextHidden],
+    });
+
+    if (snapshot) {
+      const nextSnapshot = markBookmarkNotFavorite(snapshot, bookmark.id);
+      setSnapshot(nextSnapshot);
+      persistBookmarkSnapshot(nextSnapshot);
+    }
+  };
 
   const runCategorize = async () => {
     setCategorizing(true);
@@ -183,10 +316,32 @@ export function BookmarksSection() {
   };
 
   const applyProposed = () => {
-    // Local-first: applying is purely a UX shift — the Worker side gets the
-    // categories on the next snapshot push (bookmarks.ts → /snapshot). We
-    // surface accepted categories by carrying them in BookmarkRow's
-    // displayed label so the user sees them under each row.
+    if (snapshot && Object.keys(proposedCategories).length > 0) {
+      const nextSnapshot: BookmarkSnapshot = {
+        ...snapshot,
+        bookmarks: snapshot.bookmarks.map((bookmark) => {
+          const proposed = proposedCategories[bookmark.id];
+          if (!proposed) return bookmark;
+          return {
+            ...bookmark,
+            category: proposed.category,
+            path: [proposed.category],
+            isFavorite: true,
+          };
+        }),
+      };
+      setSnapshot(nextSnapshot);
+      persistBookmarkSnapshot(nextSnapshot);
+      const acceptedIds = new Set(Object.keys(proposedCategories));
+      const nextHidden = [...hiddenFavoriteIds].filter(
+        (id) => !acceptedIds.has(id),
+      );
+      setHiddenFavoriteIds(new Set(nextHidden));
+      void chrome.storage.local.set({
+        [BOOKMARK_HIDDEN_FAVORITES_KEY]: nextHidden,
+      });
+      setView("favorites");
+    }
     setProposedCategories({});
   };
 
@@ -202,10 +357,14 @@ export function BookmarksSection() {
   const favorites = useMemo(
     () =>
       bookmarks
-        .filter((bookmark) => bookmark.isFavorite)
+        .filter(
+          (bookmark) =>
+            bookmark.isFavorite && !hiddenFavoriteIds.has(bookmark.id),
+        )
         .sort(compareBookmarks),
-    [bookmarks],
+    [bookmarks, hiddenFavoriteIds],
   );
+  const favoriteGroups = useMemo(() => groupByCategory(favorites), [favorites]);
   const categories = useMemo(() => groupByCategory(bookmarks), [bookmarks]);
   const pulledLabel = snapshot?.pulledAt
     ? new Date(snapshot.pulledAt).toLocaleString()
@@ -307,45 +466,33 @@ export function BookmarksSection() {
         )}
 
         {view === "favorites" && (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             {favorites.length > 0 ? (
-              favorites.map((bookmark) => (
-                <BookmarkRow
-                key={bookmark.id}
-                bookmark={bookmark}
-                proposedCategory={proposedCategories[bookmark.id]}
-              />
+              favoriteGroups.map((group) => (
+                <BookmarkGroup
+                  key={group.category}
+                  category={group.category}
+                  items={group.items}
+                  proposedCategories={proposedCategories}
+                  onRemoveFromFavorites={removeFromFavorites}
+                />
               ))
             ) : (
-              <div className="rounded border border-border p-4 text-sm text-fg/50">
-                No bookmarks stored from the bookmarks bar.
-              </div>
+              <EmptyState>No bookmarks stored in Favorites.</EmptyState>
             )}
           </div>
         )}
 
         {view === "categories" && (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
             {categories.map((group) => (
-              <section key={group.category} className="min-w-0">
-                <div className="mb-1 flex items-center justify-between gap-3 px-1">
-                  <h2 className="truncate text-xs font-semibold uppercase tracking-wide text-fg/45">
-                    {group.category}
-                  </h2>
-                  <span className="text-[11px] text-fg/35">
-                    {group.items.length}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  {group.items.map((bookmark) => (
-                    <BookmarkRow
-                key={bookmark.id}
-                bookmark={bookmark}
-                proposedCategory={proposedCategories[bookmark.id]}
+              <BookmarkGroup
+                key={group.category}
+                category={group.category}
+                items={group.items}
+                proposedCategories={proposedCategories}
+                onRemoveFromFavorites={removeFromFavorites}
               />
-                  ))}
-                </div>
-              </section>
             ))}
           </div>
         )}

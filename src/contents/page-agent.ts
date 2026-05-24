@@ -8,10 +8,12 @@ export const config: PlasmoCSConfig = {
 
 const TOKEN = Math.random().toString(36).slice(2, 10)
 const HOST_ID = `surface-${TOKEN}`
+const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
 
 type ChatEntry = { role: "user" | "assistant" | "status" | "error"; text: string }
 
 let sessionId: string | undefined
+let visible = true
 let open = false
 const entries: ChatEntry[] = []
 const CHAT_KEYBOARD_EVENTS = ["keydown", "keypress", "keyup"] as const
@@ -185,6 +187,7 @@ function mount() {
 
   const toggle = shadow.querySelector<HTMLButtonElement>(".toggle")!
   const panel = shadow.querySelector<HTMLElement>(".panel")!
+  const root = shadow.querySelector<HTMLElement>(".root")!
   const close = shadow.querySelector<HTMLButtonElement>(".close")!
   const form = shadow.querySelector<HTMLFormElement>("form")!
   const input = shadow.querySelector<HTMLTextAreaElement>("textarea")!
@@ -207,8 +210,9 @@ function mount() {
   }
 
   const render = () => {
+    root.style.display = visible ? "block" : "none"
     panel.dataset.open = open ? "true" : "false"
-    toggle.style.display = open ? "none" : "inline-grid"
+    toggle.style.display = visible && !open ? "inline-grid" : "none"
     log.replaceChildren(
       ...entries.map((entry) => {
         const node = document.createElement("div")
@@ -218,6 +222,15 @@ function mount() {
       })
     )
     log.scrollTop = log.scrollHeight
+  }
+
+  const setVisible = (nextVisible: boolean, persist = false) => {
+    visible = nextVisible
+    if (!visible) open = false
+    render()
+    if (persist) {
+      void chrome.storage?.local?.set?.({ [PAGE_AGENT_VISIBLE_KEY]: visible })
+    }
   }
 
   toggle.addEventListener("click", () => {
@@ -259,17 +272,27 @@ function mount() {
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "PAGE_AGENT_TOGGLE") return false
-    open = !open
-    if (open && entries.length === 0) {
+    const nextVisible =
+      typeof message.visible === "boolean" ? message.visible : !visible
+    setVisible(nextVisible, true)
+    if (visible && entries.length === 0) {
       entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+      render()
     }
-    render()
-    if (open) input.focus()
-    sendResponse({ ok: true, open })
+    sendResponse({ ok: true, visible, open })
     return false
   })
 
   render()
+  void chrome.storage?.local?.get?.(PAGE_AGENT_VISIBLE_KEY)?.then((result) => {
+    const stored = result?.[PAGE_AGENT_VISIBLE_KEY]
+    if (typeof stored === "boolean") setVisible(stored)
+  })
+  chrome.storage?.onChanged?.addListener?.((changes, area) => {
+    if (area !== "local" || !(PAGE_AGENT_VISIBLE_KEY in changes)) return
+    const nextVisible = changes[PAGE_AGENT_VISIBLE_KEY].newValue
+    if (typeof nextVisible === "boolean") setVisible(nextVisible)
+  })
 }
 
 function removeLastStatus() {
