@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import app from "../../src/index"
 import type { Env } from "../../src/env"
 import { makeEnv } from "../helpers"
@@ -46,10 +46,68 @@ describe("/api/agent", () => {
       body: JSON.stringify({ message: "click save", observation })
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { session: { id: string; nextStep: string }; reply: string; provider: string }
+    const body = (await res.json()) as { session: { id: string; nextStep: string; lastObservation: unknown }; reply: string; provider: string }
     expect(body.provider).toBe("worker-deterministic")
     expect(body.reply).toContain("Objective: click save")
-    expect(body.session.nextStep).toContain("observed")
+    expect(body.session.lastObservation).toBeNull()
+    expect(body.session.nextStep).toContain("collect more page context")
+  })
+
+  it("uses AI Gateway planning only after explicit cloud planning opt-in", async () => {
+    const aiRun = vi.fn(async () => ({
+      response: JSON.stringify({
+        status: "planning",
+        nextStep: "Click the Save button.",
+        stopCondition: "The draft is saved.",
+        reply: "Cloud plan: click Save."
+      })
+    }))
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation: { ...observation, visibleText: "private page text" },
+        cloudUse: { planning: true, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { session: { lastObservation: any }; reply: string; provider: string; cloudUse: unknown; model: string; gateway: string }
+    expect(body.provider).toBe("cloudflare-ai-gateway")
+    expect(body.reply).toBe("Cloud plan: click Save.")
+    expect(body.session.lastObservation.visibleText).toBe("private page text")
+    expect(body.cloudUse).toEqual({ planning: true, vision: false, ocr: false })
+    expect(aiRun).toHaveBeenCalledOnce()
+    expect(JSON.stringify(aiRun.mock.calls[0])).toContain("private page text")
+  })
+
+  it("does not call AI Gateway or store raw observation when cloud planning is disabled", async () => {
+    const aiRun = vi.fn(async () => {
+      throw new Error("AI Gateway should not be called")
+    })
+    env = makeEnv({ AI: { run: aiRun } as unknown as Ai })
+
+    const res = await authed(env, "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "click save",
+        observation: { ...observation, visibleText: "secret account content" },
+        cloudUse: { planning: false, vision: false, ocr: false }
+      })
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { session: { id: string; lastObservation: unknown }; provider: string }
+    expect(body.provider).toBe("worker-deterministic")
+    expect(body.session.lastObservation).toBeNull()
+    expect(aiRun).not.toHaveBeenCalled()
+
+    const get = await authed(env, `/api/agent/sessions/${body.session.id}`)
+    const sessionBody = (await get.json()) as { messages: Array<{ content: string; observation: unknown }> }
+    expect(JSON.stringify(sessionBody)).not.toContain("secret account content")
+    expect(sessionBody.messages[0]?.observation).toBeNull()
   })
 
   it("stores and searches session memory", async () => {

@@ -95,14 +95,16 @@ describe("sidebar-api client", () => {
     const out = await client.agent.chat({
       sessionId: "s1",
       message: "save",
-      observation: { title: "Example", nodes: [] }
+      observation: { title: "Example", nodes: [] },
+      cloudUse: { planning: true, vision: false, ocr: false }
     })
     expect(out.provider).toBe("worker-deterministic")
     expect(calls[0]!.url).toBe(`${BASE}/api/agent/chat`)
     expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
       sessionId: "s1",
       message: "save",
-      observation: { title: "Example" }
+      observation: { title: "Example" },
+      cloudUse: { planning: true }
     })
   })
 

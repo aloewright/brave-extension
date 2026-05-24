@@ -447,6 +447,24 @@ export function SettingsPanel({
                   checked={settings.sidebarPruneAfterSync}
                   onChange={(v) => onUpdate({ sidebarPruneAfterSync: v })}
                 />
+                <Toggle
+                  label="Cloud browser planning"
+                  description="Allow the page agent to send capped observations to sidebar-api / AI Gateway when local planning needs fallback"
+                  checked={settings.browserAgentCloudPlanningEnabled}
+                  onChange={(v) => onUpdate({ browserAgentCloudPlanningEnabled: v })}
+                />
+                <Toggle
+                  label="Cloud vision fallback"
+                  description="Allow future screenshot-based visual reasoning through AI Gateway. Screenshot bytes are not sent by default."
+                  checked={settings.browserAgentCloudVisionEnabled}
+                  onChange={(v) => onUpdate({ browserAgentCloudVisionEnabled: v })}
+                />
+                <Toggle
+                  label="Cloud OCR fallback"
+                  description="Allow future screenshot OCR through AI Gateway. Page text still stays local unless cloud planning is enabled."
+                  checked={settings.browserAgentCloudOcrEnabled}
+                  onChange={(v) => onUpdate({ browserAgentCloudOcrEnabled: v })}
+                />
                 <div className="flex items-center justify-between text-[9px] pt-1">
                   <div className="text-fg/40">
                     {sidebarSync.pending

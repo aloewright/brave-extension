@@ -110,6 +110,9 @@ export interface Settings {
   allowEvalJs: boolean
   allowExtensionUninstall: boolean
   cookiesAllowAll: boolean
+  browserAgentCloudPlanningEnabled: boolean
+  browserAgentCloudVisionEnabled: boolean
+  browserAgentCloudOcrEnabled: boolean
   braveSearchApiKey: string
   dopplerProject: string
   dopplerConfig: string
@@ -172,6 +175,9 @@ export const DEFAULT_SETTINGS: Settings = {
   allowEvalJs: false,
   allowExtensionUninstall: false,
   cookiesAllowAll: false,
+  browserAgentCloudPlanningEnabled: false,
+  browserAgentCloudVisionEnabled: false,
+  browserAgentCloudOcrEnabled: false,
   braveSearchApiKey: "",
   dopplerProject: "",
   dopplerConfig: "",

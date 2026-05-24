@@ -76,6 +76,11 @@ export interface BrowserAgentChatPayload {
   message: string
   objective?: string
   observation?: unknown
+  cloudUse?: {
+    planning?: boolean
+    vision?: boolean
+    ocr?: boolean
+  }
 }
 
 export class ApiError extends Error {
