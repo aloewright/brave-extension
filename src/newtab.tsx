@@ -12,6 +12,15 @@ import {
   type WorkspaceApp,
   type WorkspaceAppIcon,
 } from "./newtab-apps";
+import {
+  APP_ORDER_STORAGE_KEY,
+  CUSTOM_APPS_STORAGE_KEY,
+  HIDDEN_APPS_STORAGE_KEY,
+  applyStoredOrder,
+  sanitizeCustomApps,
+  sanitizeHiddenAppUrls,
+  visibleWorkspaceApps,
+} from "./lib/newtab-workspace-links";
 
 const TOP_APP_COUNT = 3;
 const FOCUS_APP_COUNT = 4;
@@ -403,10 +412,12 @@ function AppCard({
   app,
   size = "standard",
   drag,
+  onDelete,
 }: {
   app: WorkspaceApp;
   size?: "standard" | "small";
   drag: AppDrag;
+  onDelete: (app: WorkspaceApp) => void;
 }) {
   const classes = [
     "workspace-app-card",
@@ -418,10 +429,8 @@ function AppCard({
     .join(" ");
 
   return (
-    <a
+    <div
       className={classes}
-      href={app.url}
-      aria-label={app.name}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
@@ -441,13 +450,49 @@ function AppCard({
       }}
       style={{ "--workspace-app-accent": app.accent } as CSSProperties}
     >
-      <span className="workspace-app-card__mark" aria-hidden="true">
-        <AppIcon name={app.icon} />
-      </span>
-      <span className="workspace-app-card__body">
-        <span className="workspace-app-card__name">{app.name}</span>
-      </span>
-    </a>
+      <a
+        className="workspace-app-card__link"
+        href={app.url}
+        aria-label={app.name}
+        draggable={false}
+      >
+        <span className="workspace-app-card__mark" aria-hidden="true">
+          <AppIcon name={app.icon} />
+        </span>
+        <span className="workspace-app-card__body">
+          <span className="workspace-app-card__name">{app.name}</span>
+        </span>
+      </a>
+      <button
+        type="button"
+        className="workspace-app-card__delete"
+        aria-label={`Remove ${app.name}`}
+        title={`Remove ${app.name}`}
+        draggable={false}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDelete(app);
+        }}
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          focusable="false"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+          viewBox="0 0 24 24"
+        >
+          <path d="M4 7h16" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M6 7l1 14h10l1-14" />
+          <path d="M9 7V4h6v3" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -540,9 +585,6 @@ function BrowserPanel({
   );
 }
 
-const APP_ORDER_STORAGE_KEY = "newtab.appOrder";
-const CUSTOM_APPS_STORAGE_KEY = "newtab.customApps";
-
 function reorderApps(
   apps: WorkspaceApp[],
   from: number,
@@ -555,36 +597,6 @@ function reorderApps(
   return next;
 }
 
-function applyStoredOrder(
-  allApps: WorkspaceApp[],
-  stored: string[],
-): WorkspaceApp[] {
-  const remaining = new Map(allApps.map((app) => [app.url, app]));
-  const ordered: WorkspaceApp[] = [];
-  for (const url of stored) {
-    const app = remaining.get(url);
-    if (app) {
-      ordered.push(app);
-      remaining.delete(url);
-    }
-  }
-  for (const app of remaining.values()) ordered.push(app);
-  return ordered;
-}
-
-function sanitizeCustomApps(input: unknown): WorkspaceApp[] {
-  if (!Array.isArray(input)) return [];
-  return input.filter((entry): entry is WorkspaceApp => {
-    return (
-      !!entry &&
-      typeof entry === "object" &&
-      typeof (entry as WorkspaceApp).name === "string" &&
-      typeof (entry as WorkspaceApp).url === "string" &&
-      typeof (entry as WorkspaceApp).domain === "string"
-    );
-  });
-}
-
 function NewTabWorkspace() {
   const { tabs, history, clearHistory } = useBrowserShortcuts();
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
@@ -595,11 +607,22 @@ function NewTabWorkspace() {
     let live = true;
     try {
       chrome.storage.local.get(
-        [APP_ORDER_STORAGE_KEY, CUSTOM_APPS_STORAGE_KEY],
+        [
+          APP_ORDER_STORAGE_KEY,
+          CUSTOM_APPS_STORAGE_KEY,
+          HIDDEN_APPS_STORAGE_KEY,
+        ],
         (result) => {
           if (!live) return;
           const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
-          const combined = [...WORKSPACE_APPS, ...customs];
+          const hiddenUrls = sanitizeHiddenAppUrls(
+            result?.[HIDDEN_APPS_STORAGE_KEY],
+          );
+          const combined = visibleWorkspaceApps(
+            WORKSPACE_APPS,
+            customs,
+            hiddenUrls,
+          );
           const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
           if (Array.isArray(storedOrder) && storedOrder.length > 0) {
             setApps(
@@ -682,6 +705,42 @@ function NewTabWorkspace() {
     }
   };
 
+  const removeApp = (app: WorkspaceApp) => {
+    if (!window.confirm(`Remove ${app.name} from the new tab page?`)) return;
+
+    const nextApps = apps.filter((candidate) => candidate.url !== app.url);
+    setApps(nextApps);
+
+    try {
+      chrome.storage.local.get(
+        [CUSTOM_APPS_STORAGE_KEY, HIDDEN_APPS_STORAGE_KEY],
+        (result) => {
+          const customApps = sanitizeCustomApps(
+            result?.[CUSTOM_APPS_STORAGE_KEY],
+          ).filter((candidate) => candidate.url !== app.url);
+          const hiddenUrls = sanitizeHiddenAppUrls(
+            result?.[HIDDEN_APPS_STORAGE_KEY],
+          );
+          const isDefaultApp = WORKSPACE_APPS.some(
+            (candidate) => candidate.url === app.url,
+          );
+          const nextHiddenUrls =
+            isDefaultApp && !hiddenUrls.includes(app.url)
+              ? [...hiddenUrls, app.url]
+              : hiddenUrls;
+
+          chrome.storage.local.set({
+            [CUSTOM_APPS_STORAGE_KEY]: customApps,
+            [HIDDEN_APPS_STORAGE_KEY]: nextHiddenUrls,
+            [APP_ORDER_STORAGE_KEY]: nextApps.map((candidate) => candidate.url),
+          });
+        },
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
   const appGroups = useMemo(() => {
     const top = apps.slice(0, TOP_APP_COUNT);
     const focus = apps.slice(TOP_APP_COUNT, TOP_APP_COUNT + FOCUS_APP_COUNT);
@@ -720,9 +779,7 @@ function NewTabWorkspace() {
         <QuickLinks />
 
         <header className="newtab-workspace__header">
-          <span className="newtab-workspace__count">
-            {apps.length} links
-          </span>
+          <span className="newtab-workspace__count">{apps.length} links</span>
         </header>
 
         <section className="newtab-app-groups" aria-label="Workspace apps">
@@ -731,7 +788,12 @@ function NewTabWorkspace() {
             aria-label="Primary apps"
           >
             {appGroups.top.map((app, i) => (
-              <AppCard key={app.url} app={app} drag={makeDrag(i)} />
+              <AppCard
+                key={app.url}
+                app={app}
+                drag={makeDrag(i)}
+                onDelete={removeApp}
+              />
             ))}
           </div>
           <div
@@ -743,6 +805,7 @@ function NewTabWorkspace() {
                 key={app.url}
                 app={app}
                 drag={makeDrag(TOP_APP_COUNT + i)}
+                onDelete={removeApp}
               />
             ))}
           </div>
@@ -756,6 +819,7 @@ function NewTabWorkspace() {
                 app={app}
                 size="small"
                 drag={makeDrag(TOP_APP_COUNT + FOCUS_APP_COUNT + i)}
+                onDelete={removeApp}
               />
             ))}
             <button

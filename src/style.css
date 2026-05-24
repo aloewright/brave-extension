@@ -322,6 +322,7 @@ body {
 
 .workspace-app-card {
   --workspace-app-accent: rgb(var(--primary));
+  position: relative;
   min-height: 132px;
   border: 1px solid rgb(var(--border));
   border-radius: 8px;
@@ -354,7 +355,7 @@ body {
 }
 
 .workspace-app-card:hover,
-.workspace-app-card:focus-visible {
+.workspace-app-card:focus-within {
   border-color: var(--workspace-app-accent);
   background: rgb(var(--card) / 0.98);
   transform: translateY(-2px);
@@ -383,10 +384,19 @@ body {
   background: rgb(var(--card) / 0.6);
 }
 
-.workspace-app-card:focus-visible {
+.workspace-app-card:focus-within {
   box-shadow:
     0 0 0 3px rgb(var(--background)),
     0 0 0 5px var(--workspace-app-accent);
+}
+
+.workspace-app-card__link {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  outline: none;
 }
 
 .workspace-app-card__mark {
@@ -418,6 +428,10 @@ body {
   height: 18px;
 }
 
+.workspace-app-card--small .workspace-app-card__link {
+  gap: 12px;
+}
+
 .workspace-app-card__body {
   display: flex;
   flex-direction: column;
@@ -433,6 +447,46 @@ body {
 .workspace-app-card--small .workspace-app-card__name {
   font-size: 14px;
   line-height: 1.18;
+}
+
+.workspace-app-card__delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(var(--muted-foreground));
+  background: rgb(var(--background) / 0.82);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.workspace-app-card__delete svg {
+  width: 16px;
+  height: 16px;
+}
+
+.workspace-app-card:hover .workspace-app-card__delete,
+.workspace-app-card:focus-within .workspace-app-card__delete {
+  opacity: 1;
+}
+
+.workspace-app-card__delete:hover,
+.workspace-app-card__delete:focus-visible {
+  border-color: rgb(var(--destructive) / 0.58);
+  color: rgb(var(--destructive));
+  background: rgb(var(--destructive) / 0.12);
+  outline: none;
 }
 
 .newtab-panels {

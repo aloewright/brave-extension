@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { WORKSPACE_APPS } from "../src/newtab-apps";
+import {
+  HIDDEN_APPS_STORAGE_KEY,
+  sanitizeHiddenAppUrls,
+  visibleWorkspaceApps,
+} from "../src/lib/newtab-workspace-links";
 
 describe("new tab workspace apps", () => {
   it("keeps the requested apps in order with https links", () => {
@@ -132,5 +137,36 @@ describe("new tab workspace apps", () => {
     expect(styles).toContain(
       "grid-template-columns: repeat(2, minmax(0, 1fr));",
     );
+  });
+
+  it("lets workspace links be hidden without hiding custom links", () => {
+    const customLink = {
+      name: "Custom Cloudflare",
+      domain: "dash.cloudflare.com",
+      url: WORKSPACE_APPS[0].url,
+      icon: "link" as const,
+      accent: "#9ca3af",
+    };
+
+    expect(HIDDEN_APPS_STORAGE_KEY).toBe("newtab.hiddenApps");
+    expect(
+      sanitizeHiddenAppUrls([WORKSPACE_APPS[0].url, 42, WORKSPACE_APPS[0].url]),
+    ).toEqual([WORKSPACE_APPS[0].url]);
+    expect(
+      visibleWorkspaceApps(
+        WORKSPACE_APPS.slice(0, 2),
+        [customLink],
+        [WORKSPACE_APPS[0].url],
+      ),
+    ).toEqual([WORKSPACE_APPS[1], customLink]);
+  });
+
+  it("renders an icon remove control on each workspace card", () => {
+    const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
+    const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
+
+    expect(source).toContain("workspace-app-card__delete");
+    expect(source).toContain("aria-label={`Remove ${app.name}`}");
+    expect(styles).toContain(".workspace-app-card__delete");
   });
 });
