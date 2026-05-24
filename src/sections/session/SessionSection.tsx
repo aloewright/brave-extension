@@ -53,6 +53,10 @@ export function SessionSection() {
   )
   const totalFeedPages = Math.max(1, Math.ceil(info.feeds.length / FEEDS_PAGE_SIZE))
 
+  useEffect(() => {
+    setFeedPage((page) => Math.min(page, totalFeedPages - 1))
+  }, [totalFeedPages])
+
   return (
     <div className="h-full flex flex-col overflow-hidden" data-testid="session-section">
       <div className="flex border-b border-border px-2 gap-1">
