@@ -16,6 +16,7 @@ import { spawn } from "child_process"
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs"
 import { homedir } from "os"
 import { join, dirname } from "path"
+import { fileURLToPath } from "url"
 import { PTYManager } from "./pty-manager.mjs"
 import { MCPServer } from "./mcp-server.mjs"
 import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
@@ -61,6 +62,9 @@ mcp.start().catch((err) => {
 const SESSION_STATE_PATH =
   process.env.AI_DEV_SIDEBAR_SESSION_STATE_PATH ||
   join(homedir(), ".ai-dev-sidebar", "session-state.json")
+const FOUNDATION_MODELS_BRIDGE_PATH = fileURLToPath(
+  new URL("./foundation-models-bridge.swift", import.meta.url)
+)
 const hasSession = loadSessionState()
 
 function loadSessionState() {
@@ -371,6 +375,143 @@ function applyExecOverride(resolved, prompt) {
   }
 }
 
+function foundationModelsFallback(kind, requestId, payload = {}, error) {
+  const objective = String(payload.objective || payload.message || "").trim()
+  const nodes = Array.isArray(payload.observation?.nodes) ? payload.observation.nodes.length : 0
+  const fallback = {
+    objective,
+    status: "planning",
+    nextStep: nodes > 0
+      ? "Use the current browser observation to choose one safe action, then observe again."
+      : "Collect a browser observation before choosing an action.",
+    stopCondition: "Stop when the requested page state is reached or user consent/input is required."
+  }
+  return {
+    type: kind,
+    requestId,
+    ok: false,
+    available: false,
+    provider: "foundation-models",
+    error: error || "Apple Foundation Models are unavailable for this native host request.",
+    fallback,
+    reply: objective
+      ? [
+          `Objective: ${objective}`,
+          `Status: local Foundation Models unavailable; observed ${nodes} page node${nodes === 1 ? "" : "s"}.`,
+          `Next step: ${fallback.nextStep}`
+        ].join("\n")
+      : undefined
+  }
+}
+
+function runFoundationModelsBridge(payload, timeoutMs = 15_000) {
+  if (!existsSync(FOUNDATION_MODELS_BRIDGE_PATH)) {
+    return Promise.resolve({
+      ok: false,
+      available: false,
+      provider: "foundation-models",
+      error: "Foundation Models bridge script is missing."
+    })
+  }
+
+  return new Promise((resolve) => {
+    const proc = spawn("swift", [FOUNDATION_MODELS_BRIDGE_PATH], {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" }
+    })
+
+    let stdout = ""
+    let stderr = ""
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM")
+      finish({
+        ok: false,
+        available: false,
+        provider: "foundation-models",
+        error: "Foundation Models bridge timed out."
+      })
+    }, timeoutMs)
+
+    proc.stdout.on("data", (data) => { stdout += data.toString() })
+    proc.stderr.on("data", (data) => { stderr += data.toString() })
+    proc.on("error", (err) => {
+      finish({
+        ok: false,
+        available: false,
+        provider: "foundation-models",
+        error: err.message
+      })
+    })
+    proc.on("close", (code) => {
+      if (settled) return
+      try {
+        const parsed = JSON.parse(stdout.trim() || "{}")
+        finish({
+          ...parsed,
+          ok: parsed.ok === true,
+          available: parsed.available === true,
+          provider: parsed.provider || "foundation-models",
+          error: parsed.error || (code === 0 ? undefined : stderr.trim() || `bridge exited ${code}`)
+        })
+      } catch (err) {
+        finish({
+          ok: false,
+          available: false,
+          provider: "foundation-models",
+          error: stderr.trim() || err.message
+        })
+      }
+    })
+
+    proc.stdin.end(JSON.stringify(payload))
+  })
+}
+
+async function foundationModelsStatus(requestId) {
+  const result = await runFoundationModelsBridge({ operation: "status" }, 5_000)
+  return {
+    type: "foundationModels.status",
+    requestId,
+    ok: result.ok === true,
+    available: result.available === true,
+    provider: "foundation-models",
+    reason: result.reason || result.error,
+    contextSize: result.contextSize
+  }
+}
+
+async function foundationModelsRun(kind, msg) {
+  const operation = kind.replace("foundationModels.", "")
+  const result = await runFoundationModelsBridge({ ...msg, operation }, 15_000)
+  if (!result.ok || !result.available) {
+    return foundationModelsFallback(kind, msg.requestId, msg, result.error || result.reason)
+  }
+  return {
+    type: kind,
+    requestId: msg.requestId,
+    ok: true,
+    available: true,
+    provider: "foundation-models",
+    operation: result.operation || operation,
+    contextSize: result.contextSize,
+    tokenEstimate: result.tokenEstimate,
+    plan: result.plan,
+    action: result.action,
+    compactSummary: result.compactSummary,
+    status: result.status,
+    nextStep: result.nextStep,
+    reply: result.reply
+  }
+}
+
 function runCommand(backend, prompt, cwd) {
   const resolvedCwd = (cwd || "~").replace("~", homedir())
   const { cmd, args } = applyExecOverride(resolveBackendCommand(backend, prompt), prompt)
@@ -522,6 +663,18 @@ async function main() {
 
       case "ping": {
         sendMessage({ type: "pong", data: "" })
+        break
+      }
+
+      case "foundationModels.status": {
+        sendMessage(await foundationModelsStatus(msg.requestId))
+        break
+      }
+
+      case "foundationModels.plan":
+      case "foundationModels.compact":
+      case "foundationModels.nextAction": {
+        sendMessage(await foundationModelsRun(msg.type, msg))
         break
       }
 

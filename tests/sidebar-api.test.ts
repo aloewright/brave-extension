@@ -97,6 +97,33 @@ describe("sidebar-api client", () => {
     expect(headers.get("x-sidebar-token")).toBe("tok")
   })
 
+  it("agent.chat posts a compact browser observation", async () => {
+    const { calls } = mockFetch([
+      {
+        body: {
+          session: { id: "s1", objective: "save", status: "planning", nextStep: "observe", compactSummary: "", tokenEstimate: 1, memoryRefs: [], lastObservation: null, pendingConsent: null, createdAt: "now", updatedAt: "now" },
+          reply: "Plan",
+          plan: { objective: "save", status: "planning", nextStep: "observe", stopCondition: "done" },
+          provider: "worker-deterministic",
+          compacted: false
+        }
+      }
+    ])
+    const client = createSidebarApiClient("tok", BASE)
+    const out = await client.agent.chat({
+      sessionId: "s1",
+      message: "save",
+      observation: { title: "Example", nodes: [] }
+    })
+    expect(out.provider).toBe("worker-deterministic")
+    expect(calls[0]!.url).toBe(`${BASE}/api/agent/chat`)
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      sessionId: "s1",
+      message: "save",
+      observation: { title: "Example" }
+    })
+  })
+
   it("throws ApiError on non-2xx with the server's code/message", async () => {
     mockFetch([{ status: 401, body: { error: { code: "unauthorized", message: "bad token" } } }])
     const client = createSidebarApiClient("bad", BASE)

@@ -70,6 +70,27 @@ export interface RecordingUploadMetadata {
   origin_url?: string | null
 }
 
+export interface BrowserAgentSession {
+  id: string
+  objective: string
+  status: string
+  nextStep: string
+  compactSummary: string
+  tokenEstimate: number
+  memoryRefs: unknown[]
+  lastObservation: unknown
+  pendingConsent: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BrowserAgentChatPayload {
+  sessionId?: string
+  message: string
+  objective?: string
+  observation?: unknown
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message)
@@ -99,6 +120,23 @@ export interface SidebarApiClient {
       blob: Blob,
       metadata: RecordingUploadMetadata
     ) => Promise<{ id: string; status: string; r2_key: string; workflow_id: string | null }>
+  }
+  agent: {
+    chat: (payload: BrowserAgentChatPayload) => Promise<{
+      session: BrowserAgentSession
+      reply: string
+      plan: { objective: string; status: string; nextStep: string; stopCondition: string }
+      provider: string
+      compacted: boolean
+    }>
+    createSession: (payload: { sessionId?: string; objective?: string; observation?: unknown; compactSummary?: string }) => Promise<{ session: BrowserAgentSession }>
+    appendMessage: (
+      sessionId: string,
+      payload: { role: "user" | "assistant" | "tool" | "system" | "observation"; content: string; observation?: unknown }
+    ) => Promise<{ message: unknown; session: BrowserAgentSession; compactRecommended: boolean }>
+    compact: (sessionId: string) => Promise<{ session: BrowserAgentSession; compacted: boolean }>
+    remember: (sessionId: string, key: string, value: string) => Promise<{ memory: { id: string; key: string; value: string; createdAt: string } }>
+    searchMemory: (sessionId: string, query: string) => Promise<{ results: Array<{ id: string; key: string; value: string; createdAt: string }> }>
   }
 }
 
@@ -176,6 +214,36 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
           throw new ApiError(res.status, body?.error?.code ?? "http_error", body?.error?.message ?? `upload failed: ${res.status}`)
         }
         return (await res.json()) as { id: string; status: string; r2_key: string; workflow_id: string | null }
+      }
+    },
+    agent: {
+      chat: (payload) =>
+        jsonRequest("/api/agent/chat", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }),
+      createSession: (payload) =>
+        jsonRequest("/api/agent/sessions", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }),
+      appendMessage: (sessionId, payload) =>
+        jsonRequest(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }),
+      compact: (sessionId) =>
+        jsonRequest(`/api/agent/sessions/${encodeURIComponent(sessionId)}/compact`, {
+          method: "POST"
+        }),
+      remember: (sessionId, key, value) =>
+        jsonRequest(`/api/agent/sessions/${encodeURIComponent(sessionId)}/memory`, {
+          method: "POST",
+          body: JSON.stringify({ key, value })
+        }),
+      searchMemory: (sessionId, query) => {
+        const params = new URLSearchParams({ q: query })
+        return jsonRequest(`/api/agent/sessions/${encodeURIComponent(sessionId)}/memory/search?${params.toString()}`)
       }
     }
   }
