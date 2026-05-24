@@ -23,7 +23,7 @@ export async function retainOffscreenDocument(use: OffscreenUse): Promise<void> 
       createPromise = (chrome.offscreen as any)
         .createDocument({
           url: OFFSCREEN_URL,
-          reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "WORKERS"],
+          reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS"],
           justification:
             "Record media and keep terminal native messaging sessions connected while the sidebar is closed.",
         })

@@ -51,7 +51,8 @@ describe("terminal native-host keepalive", () => {
     expect(recorder).not.toContain("chrome.offscreen.closeDocument()");
     expect(manager).toContain("activeUses.size > 0");
     expect(manager).toContain("activeUses.delete(use)");
-    expect(manager).toContain('"USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "WORKERS"');
+    expect(manager).toContain('"USER_MEDIA", "DISPLAY_MEDIA", "BLOBS"');
+    expect(manager).not.toContain('"WORKERS"');
   });
 
   it("rolls back failed offscreen retain calls before later release checks", async () => {
