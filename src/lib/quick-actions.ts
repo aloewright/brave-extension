@@ -126,6 +126,7 @@ export async function runSaveLinkQuickAction(): Promise<QuickActionResult> {
  */
 export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
   const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+  if (!win?.id) return { kind: "error", message: "No active window" }
   const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
   if (!tab?.id) return { kind: "error", message: "No active tab" }
   try {
