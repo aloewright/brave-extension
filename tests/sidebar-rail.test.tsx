@@ -75,8 +75,22 @@ describe("Bottom quick-action group composition", () => {
     expect(source).toContain("setRunningAction(def.label)")
     expect(source).toContain("aria-busy={isRunning ? true : undefined}")
     expect(source).toContain("animate-spin")
-    expect(source).toContain('data-testid="sidebar-rail-feedback"')
+    expect(source).toContain('data-testid="sidebar-rail-toast"')
+    expect(source).toContain("max-w-[60px]")
     expect(source).toContain("showFeedback(def.label, await def.run())")
     expect(source).not.toContain("quick actions intentionally do not render rail feedback")
+  })
+
+  it("keeps animated hover and active feedback on bottom rail buttons", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+
+    expect(source).toContain("transition-all duration-150 ease-out")
+    expect(source).toContain("hover:-translate-y-0.5")
+    expect(source).toContain("hover:scale-110")
+    expect(source).toContain("active:scale-95")
+    expect(source).toContain("disabled:cursor-wait")
   })
 })

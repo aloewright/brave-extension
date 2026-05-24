@@ -123,7 +123,8 @@ export function SidebarRail({ active, onChange }: Props) {
               title={def.label}
               aria-label={def.label}
               aria-busy={isRunning ? true : undefined}
-              className={`p-2 rounded transition-colors hover:bg-[${NORD_BLUE}]/15`}
+              disabled={runningAction !== null}
+              className="grid h-8 w-8 place-items-center rounded transition-all duration-150 ease-out hover:-translate-y-0.5 hover:scale-110 hover:bg-[rgba(136,192,208,0.15)] hover:shadow-[0_0_0_1px_rgba(136,192,208,0.22)] active:translate-y-0 active:scale-95 disabled:cursor-wait disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:scale-100"
               style={{
                 color: NORD_BLUE,
                 backgroundColor: isRunning ? "rgba(136, 192, 208, 0.16)" : undefined
@@ -143,12 +144,13 @@ export function SidebarRail({ active, onChange }: Props) {
         {feedback && (
           <div
             role={feedback.kind === "error" ? "alert" : "status"}
-            data-testid="sidebar-rail-feedback"
+            aria-live="polite"
+            data-testid="sidebar-rail-toast"
             data-kind={feedback.kind}
-            className={`absolute bottom-2 left-full z-50 ml-2 w-56 rounded-md border px-2.5 py-2 text-xs leading-snug shadow-lg ${
+            className={`max-w-[60px] animate-fade-in break-words px-1 text-center text-[8px] leading-tight ${
               feedback.kind === "error"
-                ? "border-red-400/40 bg-red-950 text-red-100"
-                : "border-border bg-bg text-fg"
+                ? "text-red-300"
+                : "text-fg/70"
             }`}
           >
             {feedback.message}
