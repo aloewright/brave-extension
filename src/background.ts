@@ -64,10 +64,13 @@ const HOST_NAME = "com.aidev.sidebar";
 const HEARTBEAT_ALARM = "native-heartbeat";
 const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
+const RSS_FEED_MENU_ID = "save-rss-feed";
+const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
 const pendingNativeRequests = new Map<string, (msg: any) => void>();
+const rssFeedContextMenuCache = new Map<number, FeedInfo[]>();
 
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(
@@ -1085,36 +1088,6 @@ async function getFeedsForTab(tabId: number): Promise<FeedInfo[]> {
   });
 }
 
-async function chooseFeedForTab(
-  tabId: number,
-  feeds: FeedInfo[],
-): Promise<FeedInfo | null> {
-  if (feeds.length === 0) return null;
-  if (feeds.length === 1) return feeds[0] ?? null;
-  try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId },
-      args: [feeds],
-      func: (detectedFeeds: FeedInfo[]) => {
-        const list = detectedFeeds
-          .map((feed, index) => `${index + 1}. ${feed.title || feed.url}`)
-          .join("\n");
-        const choice = window.prompt(
-          `Choose an RSS feed to save:\n\n${list}`,
-          "1",
-        );
-        const parsed = Number.parseInt(choice || "", 10);
-        if (!Number.isFinite(parsed)) return null;
-        return parsed - 1;
-      },
-    });
-    const index = typeof result?.result === "number" ? result.result : -1;
-    return feeds[index] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function getAutofillMatches(pageUrl: string): Promise<PasswordLogin[]> {
   if (!/^https?:\/\//i.test(pageUrl)) return [];
   const matches = await getMatchingPasswordLogins(pageUrl);
@@ -1128,6 +1101,47 @@ async function getAutofillMatches(pageUrl: string): Promise<PasswordLogin[]> {
 
 function withoutPassword(login: PasswordLogin): PasswordLogin {
   return { ...login, password: "" };
+}
+
+async function rebuildRssFeedContextMenu(tabId: number) {
+  const feeds = await getFeedsForTab(tabId);
+  rssFeedContextMenuCache.set(tabId, feeds);
+  await removeRssFeedContextMenuItems();
+  if (feeds.length === 0) {
+    chrome.contextMenus.create({
+      id: `${RSS_FEED_MENU_PREFIX}none`,
+      parentId: RSS_FEED_MENU_ID,
+      title: "No RSS feeds found",
+      contexts: ["page"],
+      enabled: false,
+    });
+  } else {
+    feeds.slice(0, 20).forEach((feed, index) => {
+      chrome.contextMenus.create({
+        id: `${RSS_FEED_MENU_PREFIX}${index}`,
+        parentId: RSS_FEED_MENU_ID,
+        title: feed.title || feed.url,
+        contexts: ["page"],
+      });
+    });
+  }
+  (chrome.contextMenus as any).refresh?.();
+}
+
+async function removeRssFeedContextMenuItems() {
+  await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      removeContextMenuItem(`${RSS_FEED_MENU_PREFIX}${index}`),
+    ).concat(removeContextMenuItem(`${RSS_FEED_MENU_PREFIX}none`)),
+  );
+}
+
+async function removeContextMenuItem(id: string) {
+  try {
+    await chrome.contextMenus.remove(id);
+  } catch {
+    // Dynamic RSS child menu items may not exist yet.
+  }
 }
 
 // Console error tracking per tab
@@ -1406,13 +1420,18 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
-      id: "save-rss-feed",
+      id: RSS_FEED_MENU_ID,
       title: "Save RSS feed...",
       contexts: ["page"],
     });
   } catch (err) {
     safeRuntimeWarning("failed to create context menus", err);
   }
+});
+
+(chrome.contextMenus as any).onShown?.addListener((info: { contexts?: string[] }, tab?: chrome.tabs.Tab) => {
+  if (!info.contexts?.includes("page") || typeof tab?.id !== "number") return;
+  void rebuildRssFeedContextMenu(tab.id);
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -1461,10 +1480,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
-  if (info.menuItemId === "save-rss-feed") {
+  if (typeof info.menuItemId === "string" && info.menuItemId.startsWith(RSS_FEED_MENU_PREFIX)) {
     try {
-      const feeds = await getFeedsForTab(tab.id);
-      const selectedFeed = await chooseFeedForTab(tab.id, feeds);
+      const feedIndex = Number.parseInt(
+        info.menuItemId.slice(RSS_FEED_MENU_PREFIX.length),
+        10,
+      );
+      const selectedFeed = rssFeedContextMenuCache.get(tab.id)?.[feedIndex];
       if (!selectedFeed) return;
       await saveLinkToLibrary(selectedFeed.url, selectedFeed.title, [
         "feed",

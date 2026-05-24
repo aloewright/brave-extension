@@ -208,26 +208,10 @@ export function RecorderSection() {
 }
 
 async function openRecordingPreview(recording: RecordingMetadata) {
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(recording.filename)}</title><style>body{margin:0;background:#111;color:#f6f6f6;font:13px system-ui;padding:24px}main{max-width:720px;margin:auto}.thumb{height:220px;border:1px solid #333;border-radius:8px;display:grid;place-items:center;color:#aaa;margin-bottom:16px}code{word-break:break-all}</style></head><body><main><div class="thumb">Video saved to Downloads</div><h1>${escapeHtml(recording.filename)}</h1><p>${escapeHtml(recording.source)} · ${formatDuration(recording.durationMs)} · ${formatBytes(recording.sizeBytes)}</p>${recording.originUrl ? `<p><code>${escapeHtml(recording.originUrl)}</code></p>` : ""}</main></body></html>`
-  const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+  const url = chrome.runtime.getURL(
+    `media-preview.html?id=${encodeURIComponent(recording.id)}`
+  )
   await openPopupWindow(url, 760, 560)
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;"
-      case "<":
-        return "&lt;"
-      case ">":
-        return "&gt;"
-      case '"':
-        return "&quot;"
-      default:
-        return "&#39;"
-    }
-  })
 }
 
 function elapsedRecordingMs(state: RecState, now: number): number {

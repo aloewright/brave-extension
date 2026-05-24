@@ -55,16 +55,6 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("change", { bubbles: true }))
 }
 
-function findSubmitButton(passwordInput: HTMLInputElement) {
-  const form = passwordInput.form
-  const selector =
-    'button[type="submit"], input[type="submit"], button:not([type])'
-  return (
-    form?.querySelector<HTMLElement>(selector) ??
-    document.querySelector<HTMLElement>(selector)
-  )
-}
-
 async function attemptAutofill() {
   if (attempted || !/^https?:$/i.test(location.protocol)) return
   attempted = true
@@ -77,7 +67,6 @@ async function attemptAutofill() {
   const usernameInput = findUsernameInput()
   if (usernameInput) setInputValue(usernameInput, login.username)
   setInputValue(passwordInput, login.password)
-  findSubmitButton(passwordInput)?.click()
 }
 
 void attemptAutofill()

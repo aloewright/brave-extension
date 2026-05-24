@@ -28,7 +28,7 @@ describe("context menu shipping changes", () => {
     expect(source).not.toContain('id: "send-selection"')
     expect(source).not.toContain("Send selection to Brave Dev")
     expect(source).toContain('title: "Save snippet"')
-    expect(source).toContain('id: "save-rss-feed"')
+    expect(source).toContain('const RSS_FEED_MENU_ID = "save-rss-feed"')
     expect(source).toContain('title: "Save RSS feed..."')
   })
 })

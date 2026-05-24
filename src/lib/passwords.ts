@@ -87,10 +87,7 @@ export async function setDisposableAliases(aliases: DisposableAlias[]): Promise<
 }
 
 export function generateDisposableAlias(): string {
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID().split("-")[0]
-      : Math.random().toString(36).slice(2, 10)
+  const id = crypto.randomUUID().split("-")[0]
   return `inbox-${id}@fly.pm`
 }
 
