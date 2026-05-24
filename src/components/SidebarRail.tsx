@@ -9,6 +9,7 @@ import {
   runSaveLinkQuickAction,
   runScreenshotQuickAction
 } from "../lib/quick-actions"
+import { openResizableSidebarWindow } from "../lib/sidebar-window"
 
 interface Props {
   active: SectionId
@@ -46,7 +47,15 @@ const QUICK_ACTIONS: QuickActionDef[] = [
   { label: "Screenshot visible area", icon: "screenshot", run: runScreenshotQuickAction },
   { label: "Picture-in-picture", icon: "picture-in-picture", run: runPipQuickAction },
   { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction },
-  { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction }
+  { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction },
+  {
+    label: "Open resizable sidebar window",
+    icon: "file-export",
+    run: async () => {
+      await openResizableSidebarWindow()
+      return { kind: "success", message: "Opened resizable sidebar window" }
+    }
+  }
 ]
 
 export function SidebarRail({ active, onChange }: Props) {
@@ -115,19 +124,37 @@ export function SidebarRail({ active, onChange }: Props) {
       >
         {QUICK_ACTIONS.map((def) => {
           const isRunning = runningAction === def.label
+          const currentFeedback = feedback?.label === def.label ? feedback : null
+          const iconName =
+            currentFeedback?.kind === "error"
+              ? "warning-triangle-outline"
+              : currentFeedback
+                ? "check-normal"
+                : def.icon
+          const iconColor =
+            currentFeedback?.kind === "error"
+              ? "rgb(var(--error))"
+              : currentFeedback
+                ? "rgb(var(--success))"
+                : NORD_BLUE
           return (
             <button
               key={def.label}
               type="button"
               onClick={() => handleQuickAction(def)}
-              title={def.label}
-              aria-label={def.label}
+              title={currentFeedback ? `${def.label}: ${currentFeedback.message}` : def.label}
+              aria-label={currentFeedback ? `${def.label}: ${currentFeedback.message}` : def.label}
               aria-busy={isRunning ? true : undefined}
               disabled={runningAction !== null}
-              className="grid h-8 w-8 place-items-center rounded transition-colors duration-150 hover:bg-[rgba(136,192,208,0.15)] active:bg-[rgba(136,192,208,0.22)] disabled:cursor-wait disabled:opacity-60"
+              data-feedback-kind={currentFeedback?.kind}
+              className="grid h-8 w-8 place-items-center overflow-hidden rounded transition-colors duration-150 hover:bg-[rgba(136,192,208,0.15)] active:bg-[rgba(136,192,208,0.22)] disabled:cursor-wait disabled:opacity-60"
               style={{
-                color: NORD_BLUE,
-                backgroundColor: isRunning ? "rgba(136, 192, 208, 0.16)" : undefined
+                color: iconColor,
+                backgroundColor: isRunning
+                  ? "rgba(136, 192, 208, 0.16)"
+                  : currentFeedback
+                    ? "rgba(136, 192, 208, 0.08)"
+                    : undefined
               }}
             >
               {isRunning ? (
@@ -136,31 +163,18 @@ export function SidebarRail({ active, onChange }: Props) {
                   className="block h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin"
                 />
               ) : (
-                <LeoIcon name={def.icon} size={16} />
+                <LeoIcon
+                  name={iconName}
+                  size={currentFeedback ? 12 : 16}
+                  className={currentFeedback ? "animate-fade-in" : undefined}
+                />
               )}
             </button>
           )
         })}
-        {feedback && (
-          <div
-            role={feedback.kind === "error" ? "alert" : "status"}
-            aria-live="polite"
-            aria-label={feedback.message}
-            title={feedback.message}
-            data-testid="sidebar-rail-feedback"
-            data-kind={feedback.kind}
-            className={`pointer-events-none absolute bottom-3 left-full z-50 ml-2 grid h-7 w-7 place-items-center rounded-full shadow-lg ring-1 ring-white/20 animate-fade-in ${
-              feedback.kind === "error"
-                ? "bg-error text-bg"
-                : "bg-success text-bg"
-            }`}
-          >
-            <LeoIcon
-              name={feedback.kind === "error" ? "warning-triangle-outline" : "check-normal"}
-              size={14}
-            />
-          </div>
-        )}
+        <span className="sr-only" aria-live="polite">
+          {feedback ? `${feedback.label}: ${feedback.message}` : ""}
+        </span>
       </div>
     </nav>
   )

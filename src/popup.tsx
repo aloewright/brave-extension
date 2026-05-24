@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import "./style.css"
 import { companyNameForDomain } from "./lib/company-names"
+import { openResizableSidebarWindow } from "./lib/sidebar-window"
 
 interface RecordingState {
   active: boolean
@@ -84,6 +85,11 @@ function Popup() {
     if (tab?.windowId) {
       chrome.sidePanel.open({ windowId: tab.windowId })
     }
+    window.close()
+  }
+
+  const openWideSidebar = async () => {
+    await openResizableSidebarWindow()
     window.close()
   }
 
@@ -236,6 +242,12 @@ function Popup() {
         className="w-full text-xs py-2 px-4 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors mb-2"
       >
         Open Sidebar
+      </button>
+      <button
+        onClick={openWideSidebar}
+        className="w-full text-xs py-2 px-4 rounded bg-secondary/40 text-fg/70 hover:bg-secondary/60 transition-colors mb-2"
+      >
+        Open Resizable Window
       </button>
       <button
         onClick={startRecording}

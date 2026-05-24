@@ -75,10 +75,11 @@ describe("Bottom quick-action group composition", () => {
     expect(source).toContain("setRunningAction(def.label)")
     expect(source).toContain("aria-busy={isRunning ? true : undefined}")
     expect(source).toContain("animate-spin")
-    expect(source).toContain('data-testid="sidebar-rail-feedback"')
-    expect(source).toContain("left-full")
     expect(source).toContain("setTimeout(() => setFeedback(null), 1400)")
-    expect(source).toContain('name={feedback.kind === "error" ? "warning-triangle-outline" : "check-normal"}')
+    expect(source).toContain("feedback?.label === def.label")
+    expect(source).toContain('data-feedback-kind={currentFeedback?.kind}')
+    expect(source).toContain('size={currentFeedback ? 12 : 16}')
+    expect(source).toContain('name={iconName}')
     expect(source).toContain("showFeedback(def.label, await def.run())")
     expect(source).not.toContain("quick actions intentionally do not render rail feedback")
   })
@@ -90,11 +91,25 @@ describe("Bottom quick-action group composition", () => {
     )
 
     expect(source).toContain("transition-colors duration-150")
+    expect(source).toContain("h-8 w-8")
+    expect(source).toContain("overflow-hidden")
     expect(source).toContain("active:bg-[rgba(136,192,208,0.22)]")
     expect(source).toContain("disabled:cursor-wait")
+    expect(source).not.toContain("left-full")
     expect(source).not.toContain("hover:-translate-y")
     expect(source).not.toContain("hover:scale")
     expect(source).not.toContain("active:scale")
     expect(source).not.toContain('data-testid="sidebar-rail-toast"')
+  })
+
+  it("exposes a resizable sidebar window action", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+
+    expect(source).toContain("openResizableSidebarWindow")
+    expect(source).toContain('label: "Open resizable sidebar window"')
+    expect(source).toContain('icon: "file-export"')
   })
 })

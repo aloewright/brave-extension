@@ -37,6 +37,7 @@ import {
   releaseOffscreenDocument,
   retainOffscreenDocument,
 } from "./background/offscreen";
+import { normalizeConsoleEntries } from "./lib/console-errors";
 import {
   requestConsent,
   handleConsentResponse,
@@ -87,15 +88,26 @@ chrome.runtime.onConnectExternal?.addListener((port) => {
   port.disconnect();
 });
 
-// PTY sessions currently live in the native host. Tracked here so the
-// heartbeat keeps the host alive (and therefore the user's shells / dev
-// servers) even when no sidebar port is connected — e.g. between the
-// instant the sidepanel disconnects and the next time it reconnects. We
-// observe the host's pty.* messages on their way through to update this set.
+// PTY sessions currently live in the native host. The keepalive is anchored to
+// normal browser windows, not the sidepanel UI, so closing the sidebar does not
+// tear down shells / dev servers that are still running in the host process.
+// The PTY set is retained as a fallback signal when the windows API is late or
+// unavailable, and as lifecycle evidence for clearing stale sessions after a
+// native-host disconnect.
 const activePtySessions = new Set<string>();
+const normalBrowserWindowIds = new Set<number>();
 const TERMINAL_KEEPALIVE_START = "TERMINAL_KEEPALIVE_START";
 const TERMINAL_KEEPALIVE_STOP = "TERMINAL_KEEPALIVE_STOP";
 let terminalKeepAliveActive = false;
+let normalWindowSyncPromise: Promise<void> | null = null;
+let normalWindowTrackingReady = false;
+
+function shouldKeepNativeHostAlive() {
+  return (
+    normalBrowserWindowIds.size > 0 ||
+    (!normalWindowTrackingReady && activePtySessions.size > 0)
+  );
+}
 
 async function postTerminalKeepAliveCommand(type: string) {
   try {
@@ -120,21 +132,63 @@ async function startTerminalKeepAlive() {
 }
 
 async function stopTerminalKeepAlive() {
-  if (!terminalKeepAliveActive) return;
+  if (!terminalKeepAliveActive || shouldKeepNativeHostAlive()) return;
   terminalKeepAliveActive = false;
   await postTerminalKeepAliveCommand(TERMINAL_KEEPALIVE_STOP);
   await releaseOffscreenDocument("terminal-keepalive");
 }
 
+function pingNativeHost() {
+  const port = nativePort ?? connectNativeHost();
+  if (!port) return;
+  try {
+    port.postMessage({ type: "ping" });
+  } catch {
+    // postMessage on a torn-down port throws; the disconnect handler reconnects.
+  }
+}
+
+function reconcileTerminalKeepAlive() {
+  if (shouldKeepNativeHostAlive()) {
+    void startTerminalKeepAlive();
+    pingNativeHost();
+    return;
+  }
+  void stopTerminalKeepAlive();
+}
+
+async function syncNormalBrowserWindows() {
+  if (normalWindowSyncPromise) return normalWindowSyncPromise;
+  normalWindowSyncPromise = (async () => {
+    const windowsApi = chrome.windows;
+    if (!windowsApi?.getAll) return;
+    try {
+      const windows = await windowsApi.getAll({ windowTypes: ["normal"] });
+      normalBrowserWindowIds.clear();
+      for (const win of windows) {
+        if (win.type === "normal" && typeof win.id === "number") {
+          normalBrowserWindowIds.add(win.id);
+        }
+      }
+      normalWindowTrackingReady = true;
+      reconcileTerminalKeepAlive();
+    } catch (err) {
+      safeRuntimeWarning("failed to sync browser windows for terminal keepalive", err);
+    }
+  })().finally(() => {
+    normalWindowSyncPromise = null;
+  });
+  return normalWindowSyncPromise;
+}
+
 function trackActivePtySession(sessionId: string) {
-  const before = activePtySessions.size;
   activePtySessions.add(sessionId);
-  if (before === 0) void startTerminalKeepAlive();
+  reconcileTerminalKeepAlive();
 }
 
 function untrackActivePtySession(sessionId: string) {
   activePtySessions.delete(sessionId);
-  if (activePtySessions.size === 0) void stopTerminalKeepAlive();
+  reconcileTerminalKeepAlive();
 }
 
 function connectNativeHost() {
@@ -185,19 +239,19 @@ function connectNativeHost() {
       console.warn("Native host disconnected:", err);
       nativePort = null;
       // PTYs only live inside the host process, so a host disconnect means
-      // they're gone. Drop the tracking set so we don't keep the heartbeat
-      // hot for sessions that no longer exist.
+      // they're gone. Drop the tracking set, but keep the window-scoped
+      // keepalive active if a normal browser window is still open.
       activePtySessions.clear();
-      void stopTerminalKeepAlive();
+      reconcileTerminalKeepAlive();
 
       // Silent auto-reconnect for transient drops (typical: SW recycled,
       // host process EOF'd, then we wake on the next message). The host
       // re-loads persisted hasSession so the CLI conversation continues.
       // Only surface the failure to the sidebar if reconnects are flapping
       // (multiple disconnects within 5s = real problem, not a recycle).
-      if (sidebarPorts.size === 0) return;
+      if (sidebarPorts.size === 0 && !shouldKeepNativeHostAlive()) return;
       const reconnected = connectNativeHost();
-      if (reconnected && sinceLast > 5000) return;
+      if (reconnected && (sinceLast > 5000 || sidebarPorts.size === 0)) return;
 
       for (const [, port] of sidebarPorts) {
         port.postMessage({ type: "native-disconnected", error: err });
@@ -220,22 +274,14 @@ if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
     chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 });
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name !== HEARTBEAT_ALARM) return;
-      // Keep the host alive whenever a sidebar is connected OR there are
-      // PTY sessions still running. The latter case matters for transient
-      // gaps (e.g. when the user closes/reopens the sidepanel quickly): we
-      // don't want a 30-second window where the host idles out and kills the
-      // user's `npm run dev`.
-      //
-      if (sidebarPorts.size === 0 && activePtySessions.size === 0) return;
-      if (activePtySessions.size > 0) void startTerminalKeepAlive();
-      const port = nativePort ?? connectNativeHost();
-      if (!port) return;
-      try {
-        port.postMessage({ type: "ping" });
-      } catch {
-        // postMessage on a torn-down port throws — let the next disconnect
-        // handler reconnect it.
-      }
+      // Keep the host alive whenever a sidebar is connected or any normal
+      // browser window is open. The latter is independent of the sidepanel
+      // React lifecycle, so closing the sidebar does not let the native-host
+      // PTY process idle out.
+      if (!shouldKeepNativeHostAlive()) void syncNormalBrowserWindows();
+      if (sidebarPorts.size === 0 && !shouldKeepNativeHostAlive()) return;
+      if (shouldKeepNativeHostAlive()) void startTerminalKeepAlive();
+      pingNativeHost();
     });
   } catch (err) {
     safeRuntimeWarning("failed to initialize heartbeat alarm", err);
@@ -312,13 +358,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
     port.onMessage.addListener((msg: any) => {
       if (msg?.type !== "terminal-keepalive-ping") return;
-      if (activePtySessions.size === 0) return;
-      const native = nativePort ?? connectNativeHost();
-      try {
-        native?.postMessage({ type: "ping" });
-      } catch {
-        // The native disconnect handler will rebuild the port if possible.
+      if (!shouldKeepNativeHostAlive()) {
+        void syncNormalBrowserWindows();
+        return;
       }
+      pingNativeHost();
     });
 
     port.onDisconnect.addListener(() => {
@@ -342,6 +386,25 @@ chrome.runtime.onConnect.addListener((port) => {
       if (sidebarPorts.size === 0) openSidePanelWindows.clear();
     });
   }
+});
+
+void syncNormalBrowserWindows();
+
+chrome.windows?.onCreated?.addListener?.((win) => {
+  if (win.type !== "normal" || typeof win.id !== "number") return;
+  normalWindowTrackingReady = true;
+  normalBrowserWindowIds.add(win.id);
+  reconcileTerminalKeepAlive();
+});
+
+chrome.windows?.onRemoved?.addListener?.((windowId) => {
+  normalWindowTrackingReady = true;
+  normalBrowserWindowIds.delete(windowId);
+  if (normalBrowserWindowIds.size === 0) {
+    void syncNormalBrowserWindows();
+    return;
+  }
+  reconcileTerminalKeepAlive();
 });
 
 // Handle messages from content scripts and popup
@@ -417,16 +480,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GET_CONSOLE_ERRORS") {
-    sendResponse({ errors: consoleErrors.get(message.tabId) || [] });
+    const tabId = message.tabId;
+    const errors = normalizeConsoleEntries(consoleErrors.get(tabId));
+    consoleErrors.set(tabId, errors);
+    sendResponse({ errors });
   }
 
   if (message.type === "PAGE_ERRORS") {
-    // Content script reports console errors
-    const existing = consoleErrors.get(sender.tab?.id || 0) || [];
-    consoleErrors.set(
-      sender.tab?.id || 0,
-      [...existing, ...message.errors].slice(-100),
-    );
+    const tabId = sender.tab?.id;
+    const next = normalizeConsoleEntries(message.errors);
+    if (next.length === 0 || typeof tabId !== "number") {
+      sendResponse({ ok: true });
+      return;
+    }
+
+    const existing = normalizeConsoleEntries(consoleErrors.get(tabId));
+    consoleErrors.set(tabId, [...existing, ...next].slice(-100));
     sendResponse({ ok: true });
   }
 
@@ -1164,11 +1233,15 @@ function clearActionPopup() {
 }
 
 clearActionPopup();
-chrome.runtime.onStartup.addListener(clearActionPopup);
+chrome.runtime.onStartup.addListener(() => {
+  clearActionPopup();
+  void syncNormalBrowserWindows();
+});
 
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
   clearActionPopup();
+  void syncNormalBrowserWindows();
   void ensureThirdPartyCookieRules().catch((err) => {
     safeRuntimeWarning("failed to refresh third-party cookie rules", err);
   });

@@ -6,7 +6,7 @@ const source = (path: string) =>
   readFileSync(join(process.cwd(), path), "utf8");
 
 describe("terminal native-host keepalive", () => {
-  it("retains the offscreen document while PTY sessions are active", () => {
+  it("retains the offscreen document for normal browser window lifetime", () => {
     const background = source("src/background.ts");
 
     expect(background).toContain("retainOffscreenDocument");
@@ -14,9 +14,21 @@ describe("terminal native-host keepalive", () => {
     expect(background).toContain('retainOffscreenDocument("terminal-keepalive")');
     expect(background).toContain('releaseOffscreenDocument("terminal-keepalive")');
     expect(background).toContain('port.name === "terminal-keepalive"');
-    expect(background).toContain("activePtySessions.size > 0");
+    expect(background).toContain("normalBrowserWindowIds");
+    expect(background).toContain('chrome.windows?.onCreated?.addListener');
+    expect(background).toContain('chrome.windows?.onRemoved?.addListener');
+    expect(background).toContain('windowTypes: ["normal"]');
     expect(background).toContain("startTerminalKeepAlive");
     expect(background).toContain("stopTerminalKeepAlive");
+  });
+
+  it("does not gate offscreen pings on a mounted sidebar or active PTY count", () => {
+    const background = source("src/background.ts");
+
+    expect(background).toContain("shouldKeepNativeHostAlive");
+    expect(background).toContain("pingNativeHost");
+    expect(background).not.toContain("if (activePtySessions.size === 0) return;");
+    expect(background).not.toContain("if (sidebarPorts.size === 0) return;");
   });
 
   it("keeps a runtime port from the offscreen document to the service worker", () => {
