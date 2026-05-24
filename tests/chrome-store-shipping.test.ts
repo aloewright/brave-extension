@@ -6,7 +6,9 @@ import {
   NODEWARDEN_DEFAULT_URL,
   addPasswordLogin,
   getMatchingPasswordLogins,
+  getNodewardenServerUrl,
   getPasswordLogins,
+  PASSWORD_NODEWARDEN_URL_KEY,
   normalizeServerUrl,
   updatePasswordLogin
 } from "../src/lib/passwords"
@@ -105,6 +107,22 @@ describe("passwords and Nodewarden", () => {
     expect(normalizeServerUrl("https://passwords.lazee.workers.dev/vault?x=1#y")).toBe(
       "https://passwords.lazee.workers.dev/vault"
     )
+  })
+
+  it("keeps invalid stored Nodewarden URLs from crashing the Passwords tab", async () => {
+    await chrome.storage.local.set({ [PASSWORD_NODEWARDEN_URL_KEY]: "not a url" })
+    await expect(getNodewardenServerUrl()).resolves.toBe(NODEWARDEN_DEFAULT_URL)
+  })
+
+  it("uses newline-delimited URI input and unbiased password sampling", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"),
+      "utf8"
+    )
+    expect(source).toContain('<TextAreaInput label="URIs"')
+    expect(source).toContain('.split("\\n")')
+    expect(source).toContain("maxValidByte")
+    expect(source).toContain("if (byte >= maxValidByte) continue")
   })
 })
 

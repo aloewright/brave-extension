@@ -107,9 +107,14 @@ export async function getMatchingPasswordLogins(pageUrl: string): Promise<Passwo
 export async function getNodewardenServerUrl(): Promise<string> {
   const got = await chrome.storage.local.get(PASSWORD_NODEWARDEN_URL_KEY)
   const value = got[PASSWORD_NODEWARDEN_URL_KEY]
-  return typeof value === "string" && value.trim()
-    ? normalizeServerUrl(value)
-    : NODEWARDEN_DEFAULT_URL
+  if (typeof value === "string" && value.trim()) {
+    try {
+      return normalizeServerUrl(value)
+    } catch {
+      return NODEWARDEN_DEFAULT_URL
+    }
+  }
+  return NODEWARDEN_DEFAULT_URL
 }
 
 export async function setNodewardenServerUrl(url: string): Promise<string> {

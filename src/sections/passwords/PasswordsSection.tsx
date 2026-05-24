@@ -386,7 +386,7 @@ function LoginForm({
       <TextInput label="Name" value={form.name} onChange={(name) => onChange({ ...form, name })} />
       <TextInput label="Username" value={form.username} onChange={(username) => onChange({ ...form, username })} />
       <TextInput label="Password" type="password" value={form.password} onChange={(password) => onChange({ ...form, password })} />
-      <TextInput label="URIs" value={form.urls} onChange={(urls) => onChange({ ...form, urls })} />
+      <TextAreaInput label="URIs" value={form.urls} onChange={(urls) => onChange({ ...form, urls })} />
       <TextInput label="Folder" value={form.folder} onChange={(folder) => onChange({ ...form, folder })} />
       <label className="flex items-center gap-2 text-xs text-fg/65">
         <input
@@ -640,6 +640,27 @@ function TextInput({
   )
 }
 
+function TextAreaInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-[10px] uppercase tracking-wide text-fg/35">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-h-[72px] rounded border border-border bg-bg px-2 py-1.5 text-xs outline-none focus:border-primary"
+      />
+    </label>
+  )
+}
+
 function FieldRow({
   label,
   value,
@@ -729,7 +750,7 @@ function formToPayload(form: FormState): Omit<PasswordLogin, "id" | "updatedAt">
     username: form.username.trim(),
     password: form.password,
     urls: form.urls
-      .split(/[\n,]/)
+      .split("\n")
       .map((url) => url.trim())
       .filter(Boolean),
     folder: form.folder.trim() || undefined,
@@ -758,7 +779,18 @@ function generatePassword(length: number, includeNumbers: boolean, includeSymbol
   const numbers = "23456789"
   const symbols = "!@#$%^&*_-+="
   const alphabet = letters + (includeNumbers ? numbers : "") + (includeSymbols ? symbols : "")
-  const bytes = new Uint8Array(length)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")
+  const maxValidByte = 256 - (256 % alphabet.length)
+  let result = ""
+
+  while (result.length < length) {
+    const bytes = new Uint8Array(Math.max(16, length - result.length))
+    crypto.getRandomValues(bytes)
+    for (const byte of bytes) {
+      if (byte >= maxValidByte) continue
+      result += alphabet[byte % alphabet.length]
+      if (result.length >= length) break
+    }
+  }
+
+  return result
 }
