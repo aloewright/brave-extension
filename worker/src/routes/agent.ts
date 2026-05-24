@@ -355,8 +355,7 @@ async function buildCloudPlan(
   const status = cleanText(parsed?.status || deterministic.status, 80) || "planning"
   const nextStep = cleanText(parsed?.nextStep || deterministic.nextStep, 500)
   const stopCondition = cleanText(parsed?.stopCondition || deterministic.stopCondition, 500)
-  const replyRaw = (parsed?.reply || raw || deterministic.reply).trim()
-  const reply = replyRaw.length > 2000 ? replyRaw.slice(0, 2000) + "...[truncated]" : replyRaw
+  const reply = preserveText(parsed?.reply || raw || deterministic.reply, 2000)
 
   return {
     status,
@@ -442,6 +441,11 @@ function cleanId(value: unknown): string | null {
 
 function cleanText(value: unknown, max: number): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim()
+  return text.length > max ? `${text.slice(0, max)}...[truncated]` : text
+}
+
+function preserveText(value: unknown, max: number): string {
+  const text = String(value ?? "").trim()
   return text.length > max ? `${text.slice(0, max)}...[truncated]` : text
 }
 
