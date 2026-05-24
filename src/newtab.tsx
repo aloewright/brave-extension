@@ -439,7 +439,7 @@ function AppCard({
       }}
       style={{ "--workspace-app-accent": app.accent } as CSSProperties}
     >
-      <a className="workspace-app-card__main" href={app.url}>
+      <a className="workspace-app-card__main" href={app.url} aria-label={app.name}>
         <span className="workspace-app-card__mark" aria-hidden="true">
           <AppIcon name={app.icon} />
         </span>
