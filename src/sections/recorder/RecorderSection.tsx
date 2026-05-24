@@ -79,9 +79,16 @@ export function RecorderSection() {
   }, [state.active, state.paused]);
 
   const handleStart = async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    const [tab] = win?.id
+      ? await chrome.tabs.query({ active: true, windowId: win.id })
+      : [];
+    if (!tab?.id) {
+      setState((s) => ({ ...s, lastError: "No active tab" }));
+      return;
+    }
     chrome.runtime.sendMessage(
-      { type: "START_RECORDING", source: "tab", tabId: tab?.id },
+      { type: "START_RECORDING", source: "tab", tabId: tab.id },
       (res: { ok: boolean; error?: string }) => {
         if (!res?.ok) {
           setState((s) => ({ ...s, lastError: res?.error || "Start failed" }));

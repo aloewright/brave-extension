@@ -198,6 +198,16 @@ function shouldFallbackToDisplayCapture(error: unknown): boolean {
   );
 }
 
+function tabCaptureStartError(error: unknown): string {
+  if (shouldFallbackToDisplayCapture(error)) {
+    return [
+      "Tab recording needs this tab's activeTab grant.",
+      "Click the pinned extension on the tab you want to record, then start recording again.",
+    ].join(" ");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 function getTabMediaStreamId(tabId: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (sid) => {
@@ -208,6 +218,13 @@ function getTabMediaStreamId(tabId: number): Promise<string> {
       }
     });
   });
+}
+
+async function getActiveNormalTab(): Promise<chrome.tabs.Tab | undefined> {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  if (!win?.id) return undefined;
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win.id });
+  return tab;
 }
 
 function chooseDesktopMediaStream(): Promise<{
@@ -258,10 +275,7 @@ export async function startRecording(opts: {
     if (source === "tab") {
       let tid = opts.tabId;
       if (!tid) {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
+        const tab = await getActiveNormalTab();
         if (!tab?.id) {
           recorderState.active = false;
           pendingStart = null;
@@ -281,15 +295,7 @@ export async function startRecording(opts: {
         streamId = await getTabMediaStreamId(tid);
         tabId = tid;
       } catch (err) {
-        if (!shouldFallbackToDisplayCapture(err)) throw err;
-        // Starting from the side panel does not always carry the transient
-        // activeTab grant needed by chrome.tabCapture. Fall back to Brave's
-        // native picker for tabs, windows, and screens.
-        const selected = await chooseDesktopMediaStream();
-        source = "screen";
-        streamId = selected.streamId;
-        desktopAudio = selected.canRequestAudioTrack;
-        tabId = null;
+        throw new Error(tabCaptureStartError(err));
       }
     }
 

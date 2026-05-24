@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import {
   chunkBase64,
   joinChunks,
@@ -21,7 +23,8 @@ import {
   notifyRecorderFinalized,
   registerStartWaiter,
   registerStopWaiter,
-  recorderState
+  recorderState,
+  startRecording
 } from "../src/background/recorder"
 import { chooseRecorderMimeType, streamBlobToMirror } from "../src/tabs/offscreen"
 
@@ -477,6 +480,79 @@ describe("getRecordingElapsedMs", () => {
     const elapsed = getRecordingElapsedMs(now)
     // Math.max(0, ...) ensures no negative contribution
     expect(elapsed).toBe(500)
+  })
+})
+
+describe("recorder tab start failures", () => {
+  beforeEach(() => {
+    recorderState.active = false
+    recorderState.paused = false
+    recorderState.source = null
+    recorderState.startedAt = null
+    recorderState.elapsedMs = 0
+    recorderState.lastResumedAt = null
+    recorderState.tabId = null
+    recorderState.originUrl = null
+    recorderState.lastSaved = null
+    recorderState.lastError = null
+  })
+
+  it("does not turn tab-capture permission failures into desktop picker cancellations", async () => {
+    const c = (globalThis as any).chrome
+    const chooseDesktopMedia = vi.fn()
+    c.tabs = {
+      get: vi.fn(async () => ({ id: 7, url: "https://example.com/" }))
+    }
+    c.tabCapture = {
+      getMediaStreamId: vi.fn((_opts: unknown, cb: (streamId?: string) => void) => {
+        c.runtime.lastError = {
+          message:
+            "The 'activeTab' permission is not in effect because this extension has not been invoked."
+        }
+        cb(undefined)
+        c.runtime.lastError = undefined
+      })
+    }
+    c.desktopCapture = { chooseDesktopMedia }
+    c.runtime = {
+      ...(c.runtime || {}),
+      lastError: undefined,
+      getContexts: vi.fn(async () => []),
+      getURL: (path: string) => path,
+      sendMessage: vi.fn(async () => undefined)
+    }
+    c.offscreen = {
+      createDocument: vi.fn(async () => undefined),
+      closeDocument: vi.fn(async () => undefined)
+    }
+    c.action = {
+      setBadgeText: vi.fn(),
+      setBadgeBackgroundColor: vi.fn(),
+      setTitle: vi.fn(),
+      setPopup: vi.fn()
+    }
+
+    const result = await startRecording({ source: "tab", tabId: 7 })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("activeTab grant")
+    expect(result.error).not.toBe("Recording cancelled")
+    expect(chooseDesktopMedia).not.toHaveBeenCalled()
+    expect(c.offscreen.createDocument).not.toHaveBeenCalled()
+    expect(recorderState.active).toBe(false)
+    expect(recorderState.lastError).toContain("activeTab grant")
+  })
+
+  it("resolves omitted tab ids from the last focused normal browser window", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/background/recorder.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("function getActiveNormalTab")
+    expect(source).toContain('chrome.windows.getLastFocused({ windowTypes: ["normal"] })')
+    expect(source).toContain("chrome.tabs.query({ active: true, windowId: win.id })")
+    expect(source).not.toContain("currentWindow: true")
   })
 })
 

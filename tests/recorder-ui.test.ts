@@ -9,9 +9,12 @@ describe("recorder section UI", () => {
       "utf8",
     );
 
-    expect(source).toContain("chrome.tabs.query({ active: true, currentWindow: true })");
+    expect(source).toContain('chrome.windows.getLastFocused({ windowTypes: ["normal"] })');
+    expect(source).toContain("chrome.tabs.query({ active: true, windowId: win.id })");
     expect(source).toContain('source: "tab"');
-    expect(source).toContain("tabId: tab?.id");
+    expect(source).toContain("tabId: tab.id");
+    expect(source).toContain('lastError: "No active tab"');
+    expect(source).not.toContain("currentWindow: true");
     expect(source).not.toContain('source: "screen"');
     expect(source).not.toContain("RECORDER_START_OPTIONS");
     expect(source).not.toContain("What do you want to record?");
