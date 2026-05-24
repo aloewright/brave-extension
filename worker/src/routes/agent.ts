@@ -355,7 +355,8 @@ async function buildCloudPlan(
   const status = cleanText(parsed?.status || deterministic.status, 80) || "planning"
   const nextStep = cleanText(parsed?.nextStep || deterministic.nextStep, 500)
   const stopCondition = cleanText(parsed?.stopCondition || deterministic.stopCondition, 500)
-  const reply = cleanText(parsed?.reply || raw || deterministic.reply, 2000)
+  const replyRaw = (parsed?.reply || raw || deterministic.reply).trim()
+  const reply = replyRaw.length > 2000 ? replyRaw.slice(0, 2000) + "...[truncated]" : replyRaw
 
   return {
     status,
