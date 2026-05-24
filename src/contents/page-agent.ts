@@ -233,16 +233,6 @@ function mount() {
   for (const type of CHAT_KEYBOARD_EVENTS) {
     window.addEventListener(type, shieldPageAgentKeyboardEvent, true)
   }
-  input.addEventListener("keydown", (event) => {
-    event.stopPropagation()
-    if (!shouldSubmitChat(event)) {
-      return
-    }
-    event.preventDefault()
-    form.requestSubmit()
-  })
-  input.addEventListener("keypress", (event) => event.stopPropagation())
-  input.addEventListener("keyup", (event) => event.stopPropagation())
   form.addEventListener("submit", async (event) => {
     event.preventDefault()
     const text = input.value.trim()
@@ -276,7 +266,7 @@ function mount() {
     render()
     if (open) input.focus()
     sendResponse({ ok: true, open })
-    return true
+    return false
   })
 
   render()

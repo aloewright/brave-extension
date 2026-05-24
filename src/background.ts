@@ -969,10 +969,7 @@ function markSidePanelClosed(windowId?: number) {
 }
 
 function isSidePanelOpen(windowId?: number) {
-  if (typeof windowId === "number" && openSidePanelWindows.has(windowId)) {
-    return true;
-  }
-  return sidebarPorts.size > 0 && openSidePanelWindows.size === 0;
+  return typeof windowId === "number" && openSidePanelWindows.has(windowId);
 }
 
 function openSidePanel(windowId?: number) {
@@ -994,7 +991,6 @@ function closeSidePanel(windowId?: number) {
   const close = chrome.sidePanel?.close;
   if (!close) {
     safeRuntimeWarning("chrome.sidePanel.close is unavailable");
-    openSidePanel(windowId);
     return;
   }
   close({ windowId })
