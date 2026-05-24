@@ -273,6 +273,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
     port.onDisconnect.addListener(() => {
       sidebarPorts.delete(id);
+      if (sidebarPorts.size === 0) openSidePanelWindows.clear();
     });
   }
 });
@@ -954,21 +955,74 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   rejectPending(tabId, "tab-closed");
 });
 
-// Side panel behavior — open on action click
+// Side panel behavior — toolbar/shortcut clicks toggle the panel for the
+// current window. Chrome added close/onOpened/onClosed after open, so keep
+// runtime feature checks for older builds.
+const openSidePanelWindows = new Set<number>();
+
+function markSidePanelOpen(windowId?: number) {
+  if (typeof windowId === "number") openSidePanelWindows.add(windowId);
+}
+
+function markSidePanelClosed(windowId?: number) {
+  if (typeof windowId === "number") openSidePanelWindows.delete(windowId);
+}
+
+function isSidePanelOpen(windowId?: number) {
+  if (typeof windowId === "number" && openSidePanelWindows.has(windowId)) {
+    return true;
+  }
+  return sidebarPorts.size > 0 && openSidePanelWindows.size === 0;
+}
+
 function openSidePanel(windowId?: number) {
-  if (!windowId) return;
+  if (typeof windowId !== "number") return;
   const open = chrome.sidePanel?.open;
   if (!open) {
     safeRuntimeWarning("chrome.sidePanel.open is unavailable");
     return;
   }
-  open({ windowId }).catch((err) => {
-    safeRuntimeWarning("failed to open side panel", err);
-  });
+  open({ windowId })
+    .then(() => markSidePanelOpen(windowId))
+    .catch((err) => {
+      safeRuntimeWarning("failed to open side panel", err);
+    });
+}
+
+function closeSidePanel(windowId?: number) {
+  if (typeof windowId !== "number") return;
+  const close = chrome.sidePanel?.close;
+  if (!close) {
+    safeRuntimeWarning("chrome.sidePanel.close is unavailable");
+    openSidePanel(windowId);
+    return;
+  }
+  close({ windowId })
+    .then(() => markSidePanelClosed(windowId))
+    .catch((err) => {
+      safeRuntimeWarning("failed to close side panel", err);
+    });
+}
+
+function toggleSidePanel(windowId?: number) {
+  if (typeof windowId !== "number") return;
+  if (isSidePanelOpen(windowId)) {
+    closeSidePanel(windowId);
+    return;
+  }
+  openSidePanel(windowId);
 }
 
 chrome.action?.onClicked?.addListener((tab) => {
-  openSidePanel(tab.windowId);
+  toggleSidePanel(tab.windowId);
+});
+
+chrome.sidePanel?.onOpened?.addListener?.((info) => {
+  markSidePanelOpen(info.windowId);
+});
+
+chrome.sidePanel?.onClosed?.addListener?.((info) => {
+  markSidePanelClosed(info.windowId);
 });
 
 // Enable side panel on all sites
@@ -1087,7 +1141,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       active: true,
       currentWindow: true,
     });
-    openSidePanel(tab?.windowId);
+    toggleSidePanel(tab?.windowId);
   }
 });
 

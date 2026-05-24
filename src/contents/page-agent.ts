@@ -14,6 +14,15 @@ type ChatEntry = { role: "user" | "assistant" | "status" | "error"; text: string
 let sessionId: string | undefined
 let open = false
 const entries: ChatEntry[] = []
+const CHAT_KEYBOARD_EVENTS = ["keydown", "keypress", "keyup"] as const
+
+function shouldSubmitChat(event: KeyboardEvent) {
+  return event.key === "Enter"
+    && !event.shiftKey
+    && !event.altKey
+    && !event.ctrlKey
+    && !event.metaKey
+}
 
 function sendRuntime<T>(message: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -55,14 +64,21 @@ function mount() {
       }
       button, textarea { font: inherit; }
       .toggle {
-        width: 44px;
+        display: inline-grid;
+        place-items: center;
+        width: 58px;
         height: 44px;
-        border: 1px solid rgba(255,255,255,.18);
-        border-radius: 999px;
-        color: #fff;
-        background: #171b22;
-        box-shadow: 0 10px 30px rgba(0,0,0,.28);
+        border: 1px solid rgba(90,150,200,.48);
+        border-radius: 14px;
+        background: rgba(228,241,250,.64);
+        box-shadow: 0 10px 30px rgba(28,64,96,.24);
         cursor: pointer;
+        backdrop-filter: blur(10px);
+      }
+      .toggle svg {
+        width: 42px;
+        height: 30px;
+        display: block;
       }
       .panel {
         display: none;
@@ -143,7 +159,15 @@ function mount() {
       }
     </style>
     <div class="root">
-      <button class="toggle" type="button" title="Page agent" aria-label="Page agent">AI</button>
+      <button class="toggle" type="button" title="Page agent" aria-label="Page agent">
+        <svg viewBox="0 0 240 160" aria-hidden="true" focusable="false">
+          <path d="M60 120C45 120 35 105 40 90C40 70 55 60 70 60C80 35 110 25 135 35C165 30 185 50 180 75C200 75 210 90 205 105C205 120 195 120 180 120Z" fill="rgba(255,255,255,.74)" stroke="#5a96c8" stroke-linejoin="round" stroke-width="6"/>
+          <path d="M60 115L180 115" fill="none" stroke="rgba(232,244,250,.78)" stroke-linecap="round" stroke-width="4"/>
+          <path d="M20 100Q50 85 70 105T110 95" fill="none" stroke="rgba(140,180,226,.76)" stroke-linecap="round" stroke-width="3.5"/>
+          <path d="M90 115Q120 100 140 115T190 105" fill="none" stroke="rgba(140,180,226,.76)" stroke-linecap="round" stroke-width="3.5"/>
+          <path d="M160 90Q180 80 200 95T220 85" fill="none" stroke="rgba(140,180,226,.76)" stroke-linecap="round" stroke-width="3.5"/>
+        </svg>
+      </button>
       <section class="panel" aria-label="Page agent chat">
         <div class="head">
           <div class="title">Page Agent</div>
@@ -166,6 +190,22 @@ function mount() {
   const input = shadow.querySelector<HTMLTextAreaElement>("textarea")!
   const log = shadow.querySelector<HTMLElement>(".log")!
 
+  const hasPageAgentFocus = () => {
+    if (!open) return false
+    const active = shadow.activeElement
+    return !!active && panel.contains(active)
+  }
+
+  const shieldPageAgentKeyboardEvent = (event: KeyboardEvent) => {
+    if (!hasPageAgentFocus()) return
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    if (event.type === "keydown" && shadow.activeElement === input && shouldSubmitChat(event)) {
+      event.preventDefault()
+      form.requestSubmit()
+    }
+  }
+
   const render = () => {
     panel.dataset.open = open ? "true" : "false"
     toggle.style.display = open ? "none" : "inline-grid"
@@ -182,7 +222,7 @@ function mount() {
 
   toggle.addEventListener("click", () => {
     open = true
-    if (entries.length === 0) entries.push({ role: "status", text: "Ready. Page context stays local unless sidebar-api sync is enabled." })
+    if (entries.length === 0) entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
     render()
     input.focus()
   })
@@ -190,6 +230,19 @@ function mount() {
     open = false
     render()
   })
+  for (const type of CHAT_KEYBOARD_EVENTS) {
+    window.addEventListener(type, shieldPageAgentKeyboardEvent, true)
+  }
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation()
+    if (!shouldSubmitChat(event)) {
+      return
+    }
+    event.preventDefault()
+    form.requestSubmit()
+  })
+  input.addEventListener("keypress", (event) => event.stopPropagation())
+  input.addEventListener("keyup", (event) => event.stopPropagation())
   form.addEventListener("submit", async (event) => {
     event.preventDefault()
     const text = input.value.trim()
@@ -212,6 +265,18 @@ function mount() {
       entries.push({ role: "error", text: err instanceof Error ? err.message : String(err) })
     }
     render()
+  })
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "PAGE_AGENT_TOGGLE") return false
+    open = !open
+    if (open && entries.length === 0) {
+      entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+    }
+    render()
+    if (open) input.focus()
+    sendResponse({ ok: true, open })
+    return true
   })
 
   render()
