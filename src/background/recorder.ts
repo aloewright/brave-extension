@@ -13,6 +13,8 @@ import {
   type RecordingMetadata,
 } from "../types";
 import { ulid } from "../lib/ulid";
+import { getSettings } from "../storage";
+import { suggestMediaFilename } from "../lib/ai-rename";
 import {
   releaseOffscreenDocument,
   retainOffscreenDocument,
@@ -461,7 +463,16 @@ export async function handleRecorderStopped(
     const createdAt = new Date();
     const mimeType = normalizeRecordingMimeType(msg.mimeType);
     const extension = recordingExtensionForMimeType(mimeType);
-    const filename = `recording-${isoForFilename(createdAt)}.${extension}`;
+    const originalFilename = `recording-${isoForFilename(createdAt)}.${extension}`;
+    const settings = await getSettings();
+    const filename = await suggestMediaFilename({
+      settings,
+      fallbackFilename: originalFilename,
+      mediaKind: "video",
+      mimeType,
+      sourceUrl: recorderState.originUrl ?? undefined,
+      createdAt: createdAt.toISOString(),
+    });
 
     await downloadBlobUrl(msg.blobUrl, filename);
 
@@ -479,6 +490,7 @@ export async function handleRecorderStopped(
       sizeBytes: msg.sizeBytes,
       mimeType,
       filename,
+      originalFilename: originalFilename === filename ? undefined : originalFilename,
       createdAt: createdAt.toISOString(),
       originUrl: recorderState.originUrl ?? undefined,
     };

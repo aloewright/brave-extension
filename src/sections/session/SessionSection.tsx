@@ -11,6 +11,7 @@ import {
   type SessionSnippet
 } from "../../lib/session-snippets"
 import { useInfoPanels, RssPanel } from "../_lx/components/InfoPanels"
+import { StickyNotesPanel } from "./StickyNotesPanel"
 
 /**
  * Session tab (ALO-470): consolidates the former Library Links, RSS feeds,
@@ -21,12 +22,13 @@ import { useInfoPanels, RssPanel } from "../_lx/components/InfoPanels"
  * Links carry over from the old Library, but with the new clipboard-backed
  * snippet workflow each highlight also copies to the user's clipboard.
  */
-type Tab = "links" | "snippets" | "feeds" | "captures"
+type Tab = "links" | "snippets" | "feeds" | "notes" | "captures"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "links", label: "Links" },
   { id: "snippets", label: "Snippets" },
   { id: "feeds", label: "Feeds" },
+  { id: "notes", label: "Notes" },
   { id: "captures", label: "Captures" }
 ]
 
@@ -77,8 +79,10 @@ export function SessionSection() {
         )}
         {tab === "feeds" && (
           <div className="space-y-2">
-            <RssPanel feeds={pagedFeeds} onCopy={(t, label) => {
+            <RssPanel feeds={pagedFeeds} allFeeds={info.feeds} onCopy={(t, label) => {
               void navigator.clipboard.writeText(t).catch(() => {})
+            }} onSaveFeed={(feed) => {
+              void addLink(feed.url, feed.title || feed.url, ["feed", feed.type])
             }} />
             {info.feeds.length === 0 ? null : (
               <div className="flex items-center justify-between text-[10px] text-fg/40">
@@ -107,6 +111,7 @@ export function SessionSection() {
             )}
           </div>
         )}
+        {tab === "notes" && <StickyNotesPanel />}
         {tab === "captures" && <LxCaptureSection />}
       </div>
     </div>
@@ -123,7 +128,7 @@ function SnippetList({
   if (snippets.length === 0) {
     return (
       <div className="text-[11px] text-fg/40">
-        Right-click selected text on any page → "Save highlight" to drop it here
+        Right-click selected text on any page → "Save snippet" to drop it here
         and copy it to your clipboard at the same time.
       </div>
     )
