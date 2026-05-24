@@ -380,13 +380,8 @@ async function buildCloudPlan(env: Env, message: string, observationJson: string
   const res = (await env.AI.run(
     AGENT_PLAN_MODEL,
     {
-      messages: [
-        {
-          role: "system",
-          content: "You are a privacy-scoped browser planner. Respond with compact strict JSON only.",
-        },
-        { role: "user", content: prompt },
-      ],
+      instructions: "You are a privacy-scoped browser planner. Respond with compact strict JSON only.",
+      input: prompt,
       max_tokens: 700,
     },
     { gateway: { id: AI_GATEWAY_ID } },

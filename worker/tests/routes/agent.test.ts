@@ -107,15 +107,14 @@ describe("/api/agent", () => {
     })
     expect(aiRun).toHaveBeenCalledOnce()
     const payload = (aiRun.mock.calls[0] as unknown[])[1] as {
-      messages: Array<{ role: string; content: string }>
+      instructions: string
+      input: string
+      messages?: unknown
     }
-    expect(payload.messages[0]).toMatchObject({
-      role: "system",
-      content: expect.stringContaining("privacy-scoped browser planner"),
-    })
-    expect(payload.messages[1]?.role).toBe("user")
-    expect(payload.messages[1]?.content.length).toBeGreaterThan(0)
-    expect(payload.messages[1]?.content).toContain("private page text")
+    expect(payload.messages).toBeUndefined()
+    expect(payload.instructions).toContain("privacy-scoped browser planner")
+    expect(payload.input.length).toBeGreaterThan(0)
+    expect(payload.input).toContain("private page text")
   })
 
   it("rejects blank chat messages before calling AI Gateway", async () => {
@@ -391,9 +390,11 @@ describe("/api/agent", () => {
     // The AI was called and the observation text was included in the prompt
     expect(aiRun).toHaveBeenCalledOnce()
     const payload = (aiRun.mock.calls[0] as unknown[])[1] as {
-      messages: Array<{ role: string; content: string }>
+      input: string
+      messages?: unknown
     }
-    expect(payload.messages[1]?.content).toContain("unique-marker-xyz-789")
+    expect(payload.messages).toBeUndefined()
+    expect(payload.input).toContain("unique-marker-xyz-789")
   })
 
   it("uses choices[0].message.content format from AI response when response field absent", async () => {
