@@ -74,6 +74,8 @@ export interface NativeHostResponse {
   backend?: CLIBackend
 }
 
+import type { CaptureSaveLocation } from "./lib/capture-destination"
+
 export interface Settings {
   backend: CLIBackend
   workingDirectory: string
@@ -82,6 +84,12 @@ export interface Settings {
   captureConsole: boolean
   captureNetwork: boolean
   theme: "dark" | "light"
+  // ALO-467 — capture (screenshot + full-page PDF) destination control.
+  // "downloads" is the default for backwards compatibility with prior
+  // releases; ALO-468 introduces "cloud" + cloudCapturesEnabled gating.
+  captureSaveLocation: CaptureSaveLocation
+  captureSubfolder: string
+  cloudCapturesEnabled: boolean
   // Sidebar-api Worker sync (Phases 1–4). Replaces the cloudos integration.
   // The Worker owns /api/conversations, /api/links, /api/bookmarks/snapshot,
   // /api/recordings, /api/pdfs, /api/search; uploads also write embeddings
@@ -102,6 +110,9 @@ export interface Settings {
   allowEvalJs: boolean
   allowExtensionUninstall: boolean
   cookiesAllowAll: boolean
+  browserAgentCloudPlanningEnabled: boolean
+  browserAgentCloudVisionEnabled: boolean
+  browserAgentCloudOcrEnabled: boolean
   braveSearchApiKey: string
   dopplerProject: string
   dopplerConfig: string
@@ -135,7 +146,9 @@ export interface DopplerStatus {
   defaults: {
     project: string
     config: string
+    scope?: string
   }
+  tokenScope?: string | null
   lastCheckedAt: string
   error: string | null
 }
@@ -148,6 +161,9 @@ export const DEFAULT_SETTINGS: Settings = {
   captureConsole: true,
   captureNetwork: false,
   theme: "dark",
+  captureSaveLocation: "downloads",
+  captureSubfolder: "ai-dev-sidebar",
+  cloudCapturesEnabled: false,
   sidebarSyncEnabled: false,
   sidebarApiUrl: "https://sidebar.pdx.software",
   sidebarApiToken: "",
@@ -159,6 +175,9 @@ export const DEFAULT_SETTINGS: Settings = {
   allowEvalJs: false,
   allowExtensionUninstall: false,
   cookiesAllowAll: false,
+  browserAgentCloudPlanningEnabled: false,
+  browserAgentCloudVisionEnabled: false,
+  browserAgentCloudOcrEnabled: false,
   braveSearchApiKey: "",
   dopplerProject: "",
   dopplerConfig: "",
@@ -305,6 +324,8 @@ export interface RecordingMetadata {
   mimeType: RecordingMimeType
   /** OS-side filename, e.g. "recording-2026-04-29T12-34-56.mp4". */
   filename: string
+  /** Deterministic pre-AI filename, when cloud renaming changed the saved name. */
+  originalFilename?: string
   /** ISO timestamp at stop. */
   createdAt: string
   /** Tab URL captured at start, only for source==="tab". */

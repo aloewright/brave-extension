@@ -114,6 +114,7 @@ export function useLinks() {
   }
 
   const addLink = async (url: string, title: string, tags: string[] = []) => {
+    const latest = await store.getLinks()
     const link: CollectedLink = {
       id: crypto.randomUUID(),
       url,
@@ -121,7 +122,7 @@ export function useLinks() {
       tags,
       date: new Date().toISOString()
     }
-    await save([link, ...links])
+    await save([link, ...latest])
     return link
   }
 

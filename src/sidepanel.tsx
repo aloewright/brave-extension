@@ -5,8 +5,11 @@ import type { SectionId } from "./sections/types";
 import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
-import { LibrarySection } from "./sections/library/LibrarySection";
+import { SessionSection } from "./sections/session/SessionSection";
+import { PasswordsSection } from "./sections/passwords/PasswordsSection";
+import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
+import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 import { RecorderSection } from "./sections/recorder/RecorderSection";
 import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
@@ -62,8 +65,11 @@ function SidePanel() {
           </div>
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
-          {active === "library" && <LibrarySection />}
+          {active === "tech" && <TechSection />}
+          {active === "session" && <SessionSection />}
+          {active === "passwords" && <PasswordsSection />}
           {active === "bookmarks" && <BookmarksSection />}
+          {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}

@@ -13,7 +13,14 @@ interface UseNativeHostOptions {
   onMcpStatus?: (status: MCPStatus) => void
   onMcpRpcResult?: (msg: { type: string; ok: boolean; error?: string; rotatedAt?: string; enabled?: boolean }) => void
   onDopplerStatus?: (status: DopplerStatus) => void
-  onDopplerRpcResult?: (msg: { type: string; ok: boolean; error?: string; defaults?: { project: string; config: string }; silent?: boolean }) => void
+  onDopplerRpcResult?: (msg: {
+    type: string
+    ok: boolean
+    error?: string
+    defaults?: { project: string; config: string; scope?: string }
+    secrets?: Record<string, string>
+    silent?: boolean
+  }) => void
   onPtyData?: (sessionId: string, data: string) => void
   onPtyExit?: (sessionId: string, exitCode: number, signal?: number) => void
   onPtySpawned?: (sessionId: string, pid: number) => void
@@ -101,7 +108,11 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
         } else if (ptype === "doppler.status") {
           const { type: _t, ...status } = payload as any
           optsRef.current.onDopplerStatus?.(status as DopplerStatus)
-        } else if (ptype === "doppler.login" || ptype === "doppler.defaults.set") {
+        } else if (
+          ptype === "doppler.login" ||
+          ptype === "doppler.defaults.set" ||
+          ptype === "doppler.secrets.download"
+        ) {
           optsRef.current.onDopplerRpcResult?.(payload as any)
         }
 
@@ -237,14 +248,27 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     [send]
   )
   const dopplerSetDefaults = useCallback(
-    (defaults: { project?: string; config?: string }, opts?: { silent?: boolean }) => {
+    (defaults: { project?: string; config?: string; scope?: string }, opts?: { silent?: boolean }) => {
       send({
         type: "doppler.defaults.set",
         project: defaults.project || "",
         config: defaults.config || "",
+        scope: defaults.scope || "",
         silent: opts?.silent === true
       })
     },
+    [send]
+  )
+  const dopplerSecretsDownload = useCallback(
+    (
+      opts?: {
+        project?: string
+        config?: string
+        scope?: string
+        secrets?: string[]
+        silent?: boolean
+      }
+    ) => send({ type: "doppler.secrets.download", ...(opts || {}) }),
     [send]
   )
 
@@ -270,6 +294,7 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     mcpSetTerminalPath,
     dopplerStatus,
     dopplerLogin,
-    dopplerSetDefaults
+    dopplerSetDefaults,
+    dopplerSecretsDownload
   }
 }

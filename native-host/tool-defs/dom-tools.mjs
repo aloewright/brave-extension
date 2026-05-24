@@ -19,6 +19,25 @@ const tabIdSchema = {
 
 export const DOM_TOOL_DEFS = [
   {
+    name: "browser_observe",
+    description:
+      "Return a compact accessibility-style observation of the current page: URL, title, visible text, focused element, and capped visible element nodes with refs and selectors.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: tabIdSchema,
+        maxNodes: {
+          type: "number",
+          description: "Maximum visible nodes to return. Default 80, hard cap 200."
+        },
+        maxText: {
+          type: "number",
+          description: "Maximum visible text characters to return. Default 6000, hard cap 20000."
+        }
+      }
+    }
+  },
+  {
     name: "query_selector",
     description:
       "Query the DOM of a tab. Returns serialized matches with truncated outerHTML.",
@@ -99,6 +118,23 @@ export const DOM_TOOL_DEFS = [
         }
       },
       required: ["selector"]
+    }
+  },
+  {
+    name: "navigate",
+    description:
+      "Navigate the target tab to an http(s) URL, wait briefly for load, then return a compact page observation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: tabIdSchema,
+        url: { type: "string", description: "Absolute http(s) URL." },
+        timeoutMs: {
+          type: "number",
+          description: "Max time to wait for tab load, default 10000ms."
+        }
+      },
+      required: ["url"]
     }
   },
   {

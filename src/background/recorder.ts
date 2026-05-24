@@ -13,8 +13,10 @@ import {
   type RecordingMetadata,
 } from "../types";
 import { ulid } from "../lib/ulid";
-
-const OFFSCREEN_URL = "tabs/offscreen.html";
+import { getSettings } from "../storage";
+import { suggestMediaFilename } from "../lib/ai-rename";
+import { chooseDesktopMediaStream as chooseDesktopMediaSelection } from "../lib/desktop-capture";
+import { releaseOffscreenDocument, retainOffscreenDocument } from "./offscreen";
 
 export interface RecorderState {
   active: boolean;
@@ -128,34 +130,12 @@ export function notifyRecorderFinalized(meta: RecordingMetadata | null) {
   }
 }
 
-async function hasOffscreen(): Promise<boolean> {
-  // @ts-ignore — chrome.runtime.getContexts is MV3 only and may be missing
-  // from older @types/chrome
-  const existing = await (chrome.runtime as any).getContexts?.({
-    contextTypes: ["OFFSCREEN_DOCUMENT"],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)],
-  });
-  return Array.isArray(existing) && existing.length > 0;
-}
-
 async function ensureOffscreen() {
-  if (await hasOffscreen()) return;
-  // @ts-ignore — older @types/chrome may not include DISPLAY_MEDIA reason
-  await (chrome.offscreen as any).createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ["USER_MEDIA", "DISPLAY_MEDIA"],
-    justification: "Record tab/screen/camera video",
-  });
+  await retainOffscreenDocument("recorder");
 }
 
 async function closeOffscreen() {
-  if (!(await hasOffscreen())) return;
-  try {
-    // @ts-ignore
-    await chrome.offscreen.closeDocument();
-  } catch {
-    // ignore
-  }
+  await releaseOffscreenDocument("recorder");
 }
 
 export function getRecordingElapsedMs(now = Date.now()): number {
@@ -223,6 +203,16 @@ function shouldFallbackToDisplayCapture(error: unknown): boolean {
   );
 }
 
+function tabCaptureStartError(error: unknown): string {
+  if (shouldFallbackToDisplayCapture(error)) {
+    return [
+      "Tab recording needs this tab's activeTab grant.",
+      "Click the pinned extension on the tab you want to record, then start recording again.",
+    ].join(" ");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 function getTabMediaStreamId(tabId: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (sid) => {
@@ -235,30 +225,11 @@ function getTabMediaStreamId(tabId: number): Promise<string> {
   });
 }
 
-function chooseDesktopMediaStream(): Promise<{
-  streamId: string;
-  canRequestAudioTrack: boolean;
-}> {
-  return new Promise((resolve, reject) => {
-    if (!chrome.desktopCapture?.chooseDesktopMedia) {
-      reject(new Error("Desktop capture is unavailable"));
-      return;
-    }
-
-    chrome.desktopCapture.chooseDesktopMedia(
-      ["tab", "window", "screen", "audio"],
-      (streamId, options) => {
-        if (!streamId) {
-          reject(new Error("Recording cancelled"));
-          return;
-        }
-        resolve({
-          streamId,
-          canRequestAudioTrack: !!options?.canRequestAudioTrack,
-        });
-      },
-    );
-  });
+async function getActiveNormalTab(): Promise<chrome.tabs.Tab | undefined> {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  if (!win?.id) return undefined;
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win.id });
+  return tab;
 }
 
 function waitForRecorderStart(
@@ -326,10 +297,7 @@ export async function startRecording(opts: {
     if (source === "tab") {
       let tid = opts.tabId;
       if (!tid) {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
+        const tab = await getActiveNormalTab();
         if (!tab?.id) {
           recorderState.active = false;
           pendingStart = null;
@@ -349,27 +317,19 @@ export async function startRecording(opts: {
         streamId = await getTabMediaStreamId(tid);
         tabId = tid;
       } catch (err) {
-        if (!shouldFallbackToDisplayCapture(err)) throw err;
-        // Starting from the side panel does not always carry the transient
-        // activeTab grant needed by chrome.tabCapture. Fall back to Brave's
-        // native picker for tabs, windows, and screens.
-        const selected = await chooseDesktopMediaStream();
-        source = "screen";
-        streamId = selected.streamId;
-        desktopAudio = selected.canRequestAudioTrack;
-        tabId = null;
+        throw new Error(tabCaptureStartError(err));
       }
     }
 
     if (source === "screen" && !streamId) {
-      const selected = await chooseDesktopMediaStream();
+      const selected = await chooseDesktopMediaSelection();
       streamId = selected.streamId;
-      desktopAudio = selected.canRequestAudioTrack;
+      desktopAudio = selected.desktopAudio;
     }
 
     pendingStart = { source, streamId, desktopAudio, id };
-    await ensureOffscreen();
     const started = waitForRecorderStart(id);
+    await ensureOffscreen();
     chrome.runtime
       .sendMessage({
         type: "RECORDER_START",
@@ -397,6 +357,7 @@ export async function startRecording(opts: {
     return await started;
   } catch (err) {
     recorderState.lastError = (err as Error).message;
+    notifyRecorderStartFailed(recorderState.lastError);
     recorderState.active = false;
     recorderState.paused = false;
     recorderState.elapsedMs = 0;
@@ -547,7 +508,16 @@ export async function handleRecorderStopped(
     const createdAt = new Date();
     const mimeType = normalizeRecordingMimeType(msg.mimeType);
     const extension = recordingExtensionForMimeType(mimeType);
-    const filename = `recording-${isoForFilename(createdAt)}.${extension}`;
+    const originalFilename = `recording-${isoForFilename(createdAt)}.${extension}`;
+    const settings = await getSettings();
+    const filename = await suggestMediaFilename({
+      settings,
+      fallbackFilename: originalFilename,
+      mediaKind: "video",
+      mimeType,
+      sourceUrl: recorderState.originUrl ?? undefined,
+      createdAt: createdAt.toISOString(),
+    });
 
     await downloadBlobUrl(msg.blobUrl, filename);
 
@@ -565,6 +535,8 @@ export async function handleRecorderStopped(
       sizeBytes: msg.sizeBytes,
       mimeType,
       filename,
+      originalFilename:
+        originalFilename === filename ? undefined : originalFilename,
       createdAt: createdAt.toISOString(),
       originUrl: recorderState.originUrl ?? undefined,
     };

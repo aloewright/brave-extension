@@ -55,6 +55,58 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
   extension messages. Extension resources, native-host tokens, and stored data
   stay in extension or native-host storage rather than being exposed to sites.
 
+## New tab page
+
+![New tab screenshot](assets/newtab-screenshot.png)
+
+The extension replaces the new tab page with a Brave-style search bar, a row
+of icon-only Quick Links (chat / email / calendar / tasks / link shortener),
+and a draggable grid of Workspace App tiles.
+
+### Customizing the Quick Links row
+
+The five icon-only links above the app grid are hardcoded in
+[`src/newtab.tsx`](src/newtab.tsx) as the `QUICK_LINKS` constant
+(around line 304). Each entry has a `label`, a `url`, and an inline SVG
+`icon`. To point them at your own chat, email, calendar, task tracker,
+and shortlink service, edit the `url` fields in place:
+
+```ts
+const QUICK_LINKS: { label: string; url: string; icon: ReactNode }[] = [
+  { label: "Chat",           url: "https://chat.example.com",     icon: (/* ... */) },
+  { label: "Email",          url: "https://mail.example.com",     icon: (/* ... */) },
+  { label: "Calendar",       url: "https://calendar.example.com", icon: (/* ... */) },
+  { label: "Tasks",          url: "https://tasks.example.com",    icon: (/* ... */) },
+  { label: "Link Shortener", url: "https://s.example.com",        icon: (/* ... */) },
+];
+```
+
+- **Change destination only**: edit `url`. The `label` is read aloud by
+  screen readers and shown as the hover tooltip, so update it to match
+  if you repurpose a slot (e.g. swap "Tasks" for "Notes").
+- **Add or remove a link**: add/remove an object in the array. The row
+  renders whatever is in `QUICK_LINKS`, in order. There's no upper limit,
+  but the layout is tuned for ~5 items.
+- **Use your own icon**: each `icon` is a fragment of SVG `<path>` /
+  `<rect>` elements that get drawn inside a shared 24×24 stroked
+  viewBox (`fill="none"`, `stroke="currentColor"`,
+  `strokeWidth="1.8"`). Drop in any path data from
+  [Lucide](https://lucide.dev/), [Tabler](https://tabler.io/icons), or
+  Hero­icons (outline set) and it will inherit the row's styling.
+
+After editing, run `pnpm dev` to hot-reload the unpacked extension or
+`pnpm build` to produce a fresh `build/` for packaging.
+
+### Customizing the Workspace App grid
+
+The larger tile grid below the Quick Links is sourced from the
+`WORKSPACE_APPS` array in [`src/newtab-apps.ts`](src/newtab-apps.ts).
+Each tile has `name`, `domain`, `url`, `icon` (one of the named icon
+slugs at the top of that file), and an `accent` color. Add, remove, or
+re-order entries to change which apps appear; per-tab ordering can also
+be rearranged by drag-and-drop and is persisted in
+`chrome.storage.local`.
+
 ## Development
 
 ```sh
@@ -62,11 +114,34 @@ pnpm install
 pnpm dev            # starts plasmo dev (loads as unpacked extension from build/)
 pnpm build          # production build
 pnpm install-host   # install the native messaging host
+pnpm diagnose-host  # print signing/quarantine state of native artifacts
 pnpm typecheck      # tsc --noEmit -p .
 pnpm test           # vitest run
 pnpm test:coverage  # vitest + v8 coverage (60% line / 50% branch floor)
 pnpm test:e2e       # playwright e2e suite
 ```
+
+### macOS: "Apple could not verify '<random>.node' is free of malware" (ALO-472)
+
+`pnpm install-host` strips `com.apple.quarantine` from every `.node` and
+`spawn-helper` under `native-host/node_modules` before the first sidebar
+terminal launches. The popup's hash-prefixed filename
+(`.9db7f7fe3f8cd7ea-00000000.node`) is XProtect's internal scan-cache
+name; the file on disk is one of node-pty's prebuilt
+`prebuilds/darwin-{arm64,x64}/pty.node` (plus its `spawn-helper`).
+
+If the popup still appears:
+
+1. Run `pnpm diagnose-host` — confirms which artifacts carry the
+   quarantine xattr and what their signing state is.
+2. Re-run with `pnpm diagnose-host --fix` to re-scrub.
+3. If Gatekeeper has already cached a denial decision, open **System
+   Settings → Privacy & Security** and click "Allow Anyway" once. The
+   shipped Microsoft prebuilds are ad-hoc signed with stable CDHashes per
+   `node-pty` version, so the grant persists across reinstalls.
+
+The installer never re-signs the prebuilds (that would mint a new
+CDHash and invalidate any "Allow Anyway" the user has already granted).
 
 ## Typechecking
 

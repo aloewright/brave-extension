@@ -183,7 +183,7 @@ export function ReviewPanel({ onClose }: Props) {
                 <div className="text-fg/30 text-sm mb-2">No cards due</div>
                 <div className="text-fg/20 text-[11px] max-w-[260px]">
                   {highlights.length === 0
-                    ? "Add a highlight in the Add tab, or right-click selected text on any page → Save highlight for review."
+                    ? "Add a highlight in the Add tab, or right-click selected text on any page → Save snippet."
                     : "Nothing due right now. Come back later or add more highlights."}
                 </div>
               </div>
@@ -296,7 +296,7 @@ export function ReviewPanel({ onClose }: Props) {
               No highlights yet. Add one in the{" "}
               <span className="font-medium">Add</span> tab, or right-click
               selected text on any page and choose{" "}
-              <span className="font-medium">Save highlight for review</span>.
+              <span className="font-medium">Save snippet</span>.
             </div>
           ) : (
             highlights.map((h) => {

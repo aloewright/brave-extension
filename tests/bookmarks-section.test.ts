@@ -88,6 +88,16 @@ describe("bookmark snapshot and section", () => {
     expect(sectionSource).toContain("Alphabetical");
     expect(sectionSource).toContain("Favorites");
     expect(sectionSource).toContain("Categories");
+    expect(sectionSource).toContain("function BookmarkGroup");
+    expect(sectionSource).toContain('const BOOKMARK_HIDDEN_FAVORITES_KEY = "bookmarks.hiddenFavorites.v1"');
+    expect(sectionSource).toContain("Remove ${bookmark.title} from Favorites");
+    expect(sectionSource).toContain("[BOOKMARK_HIDDEN_FAVORITES_KEY]: [...nextHidden]");
+    expect(sectionSource).toContain("!hiddenFavoriteIds.has(bookmark.id)");
+    expect(sectionSource).toContain("persistBookmarkSnapshot(nextSnapshot)");
+    expect(sectionSource).not.toContain("function markBookmarkNotFavorite");
+    expect(sectionSource).not.toContain("isFavorite: false");
+    expect(sectionSource).not.toContain("isFavorite: true");
+    expect(sectionSource).toContain('setView("favorites")');
     expect(typesSource).toContain('"bookmarks"');
     expect(sidepanelSource).toContain("<BookmarksSection />");
     expect(railSource).toContain('bookmarks: "product-bookmarks"');
