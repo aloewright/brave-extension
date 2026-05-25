@@ -13,6 +13,7 @@ import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 import { RecorderSection } from "./sections/recorder/RecorderSection";
 import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
+import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
@@ -67,6 +68,7 @@ function SidePanel() {
           {active === "extensions" && <ExtensionsSection />}
           {active === "tech" && <TechSection />}
           {active === "session" && <SessionSection />}
+          {active === "tasks" && <TasksSection />}
           {active === "passwords" && <PasswordsSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}

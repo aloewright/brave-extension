@@ -4,6 +4,7 @@ export type SectionId =
   | "extensions"
   | "tech"
   | "session"
+  | "tasks"
   | "passwords"
   | "bookmarks"
   | "captures"
@@ -27,6 +28,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "extensions", label: "Extensions" },
   { id: "tech", label: "Tech" },
   { id: "session", label: "Session" },
+  { id: "tasks", label: "Tasks" },
   { id: "passwords", label: "Passwords" },
   { id: "bookmarks", label: "Bookmarks" },
   { id: "captures", label: "Page Captures" },
