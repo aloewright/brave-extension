@@ -6,6 +6,7 @@ import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
+import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
 import { PasswordsSection } from "./sections/passwords/PasswordsSection";
 import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
@@ -52,24 +53,27 @@ function SidePanel() {
         <SidebarRail active={active} onChange={change} />
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {/*
-           * TerminalSection stays mounted across section switches so the
-           * native-host port (and therefore any running shells / dev servers
-           * the user spawned) survive when the user navigates to another
-           * section in the rail. Hidden via CSS when inactive; the other
-           * sections remain conditionally rendered to keep their original
-           * mount/unmount semantics.
+           * TerminalSection and PasswordsSection stay mounted across section switches so
+           * they survive when the user navigates to another section in the rail.
+           * Hidden via CSS when inactive; the other sections remain conditionally
+           * rendered to keep their original mount/unmount semantics.
            */}
           <div
             className={`flex-1 min-h-0 flex flex-col ${active === "terminal" ? "" : "hidden"}`}
           >
             <TerminalSection active={active === "terminal"} />
           </div>
+          <div
+            className={`flex-1 min-h-0 flex flex-col ${active === "passwords" ? "" : "hidden"}`}
+          >
+            <PasswordsSection />
+          </div>
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
           {active === "tech" && <TechSection />}
           {active === "session" && <SessionSection />}
+          {active === "quickInfo" && <QuickInfoSection />}
           {active === "tasks" && <TasksSection />}
-          {active === "passwords" && <PasswordsSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}

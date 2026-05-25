@@ -28,6 +28,12 @@ describe("SECTIONS reflects ALO-471 reorg", () => {
     expect(ids as string[]).not.toContain("library")
   })
 
+  it("includes Contact Enrichment as a dedicated Quick Info surface", () => {
+    const ids = SECTIONS.map((s) => s.id)
+    expect(ids).toContain<SectionId>("quickInfo")
+    expect(SECTIONS.find((s) => s.id === "quickInfo")?.label).toBe("Contact Enrichment")
+  })
+
   it("Tech and Session appear next to each other to keep the rail scannable", () => {
     const ids = SECTIONS.map((s) => s.id)
     const techIdx = ids.indexOf("tech")

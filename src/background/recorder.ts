@@ -196,15 +196,18 @@ export function updateRecorderAction() {
   }
 }
 
+function isActiveTabGrantError(error: unknown): boolean {
+  const message = (error as Error | undefined)?.message ?? "";
+  return /activeTab|not been invoked/i.test(message);
+}
+
 function shouldFallbackToDisplayCapture(error: unknown): boolean {
   const message = (error as Error | undefined)?.message ?? "";
-  return /activeTab|not been invoked|Chrome pages cannot be captured/i.test(
-    message,
-  );
+  return /Chrome pages cannot be captured/i.test(message);
 }
 
 function tabCaptureStartError(error: unknown): string {
-  if (shouldFallbackToDisplayCapture(error)) {
+  if (isActiveTabGrantError(error)) {
     return [
       "Tab recording needs this tab's activeTab grant.",
       "Click the pinned extension on the tab you want to record, then start recording again.",
@@ -317,7 +320,14 @@ export async function startRecording(opts: {
         streamId = await getTabMediaStreamId(tid);
         tabId = tid;
       } catch (err) {
-        throw new Error(tabCaptureStartError(err));
+        if (shouldFallbackToDisplayCapture(err)) {
+          const selected = await chooseDesktopMediaSelection();
+          streamId = selected.streamId;
+          desktopAudio = selected.desktopAudio;
+          source = "screen";
+        } else {
+          throw new Error(tabCaptureStartError(err));
+        }
       }
     }
 

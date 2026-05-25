@@ -105,7 +105,18 @@ export async function deleteCapture(cfg: ClientConfig, id: string): Promise<void
  * Resolve them against the configured API host so the sidebar can open
  * them in a new tab.
  */
-export function absoluteBlobUrl(cfg: { apiUrl: string }, blobUrl: string): string {
-  if (/^https?:/i.test(blobUrl)) return blobUrl
-  return `${cfg.apiUrl.replace(/\/+$/, "")}${blobUrl.startsWith("/") ? blobUrl : `/${blobUrl}`}`
+export function absoluteBlobUrl(cfg: { apiUrl: string; apiToken?: string }, blobUrl: string): string {
+  const base = /^https?:/i.test(blobUrl)
+    ? blobUrl
+    : `${cfg.apiUrl.replace(/\/+$/, "")}${blobUrl.startsWith("/") ? blobUrl : `/${blobUrl}`}`
+
+  if (!cfg.apiToken) return base
+
+  try {
+    const u = new URL(base)
+    u.searchParams.set("token", cfg.apiToken)
+    return u.toString()
+  } catch {
+    return base
+  }
 }

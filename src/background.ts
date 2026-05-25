@@ -609,7 +609,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleRecorderReady((m) => {
       chrome.runtime.sendMessage(m).catch(() => {});
     });
-    if (activePtySessions.size > 0) void startTerminalKeepAlive();
+    if (shouldKeepNativeHostAlive()) void startTerminalKeepAlive();
   }
 
   if (message.type === "RECORDER_STARTED") {

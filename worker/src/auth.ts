@@ -9,7 +9,7 @@ import type { Env } from "./env"
 export function requireToken(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c, next) => {
     if (c.req.path === "/api/health") return next()
-    const got = c.req.header("x-sidebar-token") ?? ""
+    const got = c.req.header("x-sidebar-token") ?? c.req.query("token") ?? ""
     const want = c.env.SIDEBAR_TOKEN ?? ""
     if (!want || !timingSafeEqual(got, want)) {
       return c.json({ error: { code: "unauthorized", message: "missing or invalid token" } }, 401)
