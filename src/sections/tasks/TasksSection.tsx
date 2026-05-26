@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { LeoBadge, LeoButton, LeoIcon, LeoIconButton } from "../../components/leo"
 import { openExternalLink } from "../../lib/open-url"
 
-const MAIL_TASKS_API_BASE = "https://mail.fly.pm/api/v1"
-const TASKS_URL = "https://tasks.fly.pm/tasks"
+const CAL_TASKS_API_BASE = "https://cal.fly.pm"
+const TASKS_URL = "https://cal.fly.pm/tasks"
 
 interface SharedTask {
   id: string
@@ -36,13 +36,13 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   if (init.body && typeof init.body === "string" && !headers.has("content-type")) {
     headers.set("content-type", "application/json")
   }
-  const res = await fetch(`${MAIL_TASKS_API_BASE}${path}`, {
+  const res = await fetch(`${CAL_TASKS_API_BASE}${path}`, {
     ...init,
     headers,
     credentials: "include"
   })
   if (res.status === 401) {
-    throw new Error("Sign in at mail.fly.pm.")
+    throw new Error("Sign in at cal.fly.pm.")
   }
   if (!res.ok) {
     throw new Error(`Task request failed: ${res.status}`)
@@ -67,7 +67,7 @@ export function TasksSection() {
     setLoading(true)
     setError(null)
     try {
-      const data = await requestJson<{ tasks?: SharedTask[] }>("/tasks")
+      const data = await requestJson<{ tasks?: SharedTask[] }>("/tasks-data")
       setTasks(data.tasks ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tasks")
@@ -90,7 +90,7 @@ export function TasksSection() {
       const scheduledTime = time || null
       const taskDateValue = date || (scheduledTime ? todayInputValue() : null)
       const plannedTime = Number.parseInt(minutes, 10)
-      const data = await requestJson<{ task?: SharedTask }>("/tasks", {
+      const data = await requestJson<{ task?: SharedTask }>("/tasks-data", {
         method: "POST",
         body: JSON.stringify({
           title: trimmedTitle,
@@ -115,7 +115,7 @@ export function TasksSection() {
     setError(null)
     try {
       const data = await requestJson<{ task?: SharedTask }>(
-        `/tasks/${encodeURIComponent(task.id)}/complete`,
+        `/tasks-data/${encodeURIComponent(task.id)}/complete`,
         { method: "POST" }
       )
       if (data.task) {
@@ -129,7 +129,7 @@ export function TasksSection() {
   async function deleteTask(task: SharedTask) {
     setError(null)
     try {
-      await requestJson<{ ok: boolean }>(`/tasks/${encodeURIComponent(task.id)}`, {
+      await requestJson<{ ok: boolean }>(`/tasks-data/${encodeURIComponent(task.id)}`, {
         method: "DELETE"
       })
       setTasks((current) => current.filter((item) => item.id !== task.id))
@@ -151,8 +151,8 @@ export function TasksSection() {
           href={TASKS_URL}
           onClick={openExternalLink(TASKS_URL)}
           className="grid h-8 w-8 shrink-0 place-items-center rounded text-fg/45 transition-colors hover:bg-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          title="Open tasks.fly.pm"
-          aria-label="Open tasks.fly.pm"
+          title="Open cal.fly.pm/tasks"
+          aria-label="Open cal.fly.pm/tasks"
         >
           <LeoIcon name="file-export" size={15} />
         </a>
