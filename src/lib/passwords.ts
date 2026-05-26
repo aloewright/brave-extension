@@ -64,7 +64,12 @@ export async function upsertPasswordLogins(imported: unknown[]): Promise<Passwor
   for (const login of normalized) {
     const key = passwordLoginMergeKey(login)
     const prior = byKey.get(key)
-    byKey.set(key, prior ? { ...prior, ...login, createdAt: prior.createdAt ?? login.createdAt } : login)
+    byKey.set(
+      key,
+      prior
+        ? { ...prior, ...login, id: prior.id, createdAt: prior.createdAt ?? login.createdAt }
+        : login
+    )
   }
   const next = [...byKey.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   await setPasswordLogins(next)
@@ -257,7 +262,7 @@ function normalizeImportedLogin(value: unknown, now: number): PasswordLogin | nu
   const updatedAt = typeof input.updatedAt === "number" ? input.updatedAt : now
   const createdAt = typeof input.createdAt === "number" ? input.createdAt : updatedAt
   return {
-    id: stringValue(input.id) || crypto.randomUUID(),
+    id: stringValue(input.id) || stableImportedLoginId(name, username, urls),
     name,
     username,
     password,
@@ -291,11 +296,20 @@ function passwordLoginMergeKey(login: PasswordLogin): string {
   } catch {
     host = primaryUrl.toLowerCase()
   }
-  return login.id || `${host}:${login.username.toLowerCase()}:${login.name.toLowerCase()}`
+  return `${host}:${login.username.toLowerCase()}:${login.name.toLowerCase()}`
 }
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
+}
+
+function stableImportedLoginId(name: string, username: string, urls: string[]): string {
+  const source = `${name}\n${username}\n${urls.join("\n")}`
+  let hash = 5381
+  for (let i = 0; i < source.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ source.charCodeAt(i)
+  }
+  return `imported-${(hash >>> 0).toString(36)}`
 }
 
 function isDisposableAlias(value: unknown): value is DisposableAlias {

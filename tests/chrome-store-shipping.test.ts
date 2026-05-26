@@ -160,6 +160,7 @@ describe("passwords and Nodewarden", () => {
     expect(source).toContain("findSubmitButton")
     expect(source).toContain(".click()")
     expect(source).toContain("exactMatches.length !== 1")
+    expect(source).toContain("sessionStorage.getItem(submitKey)")
   })
 })
 

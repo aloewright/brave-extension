@@ -1139,13 +1139,15 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
       headers[key] = value;
     }
   }
-  const cookieHeader = await buildCookieHeader(CAL_TASKS_API_BASE);
-  const response = await fetchWithOptionalCookie(url, {
+  const init: RequestInit = {
     method,
     headers,
-    body: typeof message.init?.body === "string" ? message.init.body : undefined,
     credentials: "include",
-  }, cookieHeader);
+  };
+  if (method !== "GET" && typeof message.init?.body === "string") {
+    init.body = message.init.body;
+  }
+  const response = await fetch(url, init);
   const text = await response.text();
   let data: unknown = null;
   if (text) {
@@ -1162,35 +1164,6 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
     return { ok: false, status: response.status, error: `Task request failed: ${response.status}`, data };
   }
   return { ok: true, status: response.status, data };
-}
-
-async function fetchWithOptionalCookie(
-  url: string,
-  init: RequestInit & { headers: Record<string, string> },
-  cookieHeader: string,
-) {
-  if (!cookieHeader) return fetch(url, init);
-  try {
-    return await fetch(url, {
-      ...init,
-      headers: { ...init.headers, cookie: cookieHeader },
-    });
-  } catch (err) {
-    safeRuntimeWarning("task API cookie header fetch failed; retrying credentialed fetch", err);
-    return fetch(url, init);
-  }
-}
-
-async function buildCookieHeader(url: string): Promise<string> {
-  try {
-    const cookies = await chrome.cookies.getAll({ url });
-    return cookies
-      .filter((cookie) => cookie.name && cookie.value)
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join("; ");
-  } catch {
-    return "";
-  }
 }
 
 function normalizeFeeds(feeds: unknown): FeedInfo[] {

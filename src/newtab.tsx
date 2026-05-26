@@ -562,7 +562,8 @@ function normalizeLinkUrl(input: string) {
   }
 }
 
-function normalizeAccent(input: string) {
+function normalizeAccent(input: unknown) {
+  if (typeof input !== "string") return null;
   const value = input.trim();
   const match = value.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
   if (!match) return null;

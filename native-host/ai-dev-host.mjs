@@ -193,11 +193,10 @@ function getClaudeConfig(configPath = "~/.claude.json") {
     join(homedir(), ".config", "claude", "settings.json")
   ]
   for (const p of paths) {
-    if (existsSync(p)) {
-      try {
-        return JSON.parse(readFileSync(p, "utf-8"))
-      } catch { continue }
-    }
+    try {
+      if (!existsSync(p)) continue
+      return JSON.parse(readFileSync(p, "utf-8"))
+    } catch { continue }
   }
   return null
 }
@@ -671,21 +670,30 @@ async function main() {
           const servers = await listAllMCPServers(msg.configPath || "~/.claude.json")
           sendMessage({ type: "mcp", data: JSON.stringify(servers) })
         } else if (msg.action === "add") {
-          const configPath = resolveUserConfigPath(msg.configPath || "~/.claude.json")
-          let config = {}
-          if (existsSync(configPath)) {
-            try { config = JSON.parse(readFileSync(configPath, "utf-8")) } catch {}
+          try {
+            const configPath = resolveUserConfigPath(msg.configPath || "~/.claude.json")
+            let config = {}
+            try {
+              if (existsSync(configPath)) config = JSON.parse(readFileSync(configPath, "utf-8"))
+            } catch {
+              config = {}
+            }
+            if (!config.mcpServers) config.mcpServers = {}
+            config.mcpServers[msg.server.name] = {
+              command: msg.server.command,
+              args: msg.server.args || [],
+              env: msg.server.env || {}
+            }
+            const { writeFileSync } = await import("fs")
+            mkdirSync(dirname(configPath), { recursive: true })
+            writeFileSync(configPath, JSON.stringify(config, null, 2))
+            sendMessage({ type: "mcp", data: JSON.stringify({ ok: true }) })
+          } catch (err) {
+            sendMessage({
+              type: "mcp",
+              data: JSON.stringify({ ok: false, error: err.message || "failed to update config" })
+            })
           }
-          if (!config.mcpServers) config.mcpServers = {}
-          config.mcpServers[msg.server.name] = {
-            command: msg.server.command,
-            args: msg.server.args || [],
-            env: msg.server.env || {}
-          }
-          const { writeFileSync } = await import("fs")
-          mkdirSync(dirname(configPath), { recursive: true })
-          writeFileSync(configPath, JSON.stringify(config, null, 2))
-          sendMessage({ type: "mcp", data: JSON.stringify({ ok: true }) })
         }
         break
       }

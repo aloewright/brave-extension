@@ -63,6 +63,10 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("change", { bubbles: true }))
 }
 
+function autofillSubmitKey(signature: string) {
+  return `ai-dev-sidebar:password-autofill-submitted:${signature}`
+}
+
 function findSubmitButton(passwordInput: HTMLInputElement): HTMLElement | null {
   const root = passwordInput.form ?? document
   const buttons = Array.from(
@@ -98,6 +102,9 @@ async function attemptAutofill(force = false) {
   lastFilledSignature = signature
   if (usernameInput) setInputValue(usernameInput, login.username)
   setInputValue(passwordInput, login.password)
+  const submitKey = autofillSubmitKey(signature)
+  if (sessionStorage.getItem(submitKey) === "1") return
+  sessionStorage.setItem(submitKey, "1")
   window.setTimeout(() => findSubmitButton(passwordInput)?.click(), 150)
 }
 
