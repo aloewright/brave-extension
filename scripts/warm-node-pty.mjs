@@ -37,8 +37,6 @@ if (rejected.length > 0) {
 }
 
 const code = `
-import { prepareNodePtyForGatekeeper } from './installer.mjs';
-prepareNodePtyForGatekeeper('.');
 await import('node-pty');
 console.log('✓ node-pty loaded');
 `
