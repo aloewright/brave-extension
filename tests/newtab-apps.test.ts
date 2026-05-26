@@ -169,6 +169,9 @@ describe("new tab workspace apps", () => {
     );
 
     expect(mainLink?.getAttribute("aria-label")).toBe("GitHub");
+    expect(mainLink?.tagName).toBe("A");
+    expect(mainLink?.className).toContain("workspace-app-card__main");
+    expect(mainLink?.querySelector(".workspace-app-card__mark")).toBeTruthy();
     expect(quickLinkNav?.getAttribute("aria-label")).toBe("GitHub quick links");
     expect(
       quickLinks.map((link) => ({

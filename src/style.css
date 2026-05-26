@@ -343,6 +343,7 @@ body {
 
 .workspace-app-card__link {
   min-width: 0;
+  flex: 1;
   display: flex;
   align-items: flex-start;
   color: inherit;

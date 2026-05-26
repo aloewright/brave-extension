@@ -967,21 +967,19 @@ export function AppCard({
           </svg>
         </button>
       </div>
-      <div className="workspace-app-card__main">
+      <a
+        className="workspace-app-card__link workspace-app-card__main"
+        href={app.url}
+        aria-label={app.name}
+        draggable={false}
+      >
         <span className="workspace-app-card__mark" aria-hidden="true">
           <AppIcon name={app.icon} />
         </span>
-        <a
-          className="workspace-app-card__link"
-          href={app.url}
-          aria-label={app.name}
-          draggable={false}
-        >
-          <span className="workspace-app-card__body">
-            <span className="workspace-app-card__name">{app.name}</span>
-          </span>
-        </a>
-      </div>
+        <span className="workspace-app-card__body">
+          <span className="workspace-app-card__name">{app.name}</span>
+        </span>
+      </a>
       {app.quickLinks?.length ? (
         <nav
           className="workspace-app-card__quick-links"
