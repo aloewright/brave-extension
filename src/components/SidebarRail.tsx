@@ -26,7 +26,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   tasks: "list-checks",
   passwords: "lock",
   bookmarks: "product-bookmarks",
-  captures: "screenshot",
+  captures: "image-stack",
   cookies: "cookie",
   recorder: "radio-checked",
   eyedropper: "paint-brush",

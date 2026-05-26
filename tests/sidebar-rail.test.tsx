@@ -42,6 +42,22 @@ describe("SECTIONS reflects ALO-471 reorg", () => {
     expect(source).toContain('quickInfo: "avatar"')
   })
 
+  it("uses a unique image stack icon for Page Captures", () => {
+    const railSource = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+    const iconSource = readFileSync(
+      join(process.cwd(), "src/components/leo.tsx"),
+      "utf8"
+    )
+
+    expect(railSource).toContain('captures: "image-stack"')
+    expect(railSource).toContain('icon: "screenshot"')
+    expect(iconSource).toContain('| "image-stack"')
+    expect(iconSource).toContain('"image-stack":')
+  })
+
   it("Tech and Session appear next to each other to keep the rail scannable", () => {
     const ids = SECTIONS.map((s) => s.id)
     const techIdx = ids.indexOf("tech")
