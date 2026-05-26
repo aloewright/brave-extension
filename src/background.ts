@@ -66,6 +66,7 @@ const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
 const RSS_FEED_MENU_ID = "save-rss-feed";
 const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
+const CAL_TASKS_API_BASE = "https://cal.fly.pm";
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
@@ -200,10 +201,41 @@ function pingNativeHost() {
   postToNative(port, { type: "ping" });
 }
 
+let lastNativeMcpEnsureAt = 0;
+let nativeMcpEnsurePromise: Promise<void> | null = null;
+const NATIVE_MCP_ENSURE_INTERVAL_MS = 30_000;
+
+async function ensureNativeMcpConnection(reason = "keepalive", force = false) {
+  if (!shouldKeepNativeHostAlive()) return;
+  const now = Date.now();
+  if (!force && now - lastNativeMcpEnsureAt < NATIVE_MCP_ENSURE_INTERVAL_MS) return;
+  if (nativeMcpEnsurePromise) return nativeMcpEnsurePromise;
+  lastNativeMcpEnsureAt = now;
+  nativeMcpEnsurePromise = (async () => {
+    const port = nativePort ?? connectNativeHost();
+    if (!port) return;
+    try {
+      const settings = await getSettings();
+      postToNative(port, {
+        type: "mcp.ensure",
+        configPath: settings.claudeConfigPath || "~/.claude.json",
+        reason,
+      });
+    } catch (err) {
+      safeRuntimeWarning("failed to ensure path-aware native MCP registration", err);
+      postToNative(port, { type: "mcp.ensure", configPath: "~/.claude.json", reason });
+    }
+    postToNative(port, { type: "ping" });
+  })().finally(() => {
+    nativeMcpEnsurePromise = null;
+  });
+  return nativeMcpEnsurePromise;
+}
+
 function reconcileTerminalKeepAlive() {
   if (shouldKeepNativeHostAlive()) {
     void startTerminalKeepAlive();
-    pingNativeHost();
+    void ensureNativeMcpConnection("window-keepalive");
     return;
   }
   void stopTerminalKeepAlive();
@@ -224,6 +256,7 @@ async function syncNormalBrowserWindows() {
       }
       normalWindowTrackingReady = true;
       reconcileTerminalKeepAlive();
+      void ensureNativeMcpConnection("window-sync", true);
     } catch (err) {
       safeRuntimeWarning("failed to sync browser windows for terminal keepalive", err);
     }
@@ -333,7 +366,7 @@ if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
       if (!shouldKeepNativeHostAlive()) void syncNormalBrowserWindows();
       if (sidebarPorts.size === 0 && !shouldKeepNativeHostAlive()) return;
       if (shouldKeepNativeHostAlive()) void startTerminalKeepAlive();
-      pingNativeHost();
+      void ensureNativeMcpConnection("heartbeat");
     });
   } catch (err) {
     safeRuntimeWarning("failed to initialize heartbeat alarm", err);
@@ -444,6 +477,7 @@ chrome.windows?.onCreated?.addListener?.((win) => {
   normalWindowTrackingReady = true;
   normalBrowserWindowIds.add(win.id);
   reconcileTerminalKeepAlive();
+  void ensureNativeMcpConnection("window-created", true);
 });
 
 chrome.windows?.onRemoved?.addListener?.((windowId) => {
@@ -718,6 +752,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       sendResponse({ feeds: normalizeFeeds(response?.feeds) });
     });
+    return true;
+  }
+
+  if (message.type === "TASKS_API_REQUEST") {
+    handleTasksApiRequest(message)
+      .then((result) => sendResponse(result))
+      .catch((err) => {
+        sendResponse({
+          ok: false,
+          status: 0,
+          error: err instanceof Error ? err.message : "Task request failed",
+        });
+      });
     return true;
   }
 
@@ -1059,6 +1106,92 @@ async function saveLinkToLibrary(
 }
 
 type FeedInfo = { url: string; title: string; type: "rss" | "atom" | "json" };
+
+type TasksApiMessage = {
+  path?: string;
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  };
+};
+
+async function handleTasksApiRequest(message: TasksApiMessage) {
+  const path = typeof message.path === "string" ? message.path : "";
+  if (!path.startsWith("/tasks-data")) {
+    return { ok: false, status: 400, error: "Unsupported task API path" };
+  }
+  const method = (message.init?.method || "GET").toUpperCase();
+  if (!["GET", "POST", "DELETE"].includes(method)) {
+    return { ok: false, status: 405, error: "Unsupported task API method" };
+  }
+  const taskUrl = new URL(path, CAL_TASKS_API_BASE);
+  if (
+    taskUrl.origin !== CAL_TASKS_API_BASE ||
+    (taskUrl.pathname !== "/tasks-data" && !taskUrl.pathname.startsWith("/tasks-data/"))
+  ) {
+    return { ok: false, status: 400, error: "Unsupported task API path" };
+  }
+  const url = taskUrl.toString();
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(message.init?.headers || {})) {
+    if (key.toLowerCase() === "content-type" && typeof value === "string") {
+      headers[key] = value;
+    }
+  }
+  const cookieHeader = await buildCookieHeader(CAL_TASKS_API_BASE);
+  const response = await fetchWithOptionalCookie(url, {
+    method,
+    headers,
+    body: typeof message.init?.body === "string" ? message.init.body : undefined,
+    credentials: "include",
+  }, cookieHeader);
+  const text = await response.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { text };
+    }
+  }
+  if (response.status === 401) {
+    return { ok: false, status: 401, error: "Sign in at cal.fly.pm.", data };
+  }
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: `Task request failed: ${response.status}`, data };
+  }
+  return { ok: true, status: response.status, data };
+}
+
+async function fetchWithOptionalCookie(
+  url: string,
+  init: RequestInit & { headers: Record<string, string> },
+  cookieHeader: string,
+) {
+  if (!cookieHeader) return fetch(url, init);
+  try {
+    return await fetch(url, {
+      ...init,
+      headers: { ...init.headers, cookie: cookieHeader },
+    });
+  } catch (err) {
+    safeRuntimeWarning("task API cookie header fetch failed; retrying credentialed fetch", err);
+    return fetch(url, init);
+  }
+}
+
+async function buildCookieHeader(url: string): Promise<string> {
+  try {
+    const cookies = await chrome.cookies.getAll({ url });
+    return cookies
+      .filter((cookie) => cookie.name && cookie.value)
+      .map((cookie) => `${cookie.name}=${cookie.value}`)
+      .join("; ");
+  } catch {
+    return "";
+  }
+}
 
 function normalizeFeeds(feeds: unknown): FeedInfo[] {
   if (!Array.isArray(feeds)) return [];

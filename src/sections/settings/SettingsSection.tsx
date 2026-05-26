@@ -108,10 +108,11 @@ export function SettingsSection() {
           showToast("Token rotated; reconnect any external `claude` sessions.")
           break
         case "mcp.register":
-          showToast("Registered Brave Extension MCP server in ~/.claude.json.")
+        case "mcp.ensure":
+          showToast(`Registered Brave Extension MCP server in ${msg.configPath || "~/.claude.json"}.`)
           break
         case "mcp.unregister":
-          showToast("Unregistered from ~/.claude.json.")
+          showToast(`Unregistered from ${msg.configPath || "~/.claude.json"}.`)
           break
         case "mcp.terminal-path.set":
           showToast(
@@ -179,7 +180,8 @@ export function SettingsSection() {
   useEffect(() => {
     if (settings && nativeHost.connected) {
       nativeHost.getMCPServers(settings.claudeConfigPath)
-      nativeHost.mcpStatus()
+      nativeHost.mcpEnsure(settings.claudeConfigPath)
+      nativeHost.mcpStatus(settings.claudeConfigPath)
       nativeHost.dopplerSetDefaults({
         project: settings.dopplerProject,
         config: settings.dopplerConfig,
@@ -221,10 +223,10 @@ export function SettingsSection() {
 
   // Periodic refresh while panel is mounted (every 10s).
   useEffect(() => {
-    if (!nativeHost.connected) return
-    const t = setInterval(() => nativeHost.mcpStatus(), 10_000)
+    if (!settings || !nativeHost.connected) return
+    const t = setInterval(() => nativeHost.mcpStatus(settings.claudeConfigPath), 10_000)
     return () => clearInterval(t)
-  }, [nativeHost.connected])
+  }, [nativeHost.connected, settings?.claudeConfigPath])
 
   if (!settings) {
     return (
@@ -246,21 +248,21 @@ export function SettingsSection() {
         status: mcpStatus,
         refresh: () => {
           beginPendingAction("mcp.refresh")
-          nativeHost.mcpStatus()
+          nativeHost.mcpStatus(settings.claudeConfigPath)
         },
         rotateToken: () => {
           beginPendingAction("mcp.rotateToken")
-          nativeHost.mcpRotateToken()
+          nativeHost.mcpRotateToken(settings.claudeConfigPath)
         },
         resetRegistration: () => {
           beginPendingAction("mcp.resetRegistration")
-          nativeHost.mcpUnregister()
+          nativeHost.mcpUnregister(settings.claudeConfigPath)
           // Re-register after a tick so unregister flushes first.
-          setTimeout(() => nativeHost.mcpRegister(), 250)
+          setTimeout(() => nativeHost.mcpRegister(settings.claudeConfigPath), 250)
         },
         setTerminalPath: (enabled: boolean) => {
           beginPendingAction("mcp.terminalPath")
-          nativeHost.mcpSetTerminalPath(enabled)
+          nativeHost.mcpSetTerminalPath(enabled, settings.claudeConfigPath)
         },
         pending: {
           refresh: !!pendingActions["mcp.refresh"],

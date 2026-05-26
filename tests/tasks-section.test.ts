@@ -15,17 +15,20 @@ describe("tasks section", () => {
     expect(railSource).toContain('tasks: "list-checks"')
   })
 
-  it("uses the shared cal.fly.pm task API", () => {
+  it("uses the background cal.fly.pm task API bridge", () => {
     const source = readFileSync(
       join(process.cwd(), "src/sections/tasks/TasksSection.tsx"),
       "utf8"
     )
+    const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
 
-    expect(source).toContain('const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
-    expect(source).toContain('credentials: "include"')
+    expect(source).toContain('type: "TASKS_API_REQUEST"')
     expect(source).toContain('requestJson<{ tasks?: SharedTask[] }>("/tasks-data")')
     expect(source).toContain('method: "POST"')
     expect(source).toContain('method: "DELETE"')
     expect(source).toContain("Timed items appear on Calendar.")
+    expect(background).toContain('const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
+    expect(background).toContain('chrome.cookies.getAll({ url })')
+    expect(background).toContain('credentials: "include"')
   })
 })

@@ -264,9 +264,9 @@ export function SettingsPanel({
                 }
               />
               <StatusRow
-                label="Registered in ~/.claude.json"
+                label="Registered in configured Claude config"
                 ok={!!mcp.status?.registered}
-                detail={mcp.status?.claudeJsonStatus || "unknown"}
+                detail={mcp.status?.configPath || mcp.status?.claudeJsonStatus || "unknown"}
               />
               <StatusRow
                 label="Available in any terminal"

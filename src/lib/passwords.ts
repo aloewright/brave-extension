@@ -19,6 +19,21 @@ export interface PasswordLogin {
   updatedAt: number
 }
 
+export type PasswordLoginImport = Partial<PasswordLogin> & {
+  decName?: string
+  decNotes?: string
+  uri?: string
+  url?: string
+  login?: {
+    username?: string | null
+    password?: string | null
+    decUsername?: string
+    decPassword?: string
+    uris?: Array<string | { uri?: string | null; decUri?: string; url?: string }>
+  }
+  uris?: Array<string | { uri?: string | null; decUri?: string; url?: string }>
+}
+
 export interface DisposableAlias {
   id: string
   alias: string
@@ -34,6 +49,26 @@ export async function getPasswordLogins(): Promise<PasswordLogin[]> {
 
 export async function setPasswordLogins(logins: PasswordLogin[]): Promise<void> {
   await passwordStorageArea().set({ [PASSWORD_AUTOFILL_STORAGE_KEY]: logins.slice(0, 200) })
+}
+
+export async function upsertPasswordLogins(imported: unknown[]): Promise<PasswordLogin[]> {
+  const now = Date.now()
+  const normalized = imported
+    .map((item) => normalizeImportedLogin(item, now))
+    .filter((login): login is PasswordLogin => Boolean(login))
+  if (!normalized.length) return getPasswordLogins()
+
+  const existing = await getPasswordLogins()
+  const byKey = new Map<string, PasswordLogin>()
+  for (const login of existing) byKey.set(passwordLoginMergeKey(login), login)
+  for (const login of normalized) {
+    const key = passwordLoginMergeKey(login)
+    const prior = byKey.get(key)
+    byKey.set(key, prior ? { ...prior, ...login, createdAt: prior.createdAt ?? login.createdAt } : login)
+  }
+  const next = [...byKey.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  await setPasswordLogins(next)
+  return next
 }
 
 export async function addPasswordLogin(input: Omit<PasswordLogin, "id" | "updatedAt">) {
@@ -194,7 +229,73 @@ function isPasswordLogin(value: unknown): value is PasswordLogin {
 }
 
 function passwordStorageArea(): chrome.storage.StorageArea {
-  return chrome.storage.session ?? chrome.storage.local
+  return chrome.storage.local
+}
+
+function normalizeImportedLogin(value: unknown, now: number): PasswordLogin | null {
+  if (!value || typeof value !== "object") return null
+  const input = value as PasswordLoginImport
+  const login = input.login && typeof input.login === "object" ? input.login : undefined
+  const password = stringValue(input.password) || stringValue(login?.decPassword) || stringValue(login?.password)
+  if (!password) return null
+
+  const username = stringValue(input.username) || stringValue(login?.decUsername) || stringValue(login?.username)
+  const urls = normalizeImportedUrls([
+    ...(Array.isArray(input.urls) ? input.urls : []),
+    ...(Array.isArray(input.uris) ? input.uris : []),
+    ...(Array.isArray(login?.uris) ? login!.uris! : []),
+    input.uri,
+    input.url
+  ])
+  if (!urls.length) return null
+
+  const name =
+    stringValue(input.name) ||
+    stringValue(input.decName) ||
+    urls[0]?.replace(/^https?:\/\//, "").replace(/\/.*$/, "") ||
+    "Login"
+  const updatedAt = typeof input.updatedAt === "number" ? input.updatedAt : now
+  const createdAt = typeof input.createdAt === "number" ? input.createdAt : updatedAt
+  return {
+    id: stringValue(input.id) || crypto.randomUUID(),
+    name,
+    username,
+    password,
+    urls,
+    notes: stringValue(input.notes) || stringValue(input.decNotes) || undefined,
+    folder: stringValue(input.folder) || undefined,
+    favorite: input.favorite === true,
+    createdAt,
+    updatedAt
+  }
+}
+
+function normalizeImportedUrls(values: unknown[]): string[] {
+  const urls = values
+    .map((value) => {
+      if (typeof value === "string") return value
+      if (!value || typeof value !== "object") return ""
+      const record = value as { uri?: string | null; decUri?: string; url?: string }
+      return stringValue(record.decUri) || stringValue(record.uri) || stringValue(record.url)
+    })
+    .map((url) => url.trim())
+    .filter(Boolean)
+  return [...new Set(urls)]
+}
+
+function passwordLoginMergeKey(login: PasswordLogin): string {
+  const primaryUrl = login.urls[0] || ""
+  let host = primaryUrl
+  try {
+    host = new URL(primaryUrl).hostname.toLowerCase().replace(/^www\./, "")
+  } catch {
+    host = primaryUrl.toLowerCase()
+  }
+  return login.id || `${host}:${login.username.toLowerCase()}:${login.name.toLowerCase()}`
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
 }
 
 function isDisposableAlias(value: unknown): value is DisposableAlias {

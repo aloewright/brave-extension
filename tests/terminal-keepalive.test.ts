@@ -18,6 +18,9 @@ describe("terminal native-host keepalive", () => {
     expect(background).toContain('chrome.windows?.onCreated?.addListener');
     expect(background).toContain('chrome.windows?.onRemoved?.addListener');
     expect(background).toContain('windowTypes: ["normal"]');
+    expect(background).toContain("ensureNativeMcpConnection");
+    expect(background).toContain('type: "mcp.ensure"');
+    expect(background).toContain("settings.claudeConfigPath");
     expect(background).toContain("startTerminalKeepAlive");
     expect(background).toContain("stopTerminalKeepAlive");
   });
