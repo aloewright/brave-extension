@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { formatColor, parseColor } from "../../utils/color"
 import type { RGBA } from "../../types"
 import {
