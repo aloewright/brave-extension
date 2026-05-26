@@ -90,7 +90,7 @@ describe("new tab workspace apps", () => {
     );
     expect(source).toContain("const WORKSPACE_APP_STORAGE_KEYS = [");
     expect(source).toContain(
-      "chrome.storage.local.get(WORKSPACE_APP_STORAGE_KEYS",
+      "[...WORKSPACE_APP_STORAGE_KEYS, QUICK_LINKS_STORAGE_KEY]",
     );
     expect(source).toContain("const removeApp = (app: WorkspaceApp) =>");
     expect(source).toContain("aria-label={`Remove ${app.name}`}");

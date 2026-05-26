@@ -264,6 +264,112 @@ body {
   display: flex;
   justify-content: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.newtab-quick-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.newtab-quick-links-row--editing .newtab-quick-link-item {
+  position: relative;
+}
+
+.newtab-quick-link-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.newtab-quick-link-item__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.newtab-quick-link-item__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--foreground) / 0.18);
+  background: rgb(var(--background-elevated, var(--background)));
+  color: rgb(var(--foreground) / 0.72);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.newtab-quick-link-item__action:hover,
+.newtab-quick-link-item__action:focus-visible {
+  border-color: rgb(var(--foreground) / 0.32);
+  color: rgb(var(--foreground));
+  outline: none;
+}
+
+.newtab-quick-link-item__action--remove:hover,
+.newtab-quick-link-item__action--remove:focus-visible {
+  border-color: rgb(251 113 133 / 0.45);
+  color: rgb(251 113 133);
+}
+
+.newtab-quick-link-item__action svg {
+  width: 12px;
+  height: 12px;
+}
+
+.newtab-quick-links__toggle {
+  border: 1px solid rgb(var(--foreground) / 0.18);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgb(var(--foreground) / 0.72);
+  background: rgb(var(--background-elevated, var(--background)));
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.newtab-quick-links__toggle:hover,
+.newtab-quick-links__toggle:focus-visible {
+  border-color: rgb(var(--foreground) / 0.32);
+  color: rgb(var(--foreground));
+  outline: none;
+}
+
+.newtab-quick-links__toggle[aria-pressed="true"] {
+  border-color: rgb(var(--foreground) / 0.42);
+  color: rgb(var(--foreground));
+  background: rgb(var(--foreground) / 0.08);
+}
+
+.newtab-quick-link--add {
+  border-style: dashed;
+  color: rgb(var(--foreground) / 0.55);
+}
+
+.newtab-quick-link--add:hover,
+.newtab-quick-link--add:focus-visible {
+  color: rgb(var(--background));
+}
+
+.newtab-edit-modal__preview--quick-link {
+  align-items: center;
+}
+
+.newtab-quick-link--preview {
+  pointer-events: none;
+  flex-shrink: 0;
 }
 
 .newtab-quick-link {
