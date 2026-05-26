@@ -25,7 +25,30 @@ export type WorkspaceAppIcon =
   | "mail"
   | "palette"
   | "pencil"
-  | "video";
+  | "video"
+  | "phosphor:atom"
+  | "phosphor:briefcase"
+  | "phosphor:chat-circle"
+  | "phosphor:code"
+  | "phosphor:database"
+  | "phosphor:planet"
+  | "phosphor:rocket"
+  | "phosphor:terminal-window"
+  | "hero:academic-cap"
+  | "hero:bolt"
+  | "hero:bookmark-square"
+  | "hero:command-line"
+  | "hero:cube-transparent"
+  | "hero:globe-alt"
+  | "hero:paper-airplane"
+  | "hero:sparkles"
+  | "lucide:boxes"
+  | "lucide:building"
+  | "lucide:database"
+  | "lucide:monitor"
+  | "lucide:shield"
+  | "lucide:star"
+  | "lucide:zap";
 
 export const WORKSPACE_APPS: WorkspaceApp[] = [
   {
