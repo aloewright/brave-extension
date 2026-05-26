@@ -7,7 +7,7 @@ import { dirname, join } from "path"
 import { fileURLToPath } from "url"
 import { scrubQuarantine } from "../installer.mjs"
 
-const hostDir = dirname(fileURLToPath(new URL("..", import.meta.url)))
+const hostDir = fileURLToPath(new URL('..', import.meta.url))
 const { errors } = scrubQuarantine(join(hostDir, "node_modules"))
 for (const e of errors) {
   console.warn(`[scrub-quarantine] ${e.path}: ${e.message}`)
