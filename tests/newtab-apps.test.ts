@@ -148,6 +148,9 @@ describe("new tab workspace apps", () => {
           onDragEnd: () => {},
           onDrop: () => {},
         },
+        iconPickerOpen: false,
+        onChangeIcon: () => {},
+        onToggleIconPicker: () => {},
         onRemove: () => {},
       }),
     );
@@ -179,6 +182,62 @@ describe("new tab workspace apps", () => {
       },
       { label: "Feed", url: "https://github.com/dashboard-feed" },
     ]);
+  });
+
+  it("lets users change card icons from the card icon control", () => {
+    const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
+    const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
+    const github = WORKSPACE_APPS.find((app) => app.name === "GitHub");
+
+    expect(source).toContain(
+      'const APP_ICON_STORAGE_KEY = "newtab.appIconOverrides"',
+    );
+    expect(source).toContain("function sanitizeIconOverrides");
+    expect(source).toContain("function applyIconOverrides");
+    expect(source).toContain("aria-label={`Change ${app.name} icon`}");
+    expect(source).toContain("onChangeIcon(app, choice.icon)");
+    expect(styles).toContain(".workspace-app-card__icon-menu");
+    expect(styles).toContain(".workspace-app-card__icon-option");
+
+    if (!github) throw new Error("GitHub app missing");
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      createElement(AppCard, {
+        app: github,
+        drag: {
+          index: 0,
+          isDragging: false,
+          isDropTarget: false,
+          onDragStart: () => {},
+          onDragOver: () => {},
+          onDragLeave: () => {},
+          onDragEnd: () => {},
+          onDrop: () => {},
+        },
+        iconPickerOpen: true,
+        onChangeIcon: () => {},
+        onToggleIconPicker: () => {},
+        onRemove: () => {},
+      }),
+    );
+
+    const iconButton = container.querySelector<HTMLButtonElement>(
+      ".workspace-app-card__icon-button",
+    );
+    const menu = container.querySelector(".workspace-app-card__icon-menu");
+    const options = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        ".workspace-app-card__icon-option",
+      ),
+    );
+
+    expect(iconButton?.getAttribute("aria-label")).toBe("Change GitHub icon");
+    expect(iconButton?.getAttribute("aria-expanded")).toBe("true");
+    expect(menu?.getAttribute("aria-label")).toBe("GitHub icon choices");
+    expect(options).toHaveLength(13);
+    expect(
+      options.map((option) => option.getAttribute("aria-label")),
+    ).toContain("Use Mail icon for GitHub");
   });
 
   it("keeps the new tab layout grouped for search, cards, tabs, and history", () => {

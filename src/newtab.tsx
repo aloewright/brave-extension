@@ -111,6 +111,23 @@ const APP_ICONS: Record<WorkspaceAppIcon, ReactNode> = {
   ),
 };
 
+const APP_ICON_CHOICES: Array<{ icon: WorkspaceAppIcon; label: string }> = [
+  { icon: "app-store", label: "App Store" },
+  { icon: "article", label: "Article" },
+  { icon: "book", label: "Book" },
+  { icon: "calendar", label: "Calendar" },
+  { icon: "cloud", label: "Cloud" },
+  { icon: "directory", label: "Directory" },
+  { icon: "github", label: "GitHub" },
+  { icon: "link", label: "Link" },
+  { icon: "linear", label: "Linear" },
+  { icon: "mail", label: "Mail" },
+  { icon: "palette", label: "Palette" },
+  { icon: "pencil", label: "Pencil" },
+  { icon: "video", label: "Video" },
+];
+const APP_ICON_NAMES = new Set(APP_ICON_CHOICES.map((choice) => choice.icon));
+
 interface BrowserShortcut {
   id: string;
   title: string;
@@ -404,11 +421,17 @@ export function AppCard({
   app,
   size = "standard",
   drag,
+  iconPickerOpen,
+  onChangeIcon,
+  onToggleIconPicker,
   onRemove,
 }: {
   app: WorkspaceApp;
   size?: "standard" | "small";
   drag: AppDrag;
+  iconPickerOpen: boolean;
+  onChangeIcon: (app: WorkspaceApp, icon: WorkspaceAppIcon) => void;
+  onToggleIconPicker: (app: WorkspaceApp) => void;
   onRemove: (app: WorkspaceApp) => void;
 }) {
   const classes = [
@@ -442,19 +465,64 @@ export function AppCard({
       }}
       style={{ "--workspace-app-accent": app.accent } as CSSProperties}
     >
-      <a
-        className="workspace-app-card__link"
-        href={app.url}
-        aria-label={app.name}
-        draggable={false}
-      >
-        <span className="workspace-app-card__mark" aria-hidden="true">
-          <AppIcon name={app.icon} />
-        </span>
-        <span className="workspace-app-card__body">
-          <span className="workspace-app-card__name">{app.name}</span>
-        </span>
-      </a>
+      <div className="workspace-app-card__main">
+        <button
+          type="button"
+          className="workspace-app-card__icon-button"
+          aria-expanded={iconPickerOpen}
+          aria-haspopup="menu"
+          aria-label={`Change ${app.name} icon`}
+          title={`Change ${app.name} icon`}
+          draggable={false}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleIconPicker(app);
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <span className="workspace-app-card__mark" aria-hidden="true">
+            <AppIcon name={app.icon} />
+          </span>
+        </button>
+        {iconPickerOpen ? (
+          <div
+            className="workspace-app-card__icon-menu"
+            role="menu"
+            aria-label={`${app.name} icon choices`}
+          >
+            {APP_ICON_CHOICES.map((choice) => (
+              <button
+                key={choice.icon}
+                type="button"
+                className="workspace-app-card__icon-option"
+                role="menuitemradio"
+                aria-checked={app.icon === choice.icon}
+                aria-label={`Use ${choice.label} icon for ${app.name}`}
+                title={choice.label}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onChangeIcon(app, choice.icon);
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <AppIcon name={choice.icon} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <a
+          className="workspace-app-card__link"
+          href={app.url}
+          aria-label={app.name}
+          draggable={false}
+        >
+          <span className="workspace-app-card__body">
+            <span className="workspace-app-card__name">{app.name}</span>
+          </span>
+        </a>
+      </div>
       {app.quickLinks?.length ? (
         <nav
           className="workspace-app-card__quick-links"
@@ -592,10 +660,12 @@ function BrowserPanel({
 const APP_ORDER_STORAGE_KEY = "newtab.appOrder";
 const CUSTOM_APPS_STORAGE_KEY = "newtab.customApps";
 const HIDDEN_APPS_STORAGE_KEY = "newtab.hiddenApps";
+const APP_ICON_STORAGE_KEY = "newtab.appIconOverrides";
 const WORKSPACE_APP_STORAGE_KEYS = [
   APP_ORDER_STORAGE_KEY,
   CUSTOM_APPS_STORAGE_KEY,
   HIDDEN_APPS_STORAGE_KEY,
+  APP_ICON_STORAGE_KEY,
 ];
 
 function reorderApps(
@@ -627,6 +697,13 @@ function applyStoredOrder(
   return ordered;
 }
 
+function isWorkspaceAppIcon(input: unknown): input is WorkspaceAppIcon {
+  return (
+    typeof input === "string" &&
+    APP_ICON_NAMES.has(input as WorkspaceAppIcon)
+  );
+}
+
 function sanitizeCustomApps(input: unknown): WorkspaceApp[] {
   if (!Array.isArray(input)) return [];
   return input.filter((entry): entry is WorkspaceApp => {
@@ -635,8 +712,30 @@ function sanitizeCustomApps(input: unknown): WorkspaceApp[] {
       typeof entry === "object" &&
       typeof (entry as WorkspaceApp).name === "string" &&
       typeof (entry as WorkspaceApp).url === "string" &&
-      typeof (entry as WorkspaceApp).domain === "string"
+      typeof (entry as WorkspaceApp).domain === "string" &&
+      typeof (entry as WorkspaceApp).accent === "string" &&
+      isWorkspaceAppIcon((entry as WorkspaceApp).icon)
     );
+  });
+}
+
+function sanitizeIconOverrides(input: unknown): Record<string, WorkspaceAppIcon> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries(
+    Object.entries(input).filter(
+      (entry): entry is [string, WorkspaceAppIcon] =>
+        typeof entry[0] === "string" && isWorkspaceAppIcon(entry[1]),
+    ),
+  );
+}
+
+function applyIconOverrides(
+  allApps: WorkspaceApp[],
+  overrides: Record<string, WorkspaceAppIcon>,
+): WorkspaceApp[] {
+  return allApps.map((app) => {
+    const icon = overrides[app.url];
+    return icon ? { ...app, icon } : app;
   });
 }
 
@@ -645,6 +744,7 @@ function NewTabWorkspace() {
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [iconPickerUrl, setIconPickerUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -663,18 +763,22 @@ function NewTabWorkspace() {
           ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
           ...customs,
         ];
+        const withIconOverrides = applyIconOverrides(
+          combined,
+          sanitizeIconOverrides(result?.[APP_ICON_STORAGE_KEY]),
+        );
         const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
         if (Array.isArray(storedOrder) && storedOrder.length > 0) {
           setApps(
             applyStoredOrder(
-              combined,
+              withIconOverrides,
               storedOrder.filter(
                 (url): url is string => typeof url === "string",
               ),
             ),
           );
         } else {
-          setApps(combined);
+          setApps(withIconOverrides);
         }
       });
     } catch {
@@ -684,6 +788,15 @@ function NewTabWorkspace() {
       live = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!iconPickerUrl) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIconPickerUrl(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [iconPickerUrl]);
 
   const persistOrder = (next: WorkspaceApp[]) => {
     setApps(next);
@@ -744,19 +857,52 @@ function NewTabWorkspace() {
     }
   };
 
+  const changeAppIcon = (app: WorkspaceApp, icon: WorkspaceAppIcon) => {
+    const nextApps = apps.map((candidate) =>
+      candidate.url === app.url ? { ...candidate, icon } : candidate,
+    );
+    setApps(nextApps);
+    setIconPickerUrl(null);
+
+    try {
+      chrome.storage.local.get(
+        [APP_ICON_STORAGE_KEY, CUSTOM_APPS_STORAGE_KEY],
+        (result) => {
+          const iconOverrides = sanitizeIconOverrides(
+            result?.[APP_ICON_STORAGE_KEY],
+          );
+          const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
+          chrome.storage.local.set({
+            [APP_ICON_STORAGE_KEY]: { ...iconOverrides, [app.url]: icon },
+            [CUSTOM_APPS_STORAGE_KEY]: customs.map((candidate) =>
+              candidate.url === app.url ? { ...candidate, icon } : candidate,
+            ),
+          });
+        },
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
   const removeApp = (app: WorkspaceApp) => {
     const nextApps = apps.filter((candidate) => candidate.url !== app.url);
     setApps(nextApps);
     setDragIndex(null);
     setOverIndex(null);
+    setIconPickerUrl(null);
 
     try {
       chrome.storage.local.get(
-        [CUSTOM_APPS_STORAGE_KEY, HIDDEN_APPS_STORAGE_KEY],
+        [CUSTOM_APPS_STORAGE_KEY, HIDDEN_APPS_STORAGE_KEY, APP_ICON_STORAGE_KEY],
         (result) => {
           const existingCustoms = sanitizeCustomApps(
             result?.[CUSTOM_APPS_STORAGE_KEY],
           );
+          const iconOverrides = sanitizeIconOverrides(
+            result?.[APP_ICON_STORAGE_KEY],
+          );
+          delete iconOverrides[app.url];
           const existingHidden = Array.isArray(
             result?.[HIDDEN_APPS_STORAGE_KEY],
           )
@@ -776,6 +922,7 @@ function NewTabWorkspace() {
               (candidate) => candidate.url !== app.url,
             ),
             [HIDDEN_APPS_STORAGE_KEY]: hidden,
+            [APP_ICON_STORAGE_KEY]: iconOverrides,
             [APP_ORDER_STORAGE_KEY]: nextApps.map((candidate) => candidate.url),
           });
         },
@@ -792,6 +939,10 @@ function NewTabWorkspace() {
     return { top, focus, compact };
   }, [apps]);
 
+  const toggleIconPicker = (app: WorkspaceApp) => {
+    setIconPickerUrl((current) => (current === app.url ? null : app.url));
+  };
+
   const handleDrop = (toIndex: number) => {
     const from = dragIndex;
     setDragIndex(null);
@@ -806,7 +957,10 @@ function NewTabWorkspace() {
     isDragging: dragIndex === index,
     isDropTarget:
       overIndex === index && dragIndex !== null && dragIndex !== index,
-    onDragStart: (i) => setDragIndex(i),
+    onDragStart: (i) => {
+      setIconPickerUrl(null);
+      setDragIndex(i);
+    },
     onDragOver: (i) => setOverIndex(i),
     onDragLeave: () => setOverIndex(null),
     onDragEnd: () => {
@@ -836,6 +990,9 @@ function NewTabWorkspace() {
                 key={app.url}
                 app={app}
                 drag={makeDrag(i)}
+                iconPickerOpen={iconPickerUrl === app.url}
+                onChangeIcon={changeAppIcon}
+                onToggleIconPicker={toggleIconPicker}
                 onRemove={removeApp}
               />
             ))}
@@ -849,6 +1006,9 @@ function NewTabWorkspace() {
                 key={app.url}
                 app={app}
                 drag={makeDrag(TOP_APP_COUNT + i)}
+                iconPickerOpen={iconPickerUrl === app.url}
+                onChangeIcon={changeAppIcon}
+                onToggleIconPicker={toggleIconPicker}
                 onRemove={removeApp}
               />
             ))}
@@ -863,6 +1023,9 @@ function NewTabWorkspace() {
                 app={app}
                 size="small"
                 drag={makeDrag(TOP_APP_COUNT + FOCUS_APP_COUNT + i)}
+                iconPickerOpen={iconPickerUrl === app.url}
+                onChangeIcon={changeAppIcon}
+                onToggleIconPicker={toggleIconPicker}
                 onRemove={removeApp}
               />
             ))}
