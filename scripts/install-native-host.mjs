@@ -22,7 +22,7 @@ import {
   registerClaudeJson,
   tokenPath,
   envPath,
-  scrubQuarantine,
+  scrubQuarantineAll,
   findNativeArtifacts
 } from "../native-host/installer.mjs"
 
@@ -193,42 +193,37 @@ if (existsSync(join(hostDir, "package.json"))) {
   }
 }
 
-// macOS: strip `com.apple.quarantine` from every `.node` + spawn-helper
-// inside native-host/node_modules so Gatekeeper doesn't reject them on
-// first dlopen/exec. The popup the user sees ("Apple could not verify
-// '.<hex>-00000000.node' is free of malware") reports XProtect's internal
-// scan-cache filename, but the underlying file is one of the shipped
-// node-pty prebuilds (or any future native helper). ALO-472.
+// macOS: strip `com.apple.quarantine` from every native addon under all repo
+// node_modules trees (node-pty, esbuild, rollup *.node, fsevents.node, …).
+// Gatekeeper popups name esbuild / rollup.darwin-arm64.node / fsevents even
+// though the underlying files live under pnpm's node_modules layout. ALO-472.
 //
-// We do NOT re-sign. The shipped Microsoft prebuilds carry stable
-// ad-hoc CDHashes that are identical for every user on the same package
-// version, so a single "Allow Anyway" in System Settings → Privacy &
-// Security persists across reinstalls. Re-signing here would mint a new
-// CDHash on every install and invalidate that grant.
-//
-// Covers BOTH darwin-arm64 and darwin-x64 so a universal-install user
-// running under Rosetta also gets a clean state. Covers any other future
-// native helper without code changes — `findNativeArtifacts` walks the
-// full tree.
+// We do NOT re-sign. Stable ad-hoc CDHashes mean a single "Allow Anyway" in
+// System Settings → Privacy & Security persists across reinstalls of the same
+// package version. Re-signing would mint a new CDHash and invalidate that grant.
 if (process.platform === "darwin") {
-  const nodeModulesDir = join(hostDir, "node_modules")
-  const artifacts = findNativeArtifacts(nodeModulesDir)
+  const { scrubbed, errors, roots } = scrubQuarantineAll(repoRoot)
+  const artifacts = roots.flatMap((root) => findNativeArtifacts(root))
   if (artifacts.length > 0) {
-    const { scrubbed, errors } = scrubQuarantine(nodeModulesDir)
     console.log(
       `✓ Cleared com.apple.quarantine on ${scrubbed.length}/${artifacts.length} native artifacts`
     )
     for (const e of errors) {
       console.warn(`  ⚠  ${e.path}: ${e.message}`)
     }
-    if (artifacts.length > 0) {
-      console.log(
-        "  If Brave still pops 'Apple could not verify…' on first launch, open\n" +
-          "  System Settings → Privacy & Security and click 'Allow Anyway' once;\n" +
-          "  the grant persists across reinstalls of the same node-pty version.\n" +
-          "  Run `pnpm diagnose-host` to see per-file signing/quarantine state."
-      )
-    }
+    console.log(
+      "  If Gatekeeper still pops on dev/build or first terminal use, run\n" +
+        "  `pnpm warm-pty` (loads node-pty so you can click Open once), then\n" +
+        "  System Settings → Privacy & Security → Allow Anyway if needed.\n" +
+        "  Run `pnpm diagnose-host` to see per-file signing/quarantine state."
+    )
+  }
+  const warm = spawnSync(process.execPath, [join(repoRoot, "scripts/warm-node-pty.mjs")], {
+    stdio: "inherit",
+    env: process.env
+  })
+  if (warm.status !== 0) {
+    console.warn("⚠  node-pty warm-load did not complete — sidebar terminal may prompt Gatekeeper on first use.")
   }
 }
 

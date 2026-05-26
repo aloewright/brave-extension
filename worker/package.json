@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "dev:web": "vite --config vite.config.web.ts",
-    "build:web": "vite build --config vite.config.web.ts",
+    "postinstall": "node ../scripts/scrub-quarantine.mjs",
+    "dev": "node ../scripts/scrub-quarantine.mjs && wrangler dev",
+    "dev:web": "node ../scripts/scrub-quarantine.mjs && vite --config vite.config.web.ts",
+    "build:web": "node ../scripts/scrub-quarantine.mjs && vite build --config vite.config.web.ts",
     "build": "pnpm build:web && wrangler deploy",
     "deploy": "wrangler deploy",
     "test": "vitest run",

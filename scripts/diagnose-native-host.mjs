@@ -1,43 +1,54 @@
 #!/usr/bin/env node
 /**
- * Diagnose the native-host install on this machine — useful when the
- * sidebar terminal hangs at startup, when macOS Gatekeeper has been seen
- * popping "Apple could not verify '<random>.node' is free of malware",
- * or when investigating a quarantine state on a fresh install.
+ * Diagnose native Mach-O artifacts (node-pty, esbuild, rollup, fsevents, …)
+ * across every repo node_modules tree — useful when macOS Gatekeeper pops
+ * "Apple could not verify '<name>' is free of malware" during dev/build or
+ * sidebar terminal use.
  *
  *   node scripts/diagnose-native-host.mjs [--fix]
  *
- * With `--fix`, re-runs the macOS quarantine scrub across native-host's
- * node_modules tree. Idempotent — safe to re-run.
+ * With `--fix`, re-runs the macOS quarantine scrub. Idempotent — safe to re-run.
  */
 
-import { resolve, join } from "path"
+import { resolve, join, relative } from "path"
 import {
   findNativeArtifacts,
+  findSwiftToolchainArtifacts,
   inspectNativeArtifact,
-  scrubQuarantine
+  repoNodeModuleRoots,
+  scrubQuarantineAll
 } from "../native-host/installer.mjs"
 
 const fix = process.argv.includes("--fix")
-const hostDir = resolve(join(import.meta.dirname, "..", "native-host"))
-const nodeModulesDir = join(hostDir, "node_modules")
+const repoRoot = resolve(join(import.meta.dirname, ".."))
+const roots = repoNodeModuleRoots(repoRoot)
 
-console.log(`Native-host root: ${hostDir}`)
+console.log(`Repo root: ${repoRoot}`)
 console.log(`Platform: ${process.platform} ${process.arch}`)
 console.log("")
 
-const artifacts = findNativeArtifacts(nodeModulesDir)
-if (artifacts.length === 0) {
-  console.log("No native artifacts found. Run `pnpm install-host` first.")
+if (roots.length === 0) {
+  console.log("No node_modules trees found. Run `pnpm install` first.")
   process.exit(0)
 }
 
-console.log(`Found ${artifacts.length} native artifact(s):\n`)
+const artifacts = [
+  ...new Set([
+    ...roots.flatMap((root) => findNativeArtifacts(root)),
+    ...findSwiftToolchainArtifacts({ repoRoot, nativeHostDir: join(repoRoot, "native-host") })
+  ])
+].sort()
+if (artifacts.length === 0) {
+  console.log("No native artifacts found under node_modules.")
+  process.exit(0)
+}
+
+console.log(`Found ${artifacts.length} native artifact(s) across ${roots.length} tree(s):\n`)
 
 let problemCount = 0
 for (const path of artifacts) {
   const info = inspectNativeArtifact(path)
-  const short = path.replace(hostDir, "<native-host>")
+  const short = relative(repoRoot, path)
   const flags = []
   if (info.hasQuarantine) {
     flags.push("QUARANTINED")
@@ -46,31 +57,40 @@ for (const path of artifacts) {
   if (info.signing === "unsigned") {
     flags.push("UNSIGNED")
   }
+  if (info.gatekeeperStatus === "rejected") {
+    flags.push("GATEKEEPER_REJECTED")
+  }
   const flagText = flags.length > 0 ? ` ⚠ ${flags.join(",")}` : ""
   console.log(`  ${short}`)
   console.log(
     `    size=${info.sizeBytes}b signing=${info.signing}` +
       `${info.teamIdentifier ? ` team=${info.teamIdentifier}` : ""}` +
-      ` xattrs=[${info.xattrs.join(",") || "none"}]${flagText}`
+      ` xattrs=[${info.xattrs.join(",") || "none"}]` +
+      `${info.gatekeeperStatus ? ` gatekeeper=${info.gatekeeperStatus}` : ""}${flagText}`
   )
+  if (info.gatekeeperStatus === "rejected" && short.includes("pty.node")) {
+    console.log(
+      "    Gatekeeper popups may name .<hex>-00000000.node — that is this pty.node. Run `pnpm warm-pty`."
+    )
+  }
 }
 
 console.log("")
 if (problemCount > 0) {
   console.log(`⚠  ${problemCount} artifact(s) still carry com.apple.quarantine.`)
   if (fix) {
-    const { scrubbed, errors } = scrubQuarantine(nodeModulesDir)
+    const { scrubbed, errors } = scrubQuarantineAll(repoRoot)
     console.log(`✓ Scrubbed ${scrubbed.length} artifact(s)`)
     for (const e of errors) console.warn(`  ⚠  ${e.path}: ${e.message}`)
   } else {
-    console.log(`   Re-run with --fix to scrub them now.`)
+    console.log(`   Re-run with --fix to scrub them now (or run \`pnpm scrub-native\`).`)
   }
 } else if (process.platform === "darwin") {
   console.log(`✓ No quarantine xattrs detected on native artifacts.`)
   console.log(
-    `  If Gatekeeper still pops on first sidebar terminal use, open\n` +
+    `  If Gatekeeper still pops on dev/build or first terminal use, open\n` +
       `  System Settings → Privacy & Security and click "Allow Anyway".\n` +
-      `  Ad-hoc-signed prebuilds (no Developer ID) keep stable CDHashes\n` +
-      `  across reinstalls of the same node-pty version, so the grant persists.`
+      `  Ad-hoc-signed prebuilds keep stable CDHashes per package version,\n` +
+      `  so the grant persists across reinstalls.`
   )
 }

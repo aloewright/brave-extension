@@ -25,7 +25,14 @@ import {
   claudeJsonPath,
   resolveClaudeConfigPath,
   findNativeArtifacts,
+  findNamedBinariesUnder,
+  findSwiftToolchainArtifacts,
+  resolveNodePtyNativePaths,
+  assessNativeExecutable,
+  prepareNodePtyForGatekeeper,
   scrubQuarantine,
+  scrubQuarantineAll,
+  repoNodeModuleRoots,
   inspectNativeArtifact
 } from "../native-host/installer.mjs"
 
@@ -287,6 +294,122 @@ describe("native artifact discovery + quarantine scrub", () => {
 
   it("findNativeArtifacts returns empty for a missing root", () => {
     expect(findNativeArtifacts(join(fakeRoot, "does-not-exist"))).toEqual([])
+  })
+
+  it("findNativeArtifacts includes fsevents.node (chokidar/vitest optional dep)", () => {
+    mkdirSync(join(fakeRoot, "fsevents"), { recursive: true })
+    writeFileSync(join(fakeRoot, "fsevents/fsevents.node"), "x")
+
+    const found = findNativeArtifacts(fakeRoot, { platform: "darwin" })
+    expect(found).toEqual([join(fakeRoot, "fsevents/fsevents.node")])
+  })
+
+  it("findNativeArtifacts includes esbuild Mach-O bins and rollup prebuilds", () => {
+    mkdirSync(join(fakeRoot, "@esbuild/darwin-arm64/bin"), { recursive: true })
+    mkdirSync(join(fakeRoot, "@rollup/rollup-darwin-arm64"), { recursive: true })
+    mkdirSync(join(fakeRoot, "fsevents"), { recursive: true })
+    writeFileSync(join(fakeRoot, "@esbuild/darwin-arm64/bin/esbuild"), "x")
+    writeFileSync(join(fakeRoot, "@rollup/rollup-darwin-arm64/rollup.darwin-arm64.node"), "x")
+    writeFileSync(join(fakeRoot, "fsevents/fsevents.node"), "x")
+
+    const found = findNativeArtifacts(fakeRoot)
+    expect(found).toHaveLength(3)
+    expect(found.some((p: string) => p.endsWith("/bin/esbuild"))).toBe(true)
+    expect(found.some((p: string) => p.endsWith("rollup.darwin-arm64.node"))).toBe(true)
+    expect(found.some((p: string) => p.endsWith("fsevents.node"))).toBe(true)
+  })
+
+  it("resolveNodePtyNativePaths returns pty.node and spawn-helper for current arch", () => {
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-x64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-x64/pty.node"), "x")
+
+    const found = resolveNodePtyNativePaths(fakeRoot, { platform: "darwin", arch: "arm64" })
+    expect(found).toHaveLength(2)
+    expect(found.every((p: string) => p.includes("darwin-arm64"))).toBe(true)
+  })
+
+  it("assessNativeExecutable maps spctl output to allowed/rejected", () => {
+    const path = join(fakeRoot, "bin")
+    mkdirSync(path, { recursive: true })
+    writeFileSync(join(path, "tool"), "x")
+    const allowed = assessNativeExecutable(join(path, "tool"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 0, stdout: "accepted\n", stderr: "" })
+    })
+    expect(allowed.status).toBe("allowed")
+    const rejected = assessNativeExecutable(join(path, "tool"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 3, stdout: "", stderr: "rejected\nsource=Unnotarized Developer ID\n" })
+    })
+    expect(rejected.status).toBe("rejected")
+  })
+
+  it("findNamedBinariesUnder finds swift-manifest in a cache tree", () => {
+    mkdirSync(join(fakeRoot, "org.swift.swiftpm", "artifacts"), { recursive: true })
+    writeFileSync(join(fakeRoot, "org.swift.swiftpm", "artifacts", "swift-manifest"), "x")
+    writeFileSync(join(fakeRoot, "org.swift.swiftpm", "artifacts", "other-tool"), "x")
+
+    const found = findNamedBinariesUnder(join(fakeRoot, "org.swift.swiftpm"), ["swift-manifest"])
+    expect(found).toHaveLength(1)
+    expect(found[0].endsWith("swift-manifest")).toBe(true)
+  })
+
+  it("findSwiftToolchainArtifacts discovers swift-manifest next to swift", () => {
+    mkdirSync(join(fakeRoot, "bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "bin", "swift"), "x")
+    writeFileSync(join(fakeRoot, "bin", "swift-manifest"), "x")
+
+    const found = findSwiftToolchainArtifacts({
+      platform: "darwin",
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "which" && args[0] === "swift") {
+          return { status: 0, stdout: join(fakeRoot, "bin", "swift") + "\n" }
+        }
+        if (cmd === "xcrun" && args[0] === "-f") {
+          return { status: 1, stdout: "" }
+        }
+        return { status: 1 }
+      }
+    })
+    expect(found.some((p: string) => p.endsWith("/bin/swift-manifest"))).toBe(true)
+  })
+
+  it("scrubQuarantineAll walks every existing repo node_modules root", () => {
+    const repo = mkdtempSync(join(tmpdir(), "aids-repo-"))
+    const roots = [
+      join(repo, "node_modules"),
+      join(repo, "native-host", "node_modules"),
+      join(repo, "worker", "node_modules")
+    ]
+    for (const root of roots) {
+      mkdirSync(join(root, "fsevents"), { recursive: true })
+      writeFileSync(join(root, "fsevents/fsevents.node"), "x")
+    }
+    const calls: string[] = []
+    const result = scrubQuarantineAll(repo, {
+      platform: "darwin",
+      spawnSync: (_cmd: string, args: string[]) => {
+        calls.push(args[2])
+        return { status: 0 }
+      }
+    })
+    expect(result.roots).toHaveLength(3)
+    expect(result.scrubbed.length).toBeGreaterThanOrEqual(3)
+    expect(calls.filter((p) => p?.includes("fsevents.node"))).toHaveLength(3)
+  })
+
+  it("findNativeArtifacts skips non-darwin optional deps on macOS", () => {
+    mkdirSync(join(fakeRoot, "@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin"), { recursive: true })
+    mkdirSync(join(fakeRoot, "@esbuild+linux-x64@0.25.12/node_modules/@esbuild/linux-x64/bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild"), "x")
+    writeFileSync(join(fakeRoot, "@esbuild+linux-x64@0.25.12/node_modules/@esbuild/linux-x64/bin/esbuild"), "x")
+
+    const found = findNativeArtifacts(fakeRoot, { platform: "darwin" })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain("darwin-arm64")
   })
 
   it("scrubQuarantine is a no-op on non-darwin platforms", () => {
