@@ -35,8 +35,16 @@ export function envPath(home = homedir()) {
 export function wrapperPath(home = homedir()) {
   return join(configDir(home), "claude")
 }
-export function claudeJsonPath(home = homedir()) {
-  return join(home, ".claude.json")
+export function resolveClaudeConfigPath(configPath = "~/.claude.json", home = homedir()) {
+  const raw = typeof configPath === "string" && configPath.trim()
+    ? configPath.trim()
+    : "~/.claude.json"
+  if (raw === "~") return home
+  if (raw.startsWith("~/")) return join(home, raw.slice(2))
+  return raw
+}
+export function claudeJsonPath(home = homedir(), configPath = "~/.claude.json") {
+  return resolveClaudeConfigPath(configPath, home)
 }
 
 // ── ~/.claude.json merge helpers (pure) ──────────────────────────────────
@@ -271,8 +279,8 @@ export function hasTerminalPath(home = homedir()) {
 
 // ── ~/.claude.json read-modify-write ─────────────────────────────────────
 
-export function readClaudeJson(home = homedir()) {
-  const path = claudeJsonPath(home)
+export function readClaudeJson(home = homedir(), configPath = "~/.claude.json") {
+  const path = claudeJsonPath(home, configPath)
   if (!existsSync(path)) return null
   try {
     return JSON.parse(readFileSync(path, "utf-8"))
@@ -281,29 +289,29 @@ export function readClaudeJson(home = homedir()) {
   }
 }
 
-export function writeClaudeJson(cfg, home = homedir()) {
-  const path = claudeJsonPath(home)
+export function writeClaudeJson(cfg, home = homedir(), configPath = "~/.claude.json") {
+  const path = claudeJsonPath(home, configPath)
   ensureDir(dirname(path))
   writeFileSync(path, JSON.stringify(cfg, null, 2))
 }
 
-export function registerClaudeJson(port, home = homedir()) {
-  const cur = readClaudeJson(home) || {}
+export function registerClaudeJson(port, home = homedir(), configPath = "~/.claude.json") {
+  const cur = readClaudeJson(home, configPath) || {}
   const next = mergeMcpEntry(cur, buildClaudeEntry(port))
-  writeClaudeJson(next, home)
+  writeClaudeJson(next, home, configPath)
   return next
 }
 
-export function unregisterClaudeJson(home = homedir()) {
-  const cur = readClaudeJson(home)
+export function unregisterClaudeJson(home = homedir(), configPath = "~/.claude.json") {
+  const cur = readClaudeJson(home, configPath)
   if (!cur) return null
   const next = removeMcpEntry(cur)
-  writeClaudeJson(next, home)
+  writeClaudeJson(next, home, configPath)
   return next
 }
 
-export function isRegistered(home = homedir()) {
-  const cur = readClaudeJson(home)
+export function isRegistered(home = homedir(), configPath = "~/.claude.json") {
+  const cur = readClaudeJson(home, configPath)
   return !!(cur && cur.mcpServers && cur.mcpServers[MCP_SERVER_ID])
 }
 

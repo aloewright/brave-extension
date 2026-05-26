@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { LeoBadge, LeoButton, LeoIcon, LeoIconButton, LeoTabButton, cx } from "../../components/leo"
 import {
   addPasswordLogin,
@@ -7,7 +7,9 @@ import {
   NODEWARDEN_DEFAULT_URL,
   removePasswordLogin,
   setNodewardenServerUrl,
+  setSelectedPasswordLogin,
   updatePasswordLogin,
+  upsertPasswordLogins,
   type PasswordLogin
 } from "../../lib/passwords"
 
@@ -29,6 +31,7 @@ const EMPTY_FORM = {
 }
 
 export function PasswordsSection() {
+  const webVaultRef = useRef<HTMLIFrameElement | null>(null)
   const [activeTab, setActiveTab] = useState<PasswordTab>("vault")
   const [serverUrl, setServerUrl] = useState(NODEWARDEN_DEFAULT_URL)
   const [serverDraft, setServerDraft] = useState(NODEWARDEN_DEFAULT_URL)
@@ -46,6 +49,27 @@ export function PasswordsSection() {
       setServerDraft(url)
     })
   }, [])
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== originForUrl(serverUrl)) return
+      const data = event.data
+      if (!data || typeof data !== "object") return
+      if ((data as { type?: string }).type !== "NODEWARDEN_AUTOFILL_SYNC") return
+      const rawLogins = (data as { logins?: unknown }).logins
+      if (!Array.isArray(rawLogins)) return
+      if (rawLogins.length === 0) return
+
+      void upsertPasswordLogins(rawLogins).then((nextLogins) => {
+        setLogins(nextLogins)
+        setSelectedId((current) => current ?? nextLogins[0]?.id ?? null)
+        setStatus(`Synced ${rawLogins.length} login${rawLogins.length === 1 ? "" : "s"} from Nodewarden`)
+        void requestActiveTabAutofillRetry()
+      })
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [serverUrl])
 
   const filteredLogins = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -70,12 +94,15 @@ export function PasswordsSection() {
 
   function startNewLogin() {
     setSelectedId(null)
+    void setSelectedPasswordLogin(null)
+    void requestActiveTabAutofillRetry()
     setForm(EMPTY_FORM)
     setStatus("")
   }
 
   function selectLogin(login: PasswordLogin) {
     setSelectedId(login.id)
+    void setSelectedPasswordLogin(login.id).then(requestActiveTabAutofillRetry)
     setForm({
       name: login.name,
       username: login.username,
@@ -105,6 +132,7 @@ export function PasswordsSection() {
         folder: form.folder.trim() || undefined,
         notes: form.notes.trim() || undefined
       })
+      await setSelectedPasswordLogin(selectedLogin.id)
       setStatus("Updated")
     } else {
       const created = await addPasswordLogin({
@@ -116,18 +144,22 @@ export function PasswordsSection() {
         notes: form.notes.trim() || undefined
       })
       setSelectedId(created.id)
+      await setSelectedPasswordLogin(created.id)
       setStatus("Saved")
     }
     await refreshVault()
+    await requestActiveTabAutofillRetry()
   }
 
   async function deleteLogin() {
     if (!selectedLogin) return
     await removePasswordLogin(selectedLogin.id)
     setSelectedId(null)
+    await setSelectedPasswordLogin(null)
     setForm(EMPTY_FORM)
     setStatus("Deleted")
     await refreshVault()
+    await requestActiveTabAutofillRetry()
   }
 
   async function saveServerUrl() {
@@ -136,6 +168,7 @@ export function PasswordsSection() {
       setServerUrl(normalized)
       setServerDraft(normalized)
       setStatus("Server saved")
+      requestWebVaultSync(normalized, webVaultRef.current)
     } catch {
       setStatus("Enter a valid http or https URL.")
     }
@@ -145,6 +178,10 @@ export function PasswordsSection() {
     setForm((current) => ({ ...current, password: generatedPassword }))
     setActiveTab("vault")
     setStatus("Password inserted")
+  }
+
+  function requestCurrentWebVaultSync() {
+    requestWebVaultSync(serverUrl, webVaultRef.current)
   }
 
   return (
@@ -280,21 +317,60 @@ export function PasswordsSection() {
             <div className="flex flex-wrap items-end gap-2 border-b border-border p-3">
               <TextInput className="min-w-[220px] flex-1" label="Nodewarden URL" value={serverDraft} onChange={setServerDraft} />
               <LeoButton variant="primary" onClick={() => void saveServerUrl()}>Save</LeoButton>
+              <LeoButton onClick={requestCurrentWebVaultSync}>Sync</LeoButton>
               <LeoButton onClick={() => window.open(serverUrl, "nodewarden-vault", "popup,width=980,height=720")}>
                 Open
               </LeoButton>
             </div>
             <iframe
-              src={serverUrl}
+              ref={webVaultRef}
+              src={buildWebVaultUrl(serverUrl)}
               title="Nodewarden vault"
               className="min-h-0 flex-1 border-none"
               allow="clipboard-read; clipboard-write"
+              onLoad={requestCurrentWebVaultSync}
             />
           </div>
         )}
       </div>
     </section>
   )
+}
+
+function buildWebVaultUrl(serverUrl: string): string {
+  try {
+    const url = new URL(serverUrl)
+    url.searchParams.set("extension", "1")
+    return url.toString()
+  } catch {
+    return serverUrl
+  }
+}
+
+function originForUrl(serverUrl: string): string {
+  try {
+    return new URL(serverUrl).origin
+  } catch {
+    return ""
+  }
+}
+
+function requestWebVaultSync(serverUrl: string, frame: HTMLIFrameElement | null) {
+  const origin = originForUrl(serverUrl)
+  if (!origin || !frame?.contentWindow) return
+  frame.contentWindow.postMessage({ type: "NODEWARDEN_AUTOFILL_REQUEST" }, origin)
+}
+
+async function requestActiveTabAutofillRetry() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    if (typeof tab?.id !== "number") return
+    chrome.tabs.sendMessage(tab.id, { type: "PASSWORDS_RETRY_AUTOFILL" }, () => {
+      void chrome.runtime.lastError
+    })
+  } catch {
+    // The Passwords tab still works if no page can receive autofill messages.
+  }
 }
 
 function TextInput({

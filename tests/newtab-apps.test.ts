@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AppCard } from "../src/newtab";
+import { AppCard, EditAppModal } from "../src/newtab";
 import { WORKSPACE_APPS } from "../src/newtab-apps";
 
 describe("new tab workspace apps", () => {
@@ -98,7 +98,10 @@ describe("new tab workspace apps", () => {
     expect(source).toContain(
       "Array.from(new Set([...existingHidden, app.url]))",
     );
-    expect(styles).toContain(".workspace-app-card__remove");
+    expect(styles).toContain(".workspace-app-card__actions");
+    expect(styles).toContain(
+      ".workspace-app-card:hover .workspace-app-card__actions",
+    );
   });
 
   it("uses app icons instead of monogram initials", () => {
@@ -148,9 +151,7 @@ describe("new tab workspace apps", () => {
           onDragEnd: () => {},
           onDrop: () => {},
         },
-        iconPickerOpen: false,
-        onChangeIcon: () => {},
-        onToggleIconPicker: () => {},
+        onEdit: () => {},
         onRemove: () => {},
       }),
     );
@@ -168,6 +169,9 @@ describe("new tab workspace apps", () => {
     );
 
     expect(mainLink?.getAttribute("aria-label")).toBe("GitHub");
+    expect(mainLink?.tagName).toBe("A");
+    expect(mainLink?.className).toContain("workspace-app-card__main");
+    expect(mainLink?.querySelector(".workspace-app-card__mark")).toBeTruthy();
     expect(quickLinkNav?.getAttribute("aria-label")).toBe("GitHub quick links");
     expect(
       quickLinks.map((link) => ({
@@ -184,7 +188,7 @@ describe("new tab workspace apps", () => {
     ]);
   });
 
-  it("lets users change card icons from the card icon control", () => {
+  it("lets users change card icons from the edit modal", () => {
     const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
     const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
     const github = WORKSPACE_APPS.find((app) => app.name === "GitHub");
@@ -194,50 +198,42 @@ describe("new tab workspace apps", () => {
     );
     expect(source).toContain("function sanitizeIconOverrides");
     expect(source).toContain("function applyIconOverrides");
-    expect(source).toContain("aria-label={`Change ${app.name} icon`}");
-    expect(source).toContain("onChangeIcon(app, choice.icon)");
-    expect(styles).toContain(".workspace-app-card__icon-menu");
-    expect(styles).toContain(".workspace-app-card__icon-option");
+    expect(source).toContain("const saveAppEdits =");
+    expect(source).toContain("Link name");
+    expect(source).toContain("Link URL");
+    expect(source).toContain('aria-label="Custom card color"');
+    expect(source).toContain("setIcon(choice.icon)");
+    expect(source).toContain('aria-label="Icon choices"');
+    expect(styles).toContain(".newtab-icon-grid");
+    expect(styles).toContain(".newtab-icon-choice");
 
     if (!github) throw new Error("GitHub app missing");
     const container = document.createElement("div");
     container.innerHTML = renderToStaticMarkup(
-      createElement(AppCard, {
+      createElement(EditAppModal, {
         app: github,
-        drag: {
-          index: 0,
-          isDragging: false,
-          isDropTarget: false,
-          onDragStart: () => {},
-          onDragOver: () => {},
-          onDragLeave: () => {},
-          onDragEnd: () => {},
-          onDrop: () => {},
-        },
-        iconPickerOpen: true,
-        onChangeIcon: () => {},
-        onToggleIconPicker: () => {},
-        onRemove: () => {},
+        apps: WORKSPACE_APPS,
+        onClose: () => {},
+        onSave: () => {},
       }),
     );
 
-    const iconButton = container.querySelector<HTMLButtonElement>(
-      ".workspace-app-card__icon-button",
+    const search = container.querySelector<HTMLInputElement>(
+      ".newtab-icon-search input",
     );
-    const menu = container.querySelector(".workspace-app-card__icon-menu");
+    const grid = container.querySelector(".newtab-icon-grid");
     const options = Array.from(
-      container.querySelectorAll<HTMLButtonElement>(
-        ".workspace-app-card__icon-option",
-      ),
+      container.querySelectorAll<HTMLButtonElement>(".newtab-icon-choice"),
     );
 
-    expect(iconButton?.getAttribute("aria-label")).toBe("Change GitHub icon");
-    expect(iconButton?.getAttribute("aria-expanded")).toBe("true");
-    expect(menu?.getAttribute("aria-label")).toBe("GitHub icon choices");
-    expect(options).toHaveLength(13);
+    expect(search?.getAttribute("aria-label")).toBe(
+      "Search Phosphor, Hero, or Lucide icons",
+    );
+    expect(grid?.getAttribute("aria-label")).toBe("Icon choices");
+    expect(options).toHaveLength(30);
     expect(
       options.map((option) => option.getAttribute("aria-label")),
-    ).toContain("Use Mail icon for GitHub");
+    ).toContain("Use Lucide Mail icon");
   });
 
   it("keeps the new tab layout grouped for search, cards, tabs, and history", () => {

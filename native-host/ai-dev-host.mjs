@@ -62,10 +62,19 @@ async function waitForMcpReady() {
   }
 }
 
-function sendMcpStatus() {
+function resolveUserConfigPath(configPath = "~/.claude.json") {
+  const raw = typeof configPath === "string" && configPath.trim()
+    ? configPath.trim()
+    : "~/.claude.json"
+  if (raw === "~") return homedir()
+  if (raw.startsWith("~/")) return join(homedir(), raw.slice(2))
+  return raw
+}
+
+function sendMcpStatus(configPath = "~/.claude.json") {
   sendMessage({
     type: "mcp.status",
-    ...mcp.getStatus(),
+    ...mcp.getStatus(configPath),
     error: mcpStartError?.message
   })
 }
@@ -176,7 +185,7 @@ function readMessage() {
 }
 
 function getClaudeConfig(configPath = "~/.claude.json") {
-  const resolved = configPath.replace("~", homedir())
+  const resolved = resolveUserConfigPath(configPath)
   const paths = [
     resolved,
     join(homedir(), ".claude.json"),
@@ -184,11 +193,10 @@ function getClaudeConfig(configPath = "~/.claude.json") {
     join(homedir(), ".config", "claude", "settings.json")
   ]
   for (const p of paths) {
-    if (existsSync(p)) {
-      try {
-        return JSON.parse(readFileSync(p, "utf-8"))
-      } catch { continue }
-    }
+    try {
+      if (!existsSync(p)) continue
+      return JSON.parse(readFileSync(p, "utf-8"))
+    } catch { continue }
   }
   return null
 }
@@ -219,7 +227,7 @@ function getMCPServers(configPath) {
  *
  * Returns a Promise of MCPServer[].
  */
-function listAllMCPServers() {
+function listAllMCPServers(configPath = "~/.claude.json") {
   return new Promise((resolve) => {
     const proc = spawn("claude", ["mcp", "list"], {
       shell: true,
@@ -236,7 +244,7 @@ function listAllMCPServers() {
     proc.on("close", () => {
       const servers = parseMCPList(stdout)
       // Merge in any user-config servers not in the CLI output (edge case)
-      const fromConfig = getMCPServers()
+      const fromConfig = getMCPServers(configPath)
       for (const cfg of fromConfig) {
         if (!servers.find((s) => s.name === cfg.name)) {
           servers.push({ ...cfg, status: "unknown" })
@@ -246,7 +254,7 @@ function listAllMCPServers() {
     })
 
     proc.on("error", () => {
-      resolve(getMCPServers().map((s) => ({ ...s, status: "unknown" })))
+      resolve(getMCPServers(configPath).map((s) => ({ ...s, status: "unknown" })))
     })
   })
 }
@@ -659,23 +667,33 @@ async function main() {
         if (msg.action === "list") {
           // Use `claude mcp list` to get the full picture — claude.ai integrations,
           // plugin servers, user/project config — with live connection status.
-          const servers = await listAllMCPServers()
+          const servers = await listAllMCPServers(msg.configPath || "~/.claude.json")
           sendMessage({ type: "mcp", data: JSON.stringify(servers) })
         } else if (msg.action === "add") {
-          const configPath = (msg.configPath || "~/.claude.json").replace("~", homedir())
-          let config = {}
-          if (existsSync(configPath)) {
-            try { config = JSON.parse(readFileSync(configPath, "utf-8")) } catch {}
+          try {
+            const configPath = resolveUserConfigPath(msg.configPath || "~/.claude.json")
+            let config = {}
+            try {
+              if (existsSync(configPath)) config = JSON.parse(readFileSync(configPath, "utf-8"))
+            } catch {
+              config = {}
+            }
+            if (!config.mcpServers) config.mcpServers = {}
+            config.mcpServers[msg.server.name] = {
+              command: msg.server.command,
+              args: msg.server.args || [],
+              env: msg.server.env || {}
+            }
+            const { writeFileSync } = await import("fs")
+            mkdirSync(dirname(configPath), { recursive: true })
+            writeFileSync(configPath, JSON.stringify(config, null, 2))
+            sendMessage({ type: "mcp", data: JSON.stringify({ ok: true }) })
+          } catch (err) {
+            sendMessage({
+              type: "mcp",
+              data: JSON.stringify({ ok: false, error: err.message || "failed to update config" })
+            })
           }
-          if (!config.mcpServers) config.mcpServers = {}
-          config.mcpServers[msg.server.name] = {
-            command: msg.server.command,
-            args: msg.server.args || [],
-            env: msg.server.env || {}
-          }
-          const { writeFileSync } = await import("fs")
-          writeFileSync(configPath, JSON.stringify(config, null, 2))
-          sendMessage({ type: "mcp", data: JSON.stringify({ ok: true }) })
         }
         break
       }
@@ -724,7 +742,20 @@ async function main() {
 
       case "mcp.status": {
         await waitForMcpReady()
-        sendMcpStatus()
+        sendMcpStatus(msg.configPath || "~/.claude.json")
+        break
+      }
+
+      case "mcp.ensure": {
+        await waitForMcpReady()
+        const configPath = msg.configPath || "~/.claude.json"
+        try {
+          const result = mcp.ensureRegistered(configPath)
+          sendMessage({ type: "mcp.ensure", ok: true, reason: msg.reason, configPath, changed: result.changed })
+          sendMcpStatus(configPath)
+        } catch (err) {
+          sendMessage({ type: "mcp.ensure", ok: false, reason: msg.reason, configPath, error: err.message })
+        }
         break
       }
 
@@ -734,7 +765,7 @@ async function main() {
           const r = mcp.rotateToken()
           sendMessage({ type: "mcp.rotate-token", ok: true, rotatedAt: r.rotatedAt })
           // Broadcast updated status so the panel can refresh.
-          sendMcpStatus()
+          sendMcpStatus(msg.configPath || "~/.claude.json")
         } catch (err) {
           sendMessage({ type: "mcp.rotate-token", ok: false, error: err.message })
         }
@@ -743,24 +774,26 @@ async function main() {
 
       case "mcp.register": {
         await waitForMcpReady()
+        const configPath = msg.configPath || "~/.claude.json"
         try {
-          mcp.registerClaudeJson()
-          sendMessage({ type: "mcp.register", ok: true })
-          sendMcpStatus()
+          mcp.registerClaudeJson(configPath)
+          sendMessage({ type: "mcp.register", ok: true, configPath })
+          sendMcpStatus(configPath)
         } catch (err) {
-          sendMessage({ type: "mcp.register", ok: false, error: err.message })
+          sendMessage({ type: "mcp.register", ok: false, configPath, error: err.message })
         }
         break
       }
 
       case "mcp.unregister": {
         await waitForMcpReady()
+        const configPath = msg.configPath || "~/.claude.json"
         try {
-          mcp.unregisterClaudeJson()
-          sendMessage({ type: "mcp.unregister", ok: true })
-          sendMcpStatus()
+          mcp.unregisterClaudeJson(configPath)
+          sendMessage({ type: "mcp.unregister", ok: true, configPath })
+          sendMcpStatus(configPath)
         } catch (err) {
-          sendMessage({ type: "mcp.unregister", ok: false, error: err.message })
+          sendMessage({ type: "mcp.unregister", ok: false, configPath, error: err.message })
         }
         break
       }
@@ -775,7 +808,7 @@ async function main() {
             enabled: !!msg.enabled,
             results
           })
-          sendMcpStatus()
+          sendMcpStatus(msg.configPath || "~/.claude.json")
         } catch (err) {
           sendMessage({ type: "mcp.terminal-path.set", ok: false, error: err.message })
         }

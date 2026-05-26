@@ -9,7 +9,10 @@ import {
   getNodewardenServerUrl,
   getPasswordLogins,
   PASSWORD_NODEWARDEN_URL_KEY,
+  PASSWORD_AUTOFILL_STORAGE_KEY,
   normalizeServerUrl,
+  setSelectedPasswordLogin,
+  upsertPasswordLogins,
   updatePasswordLogin
 } from "../src/lib/passwords"
 import {
@@ -80,6 +83,24 @@ describe("passwords and Nodewarden", () => {
     expect(await getMatchingPasswordLogins("https://elsewhere.test")).toEqual([])
   })
 
+  it("persists autofill cache locally and tracks selected logins for multiple matches", async () => {
+    await upsertPasswordLogins([
+      {
+        id: "nodewarden-1",
+        decName: "Example",
+        login: {
+          decUsername: "a@example.com",
+          decPassword: "secret",
+          uris: [{ decUri: "https://example.com/login" }]
+        }
+      }
+    ])
+    await setSelectedPasswordLogin("nodewarden-1")
+    const stored = await chrome.storage.local.get(PASSWORD_AUTOFILL_STORAGE_KEY)
+    expect(stored[PASSWORD_AUTOFILL_STORAGE_KEY]).toHaveLength(1)
+    expect(await getMatchingPasswordLogins("https://example.com/login")).toHaveLength(1)
+  })
+
   it("renders a responsive Bitwarden-style sidebar vault surface", () => {
     const source = readFileSync(
       join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"),
@@ -90,6 +111,10 @@ describe("passwords and Nodewarden", () => {
     expect(source).toContain('{ id: "web", label: "Web Vault" }')
     expect(source).toContain("grid-cols-[minmax(190px,0.9fr)_minmax(230px,1.1fr)]")
     expect(source).toContain("max-[620px]:grid-cols-1")
+    expect(source).toContain("NODEWARDEN_AUTOFILL_SYNC")
+    expect(source).toContain("NODEWARDEN_AUTOFILL_REQUEST")
+    expect(source).toContain("setSelectedPasswordLogin(login.id)")
+    expect(source).toContain("PASSWORDS_RETRY_AUTOFILL")
   })
 
   it("updates local vault items and normalizes Nodewarden server URLs", async () => {
@@ -123,6 +148,19 @@ describe("passwords and Nodewarden", () => {
     expect(source).toContain('.split("\\n")')
     expect(source).toContain("maxValidByte")
     expect(source).toContain("if (byte >= maxValidByte) continue")
+  })
+
+  it("retries website autofill on dynamic forms and submits a single exact match", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/contents/password-autofill.ts"),
+      "utf8"
+    )
+    expect(source).toContain("MutationObserver")
+    expect(source).toContain("PASSWORDS_RETRY_AUTOFILL")
+    expect(source).toContain("findSubmitButton")
+    expect(source).toContain(".click()")
+    expect(source).toContain("exactMatches.length !== 1")
+    expect(source).toContain("sessionStorage.getItem(submitKey)")
   })
 })
 

@@ -122,11 +122,12 @@ export class MCPServer {
   }
 
   // ── Public APIs for host RPCs ─────────────────────────────────────────
-  getStatus() {
-    const reg = installerIsRegistered()
+  getStatus(configPath = "~/.claude.json") {
+    const reg = installerIsRegistered(undefined, configPath)
     const tp = hasTerminalPath()
     return {
       port: this.port,
+      configPath,
       sessions: this.sseClients.size,
       registered: reg,
       claudeJsonStatus: reg ? "registered" : "missing",
@@ -154,12 +155,23 @@ export class MCPServer {
     return { token: this.token, rotatedAt: nowIso() }
   }
 
-  registerClaudeJson() {
-    return installerRegister(this.port)
+  registerClaudeJson(configPath = "~/.claude.json") {
+    return installerRegister(this.port, undefined, configPath)
   }
 
-  unregisterClaudeJson() {
-    return installerUnregister()
+  unregisterClaudeJson(configPath = "~/.claude.json") {
+    return installerUnregister(undefined, configPath)
+  }
+
+  ensureRegistered(configPath = "~/.claude.json") {
+    const before = installerIsRegistered(undefined, configPath)
+    const result = this.registerClaudeJson(configPath)
+    return {
+      configPath,
+      changed: !before,
+      result,
+      status: this.getStatus(configPath)
+    }
   }
 
   setTerminalPath(enabled) {
@@ -207,15 +219,15 @@ export class MCPServer {
   }
 
   // ── Claude config registration ─────────────────────────────────────────
-  _registerWithClaudeJson() {
+  _registerWithClaudeJson(configPath = "~/.claude.json") {
     // Delegates to native-host/installer.mjs, which uses the marker-pure
     // mergeMcpEntry() helper to preserve siblings. The `${AI_DEV_MCP_TOKEN}`
     // placeholder is intentional — Claude expands env refs at connect time.
     try {
-      installerRegister(this.port)
-      this.log(`[mcp] registered ai-dev-sidebar in ~/.claude.json`)
+      installerRegister(this.port, undefined, configPath)
+      this.log(`[mcp] registered ai-dev-sidebar in ${configPath}`)
     } catch (err) {
-      this.log(`[mcp] WARN: cannot write ~/.claude.json: ${err.message}`)
+      this.log(`[mcp] WARN: cannot write ${configPath}: ${err.message}`)
     }
   }
 

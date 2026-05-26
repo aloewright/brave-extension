@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { LeoBadge, LeoButton, LeoIcon, LeoIconButton } from "../../components/leo"
 import { openExternalLink } from "../../lib/open-url"
 
-const CAL_TASKS_API_BASE = "https://cal.fly.pm"
 const TASKS_URL = "https://cal.fly.pm/tasks"
 
 interface SharedTask {
@@ -36,18 +35,19 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   if (init.body && typeof init.body === "string" && !headers.has("content-type")) {
     headers.set("content-type", "application/json")
   }
-  const res = await fetch(`${CAL_TASKS_API_BASE}${path}`, {
-    ...init,
-    headers,
-    credentials: "include"
+  const response = await chrome.runtime.sendMessage({
+    type: "TASKS_API_REQUEST",
+    path,
+    init: {
+      method: init.method,
+      headers: Object.fromEntries(headers.entries()),
+      body: typeof init.body === "string" ? init.body : undefined
+    }
   })
-  if (res.status === 401) {
-    throw new Error("Sign in at cal.fly.pm.")
+  if (!response?.ok) {
+    throw new Error(response?.error || `Task request failed: ${response?.status ?? "unknown"}`)
   }
-  if (!res.ok) {
-    throw new Error(`Task request failed: ${res.status}`)
-  }
-  return (await res.json()) as T
+  return response.data as T
 }
 
 export function TasksSection() {

@@ -11,7 +11,7 @@ interface UseNativeHostOptions {
   onSessionReset?: (backend: CLIBackend) => void
   onMcpList?: (servers: any[]) => void
   onMcpStatus?: (status: MCPStatus) => void
-  onMcpRpcResult?: (msg: { type: string; ok: boolean; error?: string; rotatedAt?: string; enabled?: boolean }) => void
+  onMcpRpcResult?: (msg: { type: string; ok: boolean; error?: string; rotatedAt?: string; enabled?: boolean; configPath?: string }) => void
   onDopplerStatus?: (status: DopplerStatus) => void
   onDopplerRpcResult?: (msg: {
     type: string
@@ -102,6 +102,7 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
           ptype === "mcp.rotate-token" ||
           ptype === "mcp.register" ||
           ptype === "mcp.unregister" ||
+          ptype === "mcp.ensure" ||
           ptype === "mcp.terminal-path.set"
         ) {
           optsRef.current.onMcpRpcResult?.(payload as any)
@@ -234,12 +235,13 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     [send]
   )
 
-  const mcpStatus = useCallback(() => send({ type: "mcp.status" }), [send])
-  const mcpRotateToken = useCallback(() => send({ type: "mcp.rotate-token" }), [send])
-  const mcpRegister = useCallback(() => send({ type: "mcp.register" }), [send])
-  const mcpUnregister = useCallback(() => send({ type: "mcp.unregister" }), [send])
+  const mcpStatus = useCallback((configPath?: string) => send({ type: "mcp.status", configPath }), [send])
+  const mcpEnsure = useCallback((configPath?: string) => send({ type: "mcp.ensure", configPath }), [send])
+  const mcpRotateToken = useCallback((configPath?: string) => send({ type: "mcp.rotate-token", configPath }), [send])
+  const mcpRegister = useCallback((configPath?: string) => send({ type: "mcp.register", configPath }), [send])
+  const mcpUnregister = useCallback((configPath?: string) => send({ type: "mcp.unregister", configPath }), [send])
   const mcpSetTerminalPath = useCallback(
-    (enabled: boolean) => send({ type: "mcp.terminal-path.set", enabled }),
+    (enabled: boolean, configPath?: string) => send({ type: "mcp.terminal-path.set", enabled, configPath }),
     [send]
   )
   const dopplerStatus = useCallback(() => send({ type: "doppler.status" }), [send])
@@ -288,6 +290,7 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     mcpResourceUpsert,
     mcpResourceRemove,
     mcpStatus,
+    mcpEnsure,
     mcpRotateToken,
     mcpRegister,
     mcpUnregister,

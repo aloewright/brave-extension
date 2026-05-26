@@ -23,6 +23,7 @@ import {
   envPath,
   wrapperPath,
   claudeJsonPath,
+  resolveClaudeConfigPath,
   findNativeArtifacts,
   scrubQuarantine,
   inspectNativeArtifact
@@ -167,6 +168,28 @@ describe("installer fs helpers (sandboxed home)", () => {
     const cfg2 = JSON.parse(readFileSync(claudeJsonPath(fakeHome), "utf-8"))
     expect(cfg2.mcpServers.other).toBeDefined()
     expect(cfg2.top).toBe(1)
+  })
+
+  it("registers MCP in any configured Claude config path", () => {
+    const customConfig = "~/Library/Application Support/Claude/claude_desktop_config.json"
+    const resolved = resolveClaudeConfigPath(customConfig, fakeHome)
+    mkdirSync(join(fakeHome, "Library/Application Support/Claude"), { recursive: true })
+    writeFileSync(
+      resolved,
+      JSON.stringify({ mcpServers: { sibling: { command: "node" } } }, null, 2)
+    )
+
+    registerClaudeJson(8474, fakeHome, customConfig)
+    expect(isRegistered(fakeHome, customConfig)).toBe(true)
+    expect(isRegistered(fakeHome)).toBe(false)
+    const cfg = JSON.parse(readFileSync(resolved, "utf-8"))
+    expect(cfg.mcpServers.sibling).toEqual({ command: "node" })
+    expect(cfg.mcpServers["ai-dev-sidebar"].url).toContain(":8474/sse")
+
+    unregisterClaudeJson(fakeHome, customConfig)
+    const removed = JSON.parse(readFileSync(resolved, "utf-8"))
+    expect(removed.mcpServers.sibling).toEqual({ command: "node" })
+    expect(removed.mcpServers["ai-dev-sidebar"]).toBeUndefined()
   })
 
   it("re-running register is idempotent", () => {

@@ -122,6 +122,7 @@ export interface Settings {
 /** Status reported by the native host's mcp.status RPC. */
 export interface MCPStatus {
   port: number | null
+  configPath?: string
   sessions: number
   registered: boolean
   claudeJsonStatus: "registered" | "missing"

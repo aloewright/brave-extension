@@ -41,9 +41,13 @@ describe("native host sidepanel handshake", () => {
 
     expect(hostSource).toContain("const mcpReady = mcp.start()");
     expect(hostSource).toContain("async function waitForMcpReady()");
-    expect(hostSource).toContain("function sendMcpStatus()");
+    expect(hostSource).toContain("function sendMcpStatus(configPath");
     expect(hostSource).toContain('case "mcp.status"');
+    expect(hostSource).toContain('case "mcp.ensure"');
+    expect(hostSource).toContain("mcp.getStatus(configPath)");
+    expect(hostSource).toContain("mcp.ensureRegistered(configPath)");
+    expect(hostSource).toContain("msg.configPath");
     expect(hostSource).toContain("await waitForMcpReady()");
-    expect(hostSource).toContain("sendMcpStatus()");
+    expect(hostSource).toContain("sendMcpStatus(msg.configPath");
   });
 });

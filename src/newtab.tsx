@@ -18,7 +18,7 @@ const TOP_APP_COUNT = 3;
 const FOCUS_APP_COUNT = 4;
 const MAX_OPEN_TAB_ITEMS = 8;
 
-const APP_ICONS: Record<WorkspaceAppIcon, ReactNode> = {
+const APP_ICONS: Partial<Record<WorkspaceAppIcon, ReactNode>> = {
   "app-store": (
     <>
       <rect x="4" y="4" width="16" height="16" rx="4" />
@@ -109,24 +109,379 @@ const APP_ICONS: Record<WorkspaceAppIcon, ReactNode> = {
       <path d="M9 10l3.5 2L9 14z" />
     </>
   ),
+  "phosphor:atom": (
+    <>
+      <circle cx="12" cy="12" r="1.3" />
+      <path d="M19.5 12c0 2-3.36 3.6-7.5 3.6S4.5 14 4.5 12 7.86 8.4 12 8.4s7.5 1.6 7.5 3.6Z" />
+      <path d="M15.75 18.5c-1.73 1-4.8-1.38-6.86-4.96S6.55 6.54 8.28 5.54s4.8 1.38 6.86 4.96 2.34 7 .61 8Z" />
+      <path d="M8.25 18.5c-1.73-1-1.45-4.42.61-8s5.13-5.96 6.86-4.96 1.45 4.42-.61 8-5.13 5.96-6.86 4.96Z" />
+    </>
+  ),
+  "phosphor:briefcase": (
+    <>
+      <rect x="4" y="7" width="16" height="12" rx="2" />
+      <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+      <path d="M4 12h16M10 12v1.5h4V12" />
+    </>
+  ),
+  "phosphor:chat-circle": (
+    <>
+      <path d="M12 5a7 7 0 0 0-5.8 10.92L5 20l4.08-1.2A7 7 0 1 0 12 5Z" />
+      <path d="M8.5 11h7M8.5 14h4.5" />
+    </>
+  ),
+  "phosphor:code": (
+    <>
+      <path d="m9 8-4 4 4 4M15 8l4 4-4 4" />
+      <path d="m13 6-2 12" />
+    </>
+  ),
+  "phosphor:database": (
+    <>
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" />
+      <path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
+    </>
+  ),
+  "phosphor:planet": (
+    <>
+      <circle cx="12" cy="12" r="6" />
+      <path d="M3.2 14.7c1.08 1.88 5.67 1.55 10.25-.72s7.43-5.66 6.35-7.54" />
+      <path d="M20.8 9.3c-1.08-1.88-5.67-1.55-10.25.72s-7.43 5.66-6.35 7.54" />
+    </>
+  ),
+  "phosphor:rocket": (
+    <>
+      <path d="M13.5 14.5 9.5 10.5C10.7 7.5 13.54 4.55 18.5 4c-.55 4.96-3.5 7.8-6.5 9Z" />
+      <path d="M9.5 10.5 6 11.2 4.5 15l3.8-.7M13.5 14.5l-.7 3.8L16.6 17l.7-3.5" />
+      <path d="M8 16 5 19M15.5 7.5h.01" />
+    </>
+  ),
+  "phosphor:terminal-window": (
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M4 9h16M8 13l2 2-2 2M12.5 17h3.5" />
+    </>
+  ),
+  "hero:academic-cap": (
+    <>
+      <path d="M3 9.5 12 5l9 4.5-9 4.5z" />
+      <path d="M7 11.5v4c1.3 1.2 3 1.8 5 1.8s3.7-.6 5-1.8v-4" />
+      <path d="M19 10.5v5.5" />
+    </>
+  ),
+  "hero:bolt": <path d="M13 3 5 14h6l-1 7 9-12h-6z" />,
+  "hero:bookmark-square": (
+    <>
+      <rect x="5" y="4" width="14" height="16" rx="2" />
+      <path d="M9 8h6v8l-3-2-3 2z" />
+    </>
+  ),
+  "hero:command-line": (
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="m8 10 2.5 2L8 14M13 14h3" />
+    </>
+  ),
+  "hero:cube-transparent": (
+    <>
+      <path d="M12 3 4.5 7.2 12 11.4l7.5-4.2z" />
+      <path d="M4.5 7.2v8.5L12 20l7.5-4.3V7.2" />
+      <path d="M12 11.4V20M8.2 5.1l7.6 4.2M15.8 5.1 8.2 9.3" />
+    </>
+  ),
+  "hero:globe-alt": (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4 12h16M12 4c2 2.2 3 4.8 3 8s-1 5.8-3 8c-2-2.2-3-4.8-3-8s1-5.8 3-8Z" />
+    </>
+  ),
+  "hero:paper-airplane": (
+    <>
+      <path d="M20 4 9.5 14.5" />
+      <path d="m20 4-6.2 16-4.3-5.5L4 12z" />
+    </>
+  ),
+  "hero:sparkles": (
+    <>
+      <path d="M12 3 13.6 8.4 19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z" />
+      <path d="M5.5 15.5 6.3 18l2.2.7-2.2.7-.8 2.1-.8-2.1-2.2-.7 2.2-.7z" />
+      <path d="M18 15.5 18.6 17l1.4.5-1.4.5-.6 1.5-.6-1.5-1.4-.5 1.4-.5z" />
+    </>
+  ),
+  "lucide:boxes": (
+    <>
+      <path d="m7.5 8.5 4.5-2.5 4.5 2.5-4.5 2.5z" />
+      <path d="m3.5 14.5 4-2.2 4 2.2-4 2.3zM12.5 14.5l4-2.2 4 2.2-4 2.3z" />
+      <path d="M7.5 16.8v3.2l4-2.2v-3.3M16.5 16.8v3.2l4-2.2v-3.3M12 11v3.2" />
+    </>
+  ),
+  "lucide:building": (
+    <>
+      <rect x="5" y="4" width="14" height="16" rx="2" />
+      <path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1" />
+    </>
+  ),
+  "lucide:database": (
+    <>
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" />
+      <path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
+    </>
+  ),
+  "lucide:monitor": (
+    <>
+      <rect x="4" y="5" width="16" height="12" rx="2" />
+      <path d="M9 21h6M12 17v4" />
+    </>
+  ),
+  "lucide:shield": (
+    <path d="M12 3 5 6v5c0 4.5 2.8 7.7 7 10 4.2-2.3 7-5.5 7-10V6z" />
+  ),
+  "lucide:star": (
+    <path d="m12 3 2.7 5.47 6.03.88-4.36 4.25 1.03 6-5.4-2.84L6.6 19.6l1.03-6-4.36-4.25 6.03-.88z" />
+  ),
+  "lucide:zap": <path d="M13 3 5 14h6l-1 7 9-12h-6z" />,
 };
 
-const APP_ICON_CHOICES: Array<{ icon: WorkspaceAppIcon; label: string }> = [
-  { icon: "app-store", label: "App Store" },
-  { icon: "article", label: "Article" },
-  { icon: "book", label: "Book" },
-  { icon: "calendar", label: "Calendar" },
-  { icon: "cloud", label: "Cloud" },
-  { icon: "directory", label: "Directory" },
-  { icon: "github", label: "GitHub" },
-  { icon: "link", label: "Link" },
-  { icon: "linear", label: "Linear" },
-  { icon: "mail", label: "Mail" },
-  { icon: "palette", label: "Palette" },
-  { icon: "pencil", label: "Pencil" },
-  { icon: "video", label: "Video" },
+type AppIconSource = "Phosphor" | "Hero" | "Lucide";
+
+interface AppIconChoice {
+  icon: WorkspaceAppIcon;
+  label: string;
+  source: AppIconSource;
+  aliases: string[];
+}
+
+const APP_ICON_CHOICES: AppIconChoice[] = [
+  {
+    icon: "app-store",
+    label: "App Store",
+    source: "Hero",
+    aliases: ["apps", "store", "apple"],
+  },
+  {
+    icon: "article",
+    label: "Article",
+    source: "Hero",
+    aliases: ["document", "post", "news"],
+  },
+  {
+    icon: "book",
+    label: "Book",
+    source: "Lucide",
+    aliases: ["reader", "docs"],
+  },
+  {
+    icon: "calendar",
+    label: "Calendar",
+    source: "Lucide",
+    aliases: ["date", "schedule"],
+  },
+  {
+    icon: "cloud",
+    label: "Cloud",
+    source: "Lucide",
+    aliases: ["hosting", "server"],
+  },
+  {
+    icon: "directory",
+    label: "Directory",
+    source: "Hero",
+    aliases: ["grid", "apps"],
+  },
+  {
+    icon: "github",
+    label: "GitHub",
+    source: "Lucide",
+    aliases: ["repo", "code"],
+  },
+  { icon: "link", label: "Link", source: "Lucide", aliases: ["url", "chain"] },
+  {
+    icon: "linear",
+    label: "Linear",
+    source: "Phosphor",
+    aliases: ["issue", "project"],
+  },
+  {
+    icon: "mail",
+    label: "Mail",
+    source: "Lucide",
+    aliases: ["email", "inbox"],
+  },
+  {
+    icon: "palette",
+    label: "Palette",
+    source: "Lucide",
+    aliases: ["design", "color"],
+  },
+  {
+    icon: "pencil",
+    label: "Pencil",
+    source: "Lucide",
+    aliases: ["edit", "write"],
+  },
+  {
+    icon: "video",
+    label: "Video",
+    source: "Lucide",
+    aliases: ["media", "play"],
+  },
+  {
+    icon: "phosphor:atom",
+    label: "Atom",
+    source: "Phosphor",
+    aliases: ["science", "ai", "research"],
+  },
+  {
+    icon: "phosphor:briefcase",
+    label: "Briefcase",
+    source: "Phosphor",
+    aliases: ["business", "work"],
+  },
+  {
+    icon: "phosphor:chat-circle",
+    label: "Chat Circle",
+    source: "Phosphor",
+    aliases: ["message", "conversation"],
+  },
+  {
+    icon: "phosphor:code",
+    label: "Code",
+    source: "Phosphor",
+    aliases: ["developer", "brackets"],
+  },
+  {
+    icon: "phosphor:database",
+    label: "Database",
+    source: "Phosphor",
+    aliases: ["data", "storage"],
+  },
+  {
+    icon: "phosphor:planet",
+    label: "Planet",
+    source: "Phosphor",
+    aliases: ["world", "global"],
+  },
+  {
+    icon: "phosphor:rocket",
+    label: "Rocket",
+    source: "Phosphor",
+    aliases: ["launch", "ship"],
+  },
+  {
+    icon: "phosphor:terminal-window",
+    label: "Terminal Window",
+    source: "Phosphor",
+    aliases: ["cli", "shell"],
+  },
+  {
+    icon: "hero:academic-cap",
+    label: "Academic Cap",
+    source: "Hero",
+    aliases: ["learn", "school"],
+  },
+  {
+    icon: "hero:bolt",
+    label: "Bolt",
+    source: "Hero",
+    aliases: ["fast", "lightning"],
+  },
+  {
+    icon: "hero:bookmark-square",
+    label: "Bookmark Square",
+    source: "Hero",
+    aliases: ["save", "favorite"],
+  },
+  {
+    icon: "hero:command-line",
+    label: "Command Line",
+    source: "Hero",
+    aliases: ["terminal", "cli"],
+  },
+  {
+    icon: "hero:cube-transparent",
+    label: "Cube Transparent",
+    source: "Hero",
+    aliases: ["package", "component"],
+  },
+  {
+    icon: "hero:globe-alt",
+    label: "Globe Alt",
+    source: "Hero",
+    aliases: ["web", "world"],
+  },
+  {
+    icon: "hero:paper-airplane",
+    label: "Paper Airplane",
+    source: "Hero",
+    aliases: ["send", "publish"],
+  },
+  {
+    icon: "hero:sparkles",
+    label: "Sparkles",
+    source: "Hero",
+    aliases: ["ai", "magic"],
+  },
+  {
+    icon: "lucide:boxes",
+    label: "Boxes",
+    source: "Lucide",
+    aliases: ["inventory", "stack"],
+  },
+  {
+    icon: "lucide:building",
+    label: "Building",
+    source: "Lucide",
+    aliases: ["company", "office"],
+  },
+  {
+    icon: "lucide:database",
+    label: "Database",
+    source: "Lucide",
+    aliases: ["data", "storage"],
+  },
+  {
+    icon: "lucide:monitor",
+    label: "Monitor",
+    source: "Lucide",
+    aliases: ["screen", "desktop"],
+  },
+  {
+    icon: "lucide:shield",
+    label: "Shield",
+    source: "Lucide",
+    aliases: ["security", "safe"],
+  },
+  {
+    icon: "lucide:star",
+    label: "Star",
+    source: "Lucide",
+    aliases: ["favorite", "featured"],
+  },
+  {
+    icon: "lucide:zap",
+    label: "Zap",
+    source: "Lucide",
+    aliases: ["fast", "lightning"],
+  },
 ];
 const APP_ICON_NAMES = new Set(APP_ICON_CHOICES.map((choice) => choice.icon));
+
+const APP_COLOR_CHOICES = [
+  { label: "Slate", value: "#9ca3af" },
+  { label: "Sky", value: "#38bdf8" },
+  { label: "Blue", value: "#60a5fa" },
+  { label: "Indigo", value: "#818cf8" },
+  { label: "Violet", value: "#a78bfa" },
+  { label: "Pink", value: "#f472b6" },
+  { label: "Red", value: "#fb7185" },
+  { label: "Orange", value: "#fb923c" },
+  { label: "Amber", value: "#fbbf24" },
+  { label: "Green", value: "#4ade80" },
+  { label: "Emerald", value: "#34d399" },
+  { label: "Cyan", value: "#22d3ee" },
+];
 
 interface BrowserShortcut {
   id: string;
@@ -150,7 +505,7 @@ function AppIcon({ name }: { name: WorkspaceAppIcon }) {
       strokeWidth="1.8"
       viewBox="0 0 24 24"
     >
-      {APP_ICONS[name]}
+      {APP_ICONS[name] ?? APP_ICONS.link}
     </svg>
   );
 }
@@ -184,6 +539,101 @@ function hostnameFor(url: string) {
   } catch {
     return url;
   }
+}
+
+function normalizeLinkUrl(input: string) {
+  let normalized = input.trim();
+  if (!normalized) return null;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    if (parsed.pathname === "/" && !parsed.search && !parsed.hash) {
+      return `${parsed.protocol}//${parsed.host}`;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAccent(input: unknown) {
+  if (typeof input !== "string") return null;
+  const value = input.trim();
+  const match = value.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return null;
+
+  const hex = match[1].toLowerCase();
+  if (hex.length === 3) {
+    return `#${hex
+      .split("")
+      .map((part) => part + part)
+      .join("")}`;
+  }
+  return `#${hex}`;
+}
+
+function getIconChoice(icon: WorkspaceAppIcon) {
+  return (
+    APP_ICON_CHOICES.find((choice) => choice.icon === icon) ??
+    APP_ICON_CHOICES.find((choice) => choice.icon === "link") ??
+    APP_ICON_CHOICES[0]
+  );
+}
+
+function normalizeIconSearch(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function fuzzyScore(query: string, target: string) {
+  if (!query) return 0;
+  if (target.includes(query)) return target.indexOf(query);
+
+  let targetIndex = 0;
+  let score = 0;
+  for (const char of query) {
+    const nextIndex = target.indexOf(char, targetIndex);
+    if (nextIndex === -1) return null;
+    score += nextIndex - targetIndex;
+    targetIndex = nextIndex + 1;
+  }
+  return score + target.length - query.length;
+}
+
+function searchIconChoices(query: string) {
+  const normalizedQuery = normalizeIconSearch(query);
+  if (!normalizedQuery) return APP_ICON_CHOICES;
+
+  return APP_ICON_CHOICES.map((choice) => {
+    const target = normalizeIconSearch(
+      [choice.label, choice.source, choice.icon, ...choice.aliases].join(" "),
+    );
+    const score = fuzzyScore(normalizedQuery, target);
+    return score === null ? null : { choice, score };
+  })
+    .filter(
+      (
+        result,
+      ): result is {
+        choice: AppIconChoice;
+        score: number;
+      } => !!result,
+    )
+    .sort(
+      (a, b) =>
+        a.score - b.score ||
+        a.choice.source.localeCompare(b.choice.source) ||
+        a.choice.label.localeCompare(b.choice.label),
+    )
+    .map((result) => result.choice);
 }
 
 function titleFor(title: string | undefined, url: string) {
@@ -421,17 +871,13 @@ export function AppCard({
   app,
   size = "standard",
   drag,
-  iconPickerOpen,
-  onChangeIcon,
-  onToggleIconPicker,
+  onEdit,
   onRemove,
 }: {
   app: WorkspaceApp;
   size?: "standard" | "small";
   drag: AppDrag;
-  iconPickerOpen: boolean;
-  onChangeIcon: (app: WorkspaceApp, icon: WorkspaceAppIcon) => void;
-  onToggleIconPicker: (app: WorkspaceApp) => void;
+  onEdit: (app: WorkspaceApp) => void;
   onRemove: (app: WorkspaceApp) => void;
 }) {
   const classes = [
@@ -465,64 +911,75 @@ export function AppCard({
       }}
       style={{ "--workspace-app-accent": app.accent } as CSSProperties}
     >
-      <div className="workspace-app-card__main">
+      <div className="workspace-app-card__actions">
         <button
           type="button"
-          className="workspace-app-card__icon-button"
-          aria-expanded={iconPickerOpen}
-          aria-haspopup="menu"
-          aria-label={`Change ${app.name} icon`}
-          title={`Change ${app.name} icon`}
+          className="workspace-app-card__action"
+          aria-label={`Edit ${app.name}`}
+          title={`Edit ${app.name}`}
           draggable={false}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            onToggleIconPicker(app);
+            onEdit(app);
           }}
           onMouseDown={(event) => event.stopPropagation()}
         >
-          <span className="workspace-app-card__mark" aria-hidden="true">
-            <AppIcon name={app.icon} />
-          </span>
-        </button>
-        {iconPickerOpen ? (
-          <div
-            className="workspace-app-card__icon-menu"
-            role="menu"
-            aria-label={`${app.name} icon choices`}
+          <svg
+            aria-hidden="true"
+            fill="none"
+            focusable="false"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.9"
+            viewBox="0 0 24 24"
           >
-            {APP_ICON_CHOICES.map((choice) => (
-              <button
-                key={choice.icon}
-                type="button"
-                className="workspace-app-card__icon-option"
-                role="menuitemradio"
-                aria-checked={app.icon === choice.icon}
-                aria-label={`Use ${choice.label} icon for ${app.name}`}
-                title={choice.label}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onChangeIcon(app, choice.icon);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-              >
-                <AppIcon name={choice.icon} />
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <a
-          className="workspace-app-card__link"
-          href={app.url}
-          aria-label={app.name}
+            <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17z" />
+            <path d="M13.5 8.5 15.5 10.5" />
+            <path d="M4 20l1-4" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="workspace-app-card__action workspace-app-card__action--remove"
+          aria-label={`Remove ${app.name}`}
+          title={`Remove ${app.name}`}
           draggable={false}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove(app);
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
         >
-          <span className="workspace-app-card__body">
-            <span className="workspace-app-card__name">{app.name}</span>
-          </span>
-        </a>
+          <svg
+            aria-hidden="true"
+            fill="none"
+            focusable="false"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
       </div>
+      <a
+        className="workspace-app-card__link workspace-app-card__main"
+        href={app.url}
+        aria-label={app.name}
+        draggable={false}
+      >
+        <span className="workspace-app-card__mark" aria-hidden="true">
+          <AppIcon name={app.icon} />
+        </span>
+        <span className="workspace-app-card__body">
+          <span className="workspace-app-card__name">{app.name}</span>
+        </span>
+      </a>
       {app.quickLinks?.length ? (
         <nav
           className="workspace-app-card__quick-links"
@@ -540,30 +997,248 @@ export function AppCard({
           ))}
         </nav>
       ) : null}
-      <button
-        type="button"
-        className="workspace-app-card__remove"
-        aria-label={`Remove ${app.name}`}
-        title={`Remove ${app.name}`}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onRemove(app);
-        }}
+    </div>
+  );
+}
+
+export function EditAppModal({
+  app,
+  apps,
+  onClose,
+  onSave,
+}: {
+  app: WorkspaceApp;
+  apps: WorkspaceApp[];
+  onClose: () => void;
+  onSave: (app: WorkspaceApp, updatedApp: WorkspaceApp) => void;
+}) {
+  const [name, setName] = useState(app.name);
+  const [url, setUrl] = useState(app.url);
+  const [accent, setAccent] = useState(
+    normalizeAccent(app.accent) ?? "#9ca3af",
+  );
+  const [icon, setIcon] = useState<WorkspaceAppIcon>(app.icon);
+  const [iconQuery, setIconQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedIcon = getIconChoice(icon);
+  const iconResults = useMemo(
+    () => searchIconChoices(iconQuery).slice(0, 30),
+    [iconQuery],
+  );
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setError("Add a link name.");
+      return;
+    }
+
+    const normalizedUrl = normalizeLinkUrl(url);
+    if (!normalizedUrl) {
+      setError("Enter a valid http or https URL.");
+      return;
+    }
+
+    const duplicate = apps.some((candidate) => {
+      if (candidate.url === app.url) return false;
+      return normalizeLinkUrl(candidate.url) === normalizedUrl;
+    });
+    if (duplicate) {
+      setError("That URL is already in your workspace.");
+      return;
+    }
+
+    onSave(app, {
+      ...app,
+      name: cleanName,
+      url: normalizedUrl,
+      domain: hostnameFor(normalizedUrl),
+      icon,
+      accent: normalizeAccent(accent) ?? "#9ca3af",
+    });
+  };
+
+  return (
+    <div
+      className="newtab-modal"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="newtab-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newtab-edit-modal-title"
+        onSubmit={submit}
       >
-        <svg
-          aria-hidden="true"
-          fill="none"
-          focusable="false"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
+        <div className="newtab-edit-modal__header">
+          <div>
+            <h2 id="newtab-edit-modal-title">Edit link</h2>
+            <p>{hostnameFor(app.url)}</p>
+          </div>
+          <button
+            type="button"
+            className="newtab-edit-modal__close"
+            aria-label="Close edit link modal"
+            onClick={onClose}
+          >
+            <svg
+              aria-hidden="true"
+              fill="none"
+              focusable="false"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div
+          className="newtab-edit-modal__preview"
+          style={{ "--workspace-app-accent": accent } as CSSProperties}
         >
-          <path d="M18 6 6 18M6 6l12 12" />
-        </svg>
-      </button>
+          <span className="workspace-app-card__mark" aria-hidden="true">
+            <AppIcon name={icon} />
+          </span>
+          <div>
+            <strong>{name.trim() || "Untitled link"}</strong>
+            <span>{normalizeLinkUrl(url) ?? url}</span>
+          </div>
+        </div>
+
+        <div className="newtab-edit-modal__fields">
+          <label className="newtab-edit-modal__field">
+            <span>Link name</span>
+            <input
+              autoFocus
+              value={name}
+              onChange={(event) => {
+                setName(event.currentTarget.value);
+                setError(null);
+              }}
+            />
+          </label>
+          <label className="newtab-edit-modal__field">
+            <span>Link URL</span>
+            <input
+              inputMode="url"
+              value={url}
+              onChange={(event) => {
+                setUrl(event.currentTarget.value);
+                setError(null);
+              }}
+            />
+          </label>
+        </div>
+
+        <section className="newtab-edit-modal__section">
+          <div className="newtab-edit-modal__section-header">
+            <h3>Color</h3>
+            <label className="newtab-edit-modal__color-input">
+              <span>Custom color</span>
+              <input
+                aria-label="Custom card color"
+                type="color"
+                value={normalizeAccent(accent) ?? "#9ca3af"}
+                onChange={(event) => setAccent(event.currentTarget.value)}
+              />
+            </label>
+          </div>
+          <div className="newtab-color-grid" aria-label="Card color choices">
+            {APP_COLOR_CHOICES.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                className="newtab-color-choice"
+                aria-label={`Use ${choice.label} card color`}
+                aria-pressed={normalizeAccent(accent) === choice.value}
+                title={choice.label}
+                onClick={() => setAccent(choice.value)}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{ backgroundColor: choice.value }}
+                />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="newtab-edit-modal__section">
+          <div className="newtab-edit-modal__section-header">
+            <h3>Icon</h3>
+            <span>
+              {selectedIcon.source} / {selectedIcon.label}
+            </span>
+          </div>
+          <label className="newtab-icon-search">
+            <SearchIcon className="newtab-icon-search__icon" />
+            <input
+              aria-label="Search Phosphor, Hero, or Lucide icons"
+              placeholder="Search Phosphor, Hero, or Lucide icons"
+              value={iconQuery}
+              onChange={(event) => setIconQuery(event.currentTarget.value)}
+            />
+          </label>
+          <div className="newtab-icon-grid" aria-label="Icon choices">
+            {iconResults.map((choice) => (
+              <button
+                key={choice.icon}
+                type="button"
+                className="newtab-icon-choice"
+                aria-label={`Use ${choice.source} ${choice.label} icon`}
+                aria-pressed={icon === choice.icon}
+                style={{ "--workspace-app-accent": accent } as CSSProperties}
+                onClick={() => setIcon(choice.icon)}
+              >
+                <span className="newtab-icon-choice__mark" aria-hidden="true">
+                  <AppIcon name={choice.icon} />
+                </span>
+                <span className="newtab-icon-choice__label">
+                  {choice.label}
+                </span>
+                <span className="newtab-icon-choice__source">
+                  {choice.source}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {error ? <p className="newtab-edit-modal__error">{error}</p> : null}
+
+        <div className="newtab-edit-modal__footer">
+          <button
+            type="button"
+            className="newtab-edit-modal__button"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="newtab-edit-modal__button newtab-edit-modal__button--primary"
+          >
+            Save link
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -699,8 +1374,7 @@ function applyStoredOrder(
 
 function isWorkspaceAppIcon(input: unknown): input is WorkspaceAppIcon {
   return (
-    typeof input === "string" &&
-    APP_ICON_NAMES.has(input as WorkspaceAppIcon)
+    typeof input === "string" && APP_ICON_NAMES.has(input as WorkspaceAppIcon)
   );
 }
 
@@ -719,7 +1393,9 @@ function sanitizeCustomApps(input: unknown): WorkspaceApp[] {
   });
 }
 
-function sanitizeIconOverrides(input: unknown): Record<string, WorkspaceAppIcon> {
+function sanitizeIconOverrides(
+  input: unknown,
+): Record<string, WorkspaceAppIcon> {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   return Object.fromEntries(
     Object.entries(input).filter(
@@ -744,7 +1420,7 @@ function NewTabWorkspace() {
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
-  const [iconPickerUrl, setIconPickerUrl] = useState<string | null>(null);
+  const [editingApp, setEditingApp] = useState<WorkspaceApp | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -789,15 +1465,6 @@ function NewTabWorkspace() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!iconPickerUrl) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIconPickerUrl(null);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [iconPickerUrl]);
-
   const persistOrder = (next: WorkspaceApp[]) => {
     setApps(next);
     try {
@@ -815,15 +1482,8 @@ function NewTabWorkspace() {
     const urlInput = window.prompt("URL (e.g. https://example.com)");
     if (!urlInput?.trim()) return;
 
-    let normalized = urlInput.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
-      normalized = `https://${normalized}`;
-    }
-
-    let host = "";
-    try {
-      host = new URL(normalized).hostname;
-    } catch {
+    const normalized = normalizeLinkUrl(urlInput);
+    if (!normalized) {
       window.alert("That URL doesn't look right.");
       return;
     }
@@ -835,7 +1495,7 @@ function NewTabWorkspace() {
 
     const newApp: WorkspaceApp = {
       name: nameInput.trim(),
-      domain: host,
+      domain: hostnameFor(normalized),
       url: normalized,
       icon: "link",
       accent: "#9ca3af",
@@ -857,26 +1517,55 @@ function NewTabWorkspace() {
     }
   };
 
-  const changeAppIcon = (app: WorkspaceApp, icon: WorkspaceAppIcon) => {
+  const saveAppEdits = (app: WorkspaceApp, updatedApp: WorkspaceApp) => {
     const nextApps = apps.map((candidate) =>
-      candidate.url === app.url ? { ...candidate, icon } : candidate,
+      candidate.url === app.url ? updatedApp : candidate,
     );
     setApps(nextApps);
-    setIconPickerUrl(null);
+    setEditingApp(null);
 
     try {
       chrome.storage.local.get(
-        [APP_ICON_STORAGE_KEY, CUSTOM_APPS_STORAGE_KEY],
+        [
+          CUSTOM_APPS_STORAGE_KEY,
+          HIDDEN_APPS_STORAGE_KEY,
+          APP_ICON_STORAGE_KEY,
+        ],
         (result) => {
           const iconOverrides = sanitizeIconOverrides(
             result?.[APP_ICON_STORAGE_KEY],
           );
           const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
-          chrome.storage.local.set({
-            [APP_ICON_STORAGE_KEY]: { ...iconOverrides, [app.url]: icon },
-            [CUSTOM_APPS_STORAGE_KEY]: customs.map((candidate) =>
-              candidate.url === app.url ? { ...candidate, icon } : candidate,
+          const existingHidden = Array.isArray(
+            result?.[HIDDEN_APPS_STORAGE_KEY],
+          )
+            ? result[HIDDEN_APPS_STORAGE_KEY].filter(
+                (url): url is string => typeof url === "string",
+              )
+            : [];
+          const isBuiltIn = WORKSPACE_APPS.some(
+            (candidate) => candidate.url === app.url,
+          );
+          const nextCustoms = [
+            ...customs.filter(
+              (candidate) =>
+                candidate.url !== app.url && candidate.url !== updatedApp.url,
             ),
+            updatedApp,
+          ];
+          const hidden = isBuiltIn
+            ? Array.from(new Set([...existingHidden, app.url]))
+            : existingHidden;
+
+          delete iconOverrides[app.url];
+          chrome.storage.local.set({
+            [CUSTOM_APPS_STORAGE_KEY]: nextCustoms,
+            [HIDDEN_APPS_STORAGE_KEY]: hidden,
+            [APP_ICON_STORAGE_KEY]: {
+              ...iconOverrides,
+              [updatedApp.url]: updatedApp.icon,
+            },
+            [APP_ORDER_STORAGE_KEY]: nextApps.map((candidate) => candidate.url),
           });
         },
       );
@@ -890,11 +1579,15 @@ function NewTabWorkspace() {
     setApps(nextApps);
     setDragIndex(null);
     setOverIndex(null);
-    setIconPickerUrl(null);
+    setEditingApp(null);
 
     try {
       chrome.storage.local.get(
-        [CUSTOM_APPS_STORAGE_KEY, HIDDEN_APPS_STORAGE_KEY, APP_ICON_STORAGE_KEY],
+        [
+          CUSTOM_APPS_STORAGE_KEY,
+          HIDDEN_APPS_STORAGE_KEY,
+          APP_ICON_STORAGE_KEY,
+        ],
         (result) => {
           const existingCustoms = sanitizeCustomApps(
             result?.[CUSTOM_APPS_STORAGE_KEY],
@@ -939,10 +1632,6 @@ function NewTabWorkspace() {
     return { top, focus, compact };
   }, [apps]);
 
-  const toggleIconPicker = (app: WorkspaceApp) => {
-    setIconPickerUrl((current) => (current === app.url ? null : app.url));
-  };
-
   const handleDrop = (toIndex: number) => {
     const from = dragIndex;
     setDragIndex(null);
@@ -958,7 +1647,7 @@ function NewTabWorkspace() {
     isDropTarget:
       overIndex === index && dragIndex !== null && dragIndex !== index,
     onDragStart: (i) => {
-      setIconPickerUrl(null);
+      setEditingApp(null);
       setDragIndex(i);
     },
     onDragOver: (i) => setOverIndex(i),
@@ -990,9 +1679,7 @@ function NewTabWorkspace() {
                 key={app.url}
                 app={app}
                 drag={makeDrag(i)}
-                iconPickerOpen={iconPickerUrl === app.url}
-                onChangeIcon={changeAppIcon}
-                onToggleIconPicker={toggleIconPicker}
+                onEdit={setEditingApp}
                 onRemove={removeApp}
               />
             ))}
@@ -1006,9 +1693,7 @@ function NewTabWorkspace() {
                 key={app.url}
                 app={app}
                 drag={makeDrag(TOP_APP_COUNT + i)}
-                iconPickerOpen={iconPickerUrl === app.url}
-                onChangeIcon={changeAppIcon}
-                onToggleIconPicker={toggleIconPicker}
+                onEdit={setEditingApp}
                 onRemove={removeApp}
               />
             ))}
@@ -1023,9 +1708,7 @@ function NewTabWorkspace() {
                 app={app}
                 size="small"
                 drag={makeDrag(TOP_APP_COUNT + FOCUS_APP_COUNT + i)}
-                iconPickerOpen={iconPickerUrl === app.url}
-                onChangeIcon={changeAppIcon}
-                onToggleIconPicker={toggleIconPicker}
+                onEdit={setEditingApp}
                 onRemove={removeApp}
               />
             ))}
@@ -1072,6 +1755,15 @@ function NewTabWorkspace() {
           />
         </section>
       </main>
+      {editingApp ? (
+        <EditAppModal
+          key={editingApp.url}
+          app={editingApp}
+          apps={apps}
+          onClose={() => setEditingApp(null)}
+          onSave={saveAppEdits}
+        />
+      ) : null}
     </div>
   );
 }
