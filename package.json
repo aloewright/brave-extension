@@ -47,18 +47,26 @@
     "vite": "6.4.2",
     "vitest": "^4.1.7"
   },
+  "overrides": {
+    "@babel/traverse": "7.29.0",
+    "@plasmohq/parcel-resolver-post": "0.4.6",
+    "@plasmohq/parcel-transformer-manifest": "0.21.1",
+    "@plasmohq/parcel-transformer-svelte": "0.6.1",
+    "content-security-policy-parser": "0.6.0",
+    "esbuild": "0.25.12",
+    "msgpackr": "1.11.9",
+    "svelte": "5.55.9",
+    "tsup": "8.5.1",
+    "vite": "6.4.2"
+  },
   "pnpm": {
-    "overrides": {
-      "@babel/traverse": "7.29.0",
-      "@plasmohq/parcel-resolver-post": "0.4.6",
-      "@plasmohq/parcel-transformer-manifest": "0.21.1",
-      "@plasmohq/parcel-transformer-svelte": "0.6.1",
-      "content-security-policy-parser": "0.6.0",
-      "esbuild": "0.25.12",
-      "msgpackr": "1.11.9",
-      "svelte": "5.55.9",
-      "tsup": "8.5.1",
-      "vite": "6.4.2"
+    "allowBuilds": {
+      "@parcel/watcher": true,
+      "@swc/core": true,
+      "esbuild": true,
+      "lmdb": true,
+      "msgpackr-extract": true,
+      "sharp": true
     }
   },
   "manifest": {

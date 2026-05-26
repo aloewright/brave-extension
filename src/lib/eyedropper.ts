@@ -21,10 +21,15 @@ export function normalizeSavedColor(input: string): string | null {
 
 export async function getSavedColors(): Promise<SavedColor[]> {
   if (!hasStorage()) return []
-  const got = await chrome.storage.local.get(EYEDROPPER_SAVED_COLORS_KEY)
-  const raw = got[EYEDROPPER_SAVED_COLORS_KEY]
-  if (!Array.isArray(raw)) return []
-  return dedupeSavedColors(raw.filter(isSavedColor))
+  try {
+    const got = await chrome.storage.local.get(EYEDROPPER_SAVED_COLORS_KEY)
+    const raw = got[EYEDROPPER_SAVED_COLORS_KEY]
+    if (!Array.isArray(raw)) return []
+    return dedupeSavedColors(raw.filter(isSavedColor))
+  } catch (error) {
+    console.error("Failed to get saved colors:", error)
+    return []
+  }
 }
 
 export async function savePickedColor(input: string): Promise<SavedColor[]> {
@@ -41,7 +46,13 @@ export async function savePickedColor(input: string): Promise<SavedColor[]> {
     0,
     EYEDROPPER_SAVED_COLORS_LIMIT
   )
-  await chrome.storage.local.set({ [EYEDROPPER_SAVED_COLORS_KEY]: capped })
+  if (hasStorage()) {
+    try {
+      await chrome.storage.local.set({ [EYEDROPPER_SAVED_COLORS_KEY]: capped })
+    } catch (error) {
+      console.error("Failed to save picked color:", error)
+    }
+  }
   return capped
 }
 
