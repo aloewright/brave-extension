@@ -9,19 +9,24 @@ export const config: PlasmoCSConfig = {
 
 let scheduledAttempt: number | null = null
 let lastFilledSignature = ""
+let passwordAutofillObserver: MutationObserver | null = null
 
 function requestMatches(): Promise<PasswordLogin[]> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { type: "PASSWORDS_MATCH_LOGINS", url: location.href },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          resolve([])
-          return
+    try {
+      chrome.runtime.sendMessage(
+        { type: "PASSWORDS_MATCH_LOGINS", url: location.href },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            resolve([])
+            return
+          }
+          resolve(Array.isArray(response?.matches) ? response.matches : [])
         }
-        resolve(Array.isArray(response?.matches) ? response.matches : [])
-      }
-    )
+      )
+    } catch {
+      resolve([])
+    }
   })
 }
 
@@ -67,6 +72,23 @@ function autofillSubmitKey(signature: string) {
   return `ai-dev-sidebar:password-autofill-submitted:${signature}`
 }
 
+function readSubmitState(key: string) {
+  try {
+    return sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function markSubmitState(key: string) {
+  try {
+    sessionStorage.setItem(key, "1")
+    return true
+  } catch {
+    return false
+  }
+}
+
 function findSubmitButton(passwordInput: HTMLInputElement): HTMLElement | null {
   const root = passwordInput.form ?? document
   const buttons = Array.from(
@@ -89,23 +111,29 @@ function findSubmitButton(passwordInput: HTMLInputElement): HTMLElement | null {
 }
 
 async function attemptAutofill(force = false) {
-  if (!/^https?:$/i.test(location.protocol)) return
-  const matches = await requestMatches()
-  const exactMatches = matches.filter((match) => match.password)
-  if (exactMatches.length !== 1) return
-  const login = exactMatches[0]
-  const passwordInput = findPasswordInput()
-  if (!passwordInput) return
-  const usernameInput = findUsernameInput()
-  const signature = `${login.id}:${location.origin}:${usernameInput?.name || usernameInput?.id || ""}:${passwordInput.name || passwordInput.id || ""}`
-  if (!force && signature === lastFilledSignature) return
-  lastFilledSignature = signature
-  if (usernameInput) setInputValue(usernameInput, login.username)
-  setInputValue(passwordInput, login.password)
-  const submitKey = autofillSubmitKey(signature)
-  if (sessionStorage.getItem(submitKey) === "1") return
-  sessionStorage.setItem(submitKey, "1")
-  window.setTimeout(() => findSubmitButton(passwordInput)?.click(), 150)
+  try {
+    if (!/^https?:$/i.test(location.protocol)) return
+    const matches = await requestMatches()
+    const exactMatches = matches.filter((match) => match.password)
+    if (exactMatches.length !== 1) return
+    const login = exactMatches[0]
+    const passwordInput = findPasswordInput()
+    if (!passwordInput) return
+    const usernameInput = findUsernameInput()
+    const signature = `${login.id}:${location.origin}:${usernameInput?.name || usernameInput?.id || ""}:${passwordInput.name || passwordInput.id || ""}`
+    if (!force && signature === lastFilledSignature) return
+    lastFilledSignature = signature
+    if (usernameInput) setInputValue(usernameInput, login.username)
+    setInputValue(passwordInput, login.password)
+    const submitKey = autofillSubmitKey(signature)
+    if (readSubmitState(submitKey) === "1") return
+    if (!markSubmitState(submitKey)) return
+    window.setTimeout(() => findSubmitButton(passwordInput)?.click(), 150)
+  } catch {
+    // Best-effort autofill. Some pages block storage, mutate the DOM rapidly,
+    // or expose malformed fields; none of those should surface as a runtime
+    // error from the content script.
+  }
 }
 
 function scheduleAutofill(delay = 250, force = false) {
@@ -120,8 +148,23 @@ scheduleAutofill(100)
 window.addEventListener("focus", () => scheduleAutofill(100))
 document.addEventListener("DOMContentLoaded", () => scheduleAutofill(100))
 
-const observer = new MutationObserver(() => scheduleAutofill(300))
-observer.observe(document.documentElement, { childList: true, subtree: true })
+function ensureAutofillObserver() {
+  if (passwordAutofillObserver || !document.documentElement) return
+  try {
+    passwordAutofillObserver = new MutationObserver(() => scheduleAutofill(300))
+    passwordAutofillObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    })
+  } catch {
+    passwordAutofillObserver = null
+  }
+}
+
+ensureAutofillObserver()
+document.addEventListener("DOMContentLoaded", ensureAutofillObserver, {
+  once: true
+})
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "PASSWORDS_RETRY_AUTOFILL") return

@@ -160,7 +160,19 @@ describe("passwords and Nodewarden", () => {
     expect(source).toContain("findSubmitButton")
     expect(source).toContain(".click()")
     expect(source).toContain("exactMatches.length !== 1")
-    expect(source).toContain("sessionStorage.getItem(submitKey)")
+    expect(source).toContain("readSubmitState(submitKey)")
+  })
+
+  it("keeps password autofill best-effort so page-specific DOM failures do not surface as uncaught errors", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/contents/password-autofill.ts"),
+      "utf8"
+    )
+    expect(source).toContain("function readSubmitState(key: string)")
+    expect(source).toContain("function markSubmitState(key: string)")
+    expect(source).toContain("function ensureAutofillObserver()")
+    expect(source).toContain("try {")
+    expect(source).toContain("catch {")
   })
 })
 
