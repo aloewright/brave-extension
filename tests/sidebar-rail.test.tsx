@@ -34,6 +34,14 @@ describe("SECTIONS reflects ALO-471 reorg", () => {
     expect(SECTIONS.find((s) => s.id === "quickInfo")?.label).toBe("Contact Enrichment")
   })
 
+  it("uses the avatar icon for Contact Enrichment", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8"
+    )
+    expect(source).toContain('quickInfo: "avatar"')
+  })
+
   it("Tech and Session appear next to each other to keep the rail scannable", () => {
     const ids = SECTIONS.map((s) => s.id)
     const techIdx = ids.indexOf("tech")

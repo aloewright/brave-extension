@@ -10,6 +10,7 @@ export function cx(...classes: Array<string | false | null | undefined>) {
 }
 
 export type LeoIconName =
+  | "avatar"
   | "browser-extensions"
   | "chevrons-down"
   | "chevrons-up"
@@ -47,6 +48,9 @@ const puzzlePieceIcon = (
 )
 
 const ICONS: Record<LeoIconName, ReactNode> = {
+  avatar: (
+    <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M12 3.2a4.35 4.35 0 1 0 0 8.7 4.35 4.35 0 0 0 0-8.7M9.25 7.55a2.75 2.75 0 1 1 5.5 0 2.75 2.75 0 0 1-5.5 0M12 13.2c-4.52 0-8 2.5-8 5.75A2.85 2.85 0 0 0 6.85 21h10.3A2.85 2.85 0 0 0 20 18.95c0-3.25-3.48-5.75-8-5.75m0 1.6c3.72 0 6.4 1.9 6.4 4.15 0 .25-.1.45-.3.45H5.9c-.2 0-.3-.2-.3-.45 0-2.25 2.68-4.15 6.4-4.15" />
+  ),
   "browser-extensions": puzzlePieceIcon,
   "chevrons-down": (
     <path fill="currentColor" d="M5.47 6.72a.75.75 0 0 1 1.06 0L12 12.19l5.47-5.47a.75.75 0 1 1 1.06 1.06l-6 6a.75.75 0 0 1-1.06 0l-6-6a.75.75 0 0 1 0-1.06m0 5a.75.75 0 0 1 1.06 0L12 17.19l5.47-5.47a.75.75 0 1 1 1.06 1.06l-6 6a.75.75 0 0 1-1.06 0l-6-6a.75.75 0 0 1 0-1.06" />
