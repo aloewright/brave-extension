@@ -15,15 +15,15 @@ describe("tasks section", () => {
     expect(railSource).toContain('tasks: "list-checks"')
   })
 
-  it("uses the shared fly-mail task API from the extension origin", () => {
+  it("uses the shared cal.fly.pm task API", () => {
     const source = readFileSync(
       join(process.cwd(), "src/sections/tasks/TasksSection.tsx"),
       "utf8"
     )
 
-    expect(source).toContain('const MAIL_TASKS_API_BASE = "https://mail.fly.pm/api/v1"')
+    expect(source).toContain('const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
     expect(source).toContain('credentials: "include"')
-    expect(source).toContain('requestJson<{ tasks?: SharedTask[] }>("/tasks")')
+    expect(source).toContain('requestJson<{ tasks?: SharedTask[] }>("/tasks-data")')
     expect(source).toContain('method: "POST"')
     expect(source).toContain('method: "DELETE"')
     expect(source).toContain("Timed items appear on Calendar.")
