@@ -132,7 +132,7 @@ export function toBridgeHistory(m: ChatMessage): BridgeHistoryRow {
 }
 
 async function sendNativeMessage(
-  payload: unknown,
+  payload: object,
   signal?: AbortSignal
 ): Promise<BridgeRawResponse> {
   return new Promise((resolve, reject) => {

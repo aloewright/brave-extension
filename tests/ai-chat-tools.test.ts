@@ -111,7 +111,7 @@ describe("buildTools", () => {
   })
 
   it("context.activeTab returns nulls when no active tab", async () => {
-    ;(globalThis as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockResolvedValue(
+    ;((globalThis as unknown) as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockResolvedValue(
       []
     )
     const tools = buildTools(async () => STUB_TOKEN)
@@ -146,7 +146,7 @@ describe("runTool", () => {
 
 describe("captureAmbient", () => {
   beforeEach(() => {
-    ;(globalThis as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockResolvedValue(
+    ;((globalThis as unknown) as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockResolvedValue(
       [{ url: "http://a.test/", title: "A" }]
     )
     mem.clear()
@@ -158,7 +158,7 @@ describe("captureAmbient", () => {
   })
 
   it("swallows tabs.query errors and returns ambient without activeTab", async () => {
-    ;(globalThis as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockRejectedValue(
+    ;((globalThis as unknown) as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockRejectedValue(
       new Error("denied")
     )
     const out = await captureAmbient()
