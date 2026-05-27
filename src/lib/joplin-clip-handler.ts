@@ -6,7 +6,7 @@
 // returns nothing — side effects: storage write + sendMessage broadcast.
 
 import { extractClip } from "./clip-extractors"
-import { createNote, joplinNoteUrl } from "./joplin-client"
+import { createNote, joplinNoteUrl } from "./joplin"
 import { prependRecentClip } from "./joplin-recents"
 import type {
   ClipRequest,

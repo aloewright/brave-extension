@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus } from "../types"
-import { ping } from "../lib/joplin-client"
+import { ping } from "../lib/joplin"
 import { BACKEND_INFO } from "../types"
 import {
   DEFAULT_CAPTURE_SUBFOLDER,
@@ -526,6 +526,25 @@ export function SettingsPanel({
                   className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
                   placeholder="X-Sidebar-Token (required)"
                 />
+                <input
+                  type="password"
+                  value={settings.tasksApiToken}
+                  onChange={(e) => onUpdate({ tasksApiToken: e.target.value })}
+                  className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                  placeholder="Tasks API token (auto-fills from Doppler; falls back to sidebar token)"
+                />
+                <p className="text-[9px] text-muted-fg leading-snug">
+                  Tasks also accept your cal.fly.pm browser session. Sign in at{" "}
+                  <a
+                    href="https://cal.fly.pm/tasks"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    cal.fly.pm/tasks
+                  </a>{" "}
+                  if token auth fails.
+                </p>
                 <Toggle
                   label="Prune local after sync"
                   description="Drop synced messages from chrome.storage to keep space low"

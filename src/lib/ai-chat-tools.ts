@@ -5,7 +5,7 @@
 // orchestrator imports buildTools(getToken) and runTool(tools, name, args).
 
 import { Storage } from "@plasmohq/storage"
-import { createNote, ping } from "./joplin-client"
+import { createNote, ping } from "./joplin"
 import type {
   AmbientContext,
   ToolDefinition,

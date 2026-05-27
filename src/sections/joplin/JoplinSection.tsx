@@ -13,7 +13,7 @@ import {
   type ClipResultEvent,
   type RecentClip
 } from "../../lib/joplin-types"
-import { ping } from "../../lib/joplin-client"
+import { ping } from "../../lib/joplin"
 import {
   getRecentClips,
   clearRecentClips

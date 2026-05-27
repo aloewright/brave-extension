@@ -5,7 +5,7 @@ const { createNoteMock, pingMock } = vi.hoisted(() => ({
   createNoteMock: vi.fn(),
   pingMock: vi.fn()
 }))
-vi.mock("../src/lib/joplin-client", () => ({
+vi.mock("../src/lib/joplin", () => ({
   createNote: createNoteMock,
   ping: pingMock,
   JoplinClientError: class extends Error {

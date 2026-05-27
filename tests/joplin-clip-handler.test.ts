@@ -9,7 +9,7 @@ const { extractClipMock, createNoteMock, prependMock } = vi.hoisted(() => ({
 }))
 
 vi.mock("../src/lib/clip-extractors", () => ({ extractClip: extractClipMock }))
-vi.mock("../src/lib/joplin-client", () => ({
+vi.mock("../src/lib/joplin", () => ({
   createNote: createNoteMock,
   joplinNoteUrl: (id: string) => `joplin://x-callback-url/openNote?id=${id}`
 }))
