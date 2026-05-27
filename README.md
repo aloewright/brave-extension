@@ -35,6 +35,13 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
   a right-click context menu. Requires Joplin's Web Clipper *service*
   (Tools → Options → Web Clipper → Enable) but not Joplin's own browser
   extension. Token configured in Settings → Joplin.
+- **AI Chat (Apple Foundation Models):** local LLM chat in the sidebar,
+  powered by Apple's on-device foundation models via the native-host
+  Swift bridge. Auto-fires tool calls (V1 catalog: joplin.createNote,
+  joplin.ping, context.activeTab) and threads results back into the
+  conversation. Hard Stop button. Single rolling conversation with
+  compaction. Requires Apple Intelligence enabled (macOS 26+,
+  M-series).
 - **Bookmarks and history:** pull a local bookmark snapshot into the extension,
   browse bookmarks alphabetically, by favorites, or by category, and show recent
   history on the new tab page.
@@ -209,3 +216,18 @@ Run the full suite (unit + integration) with `npm test`.
 - [ ] Stop Joplin Desktop → click Clip → toast says "Couldn't reach Joplin." Status dot turns red within 30s.
 - [ ] Clear the token in Settings → Clip button still works mechanically but the result toast says "No Joplin API token configured."
 - [ ] Click Clip on a `chrome://` page → toast says "Couldn't extract page content" (or similar).
+
+## AI Chat — done-criteria checklist
+
+- [ ] `pnpm build` produces a clean Plasmo bundle.
+- [ ] `pnpm test` (vitest) is green, including the four new chat test files.
+- [ ] Native host installed (`pnpm install-host`); `pnpm diagnose-host` exits 0.
+- [ ] Load `build/chrome-mv3-prod/` unpacked in Brave → sidebar shows the new "AI Chat" section.
+- [ ] On a Mac with Apple Intelligence enabled (macOS 26+, M-series), sending "hi" produces a streamed-feel response within ~5s.
+- [ ] Sending "what's the URL of my current tab?" → model emits a `context.activeTab` tool call, a tool-result row appears, then a final assistant message naming the URL.
+- [ ] Sending "create a Joplin note titled Hello with body World" (Joplin token configured, Web Clipper running) → model emits `joplin.createNote`, the tool result has the note id, final assistant message confirms; verify the note in Joplin Desktop.
+- [ ] Pressing Stop during a turn → conversation shows "Stopped by user." within ~3s.
+- [ ] Clear button empties the conversation; sending again starts fresh.
+- [ ] Apple Intelligence disabled → first Send produces a "Foundation Models is unavailable…" assistant message within ~2s.
+- [ ] Uninstall the native host (`pnpm uninstall-host`), reload extension → first Send produces a "Native host not installed…" assistant message within ~2s.
+- [ ] Force the step cap by asking for something open-ended (e.g., "keep pinging Joplin forever") — after 10 tool calls the conversation gets the cap message and stops.
