@@ -66,3 +66,52 @@ export function parseProgram(plan: unknown): Op[] {
 }
 
 export { BROWSER_AGENT_OPERATIONS }
+
+export type OpResult = {
+  ok: boolean
+  skipped?: boolean
+  reason?: string
+  durationMs?: number
+  selector?: string
+  data?: unknown
+}
+
+export type StepEntry = {
+  kind: string
+  label?: string
+  ok: boolean
+  skipped?: boolean
+  reason?: string
+  durationMs?: number
+  selector?: string
+  raw: { op: Op; result: OpResult }
+}
+
+type ObservationLite = { nodes?: Array<{ ref?: string; name?: string; text?: string; selector?: string }> }
+
+function labelFor(op: Op, observation: ObservationLite | null | undefined): string | undefined {
+  if (op.kind === "browser.navigate") return op.url
+  if (op.kind === "browser.wait") return op.ms != null ? `${op.ms}ms` : undefined
+  if (op.kind === "memory.search" || op.kind === "memory.remember") return op.value
+  if (op.kind === "browser.observe" || op.kind === "session.compact") return undefined
+  if (!op.ref) return undefined
+  const nodes = observation?.nodes ?? []
+  const node = nodes.find((n) => n?.ref === op.ref)
+  const name = (node?.name && node.name.trim()) || (node?.text && node.text.trim())
+  return name || undefined
+}
+
+export function summarizeStep(op: Op, result: OpResult, observation: ObservationLite | null | undefined): StepEntry {
+  const step: StepEntry = {
+    kind: op.kind,
+    ok: result.ok,
+    raw: { op, result }
+  }
+  const label = labelFor(op, observation)
+  if (label) step.label = label
+  if (result.skipped) step.skipped = true
+  if (result.reason) step.reason = result.reason
+  if (typeof result.durationMs === "number") step.durationMs = result.durationMs
+  if (result.selector) step.selector = result.selector
+  return step
+}
