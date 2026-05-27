@@ -1,6 +1,8 @@
 import { ulid } from "./lib/ulid";
 import { MENU_ID_TO_MODE } from "./lib/joplin-types";
-import type { ClipMode } from "./lib/joplin-types";
+import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
+import { handleClipRequest } from "./lib/joplin-clip-handler";
+import { Storage } from "@plasmohq/storage";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { getSettings } from "./storage";
@@ -64,6 +66,31 @@ import type {
 
 const HOST_NAME = "com.aidev.sidebar";
 const HEARTBEAT_ALARM = "native-heartbeat";
+
+// ─── Joplin clipper integration ──────────────────────────────────────────────
+
+const settingsStorage = new Storage();
+
+async function getJoplinToken(): Promise<string> {
+  const settings = await settingsStorage.get<{ joplinToken?: string }>("ai-dev-settings");
+  return settings?.joplinToken ?? "";
+}
+
+function broadcastClipResult(event: ClipResultEvent) {
+  // Fire-and-forget. Receivers may not exist (sidebar closed). Errors here
+  // are harmless (the well-known "Could not establish connection" when there
+  // are no listeners).
+  void chrome.runtime.sendMessage(event).catch(() => undefined);
+}
+
+async function dispatchClip(req: ClipRequest) {
+  await handleClipRequest(req, {
+    getJoplinToken,
+    broadcast: broadcastClipResult,
+    newId: () => ulid(),
+    now: () => new Date()
+  });
+}
 const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
 const RSS_FEED_MENU_ID = "save-rss-feed";
@@ -493,6 +520,16 @@ chrome.windows?.onRemoved?.addListener?.((windowId) => {
 });
 
 // Handle messages from content scripts and popup
+chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
+  if (message && typeof message === "object" && (message as { type?: string }).type === "joplin/clip") {
+    dispatchClip(message as ClipRequest)
+      .then(() => sendResponse2({ ok: true }))
+      .catch((err) => sendResponse2({ ok: false, error: String(err) }));
+    return true; // keep the message channel open for the async response
+  }
+  return undefined;
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "consent:response") {
     handleConsentResponse(message as ConsentResponseMessage);
@@ -1580,10 +1617,10 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
 
-  // Joplin clipper — Task 10 will wire this up to handleClipRequest.
+  // Joplin clipper — dispatch to handleClipRequest via dispatchClip.
   const mode: ClipMode | undefined = MENU_ID_TO_MODE[String(info.menuItemId)];
   if (mode) {
-    console.info("[joplin-clip] context menu click", { mode, tabId: tab.id });
+    await dispatchClip({ type: "joplin/clip", mode, tabId: tab.id });
     return;
   }
 
