@@ -346,10 +346,23 @@ function untrackActivePtySession(sessionId: string) {
 
 function connectNativeHost() {
   if (nativePort) return nativePort;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  // Backoff gate: while a scheduled retry is pending, every external caller
+  // (offscreen keepalive ping, sendToNative, NATIVE_STATUS, etc.) would
+  // otherwise create a parallel port that immediately disconnects — the
+  // storm we used to see in the unreachable-host case. Defer to the
+  // scheduled retry instead.
+  if (reconnectTimer !== null) return null;
+  // Give-up state: if we've burned through RECONNECT_MAX_FAILURES rapidly,
+  // wait for the heartbeat window before trying again. The 30s threshold
+  // matches the heartbeat alarm period, so heartbeat-initiated retries
+  // pass through and reset the failure streak.
+  if (
+    reconnectFailures > RECONNECT_MAX_FAILURES &&
+    Date.now() - lastDisconnectAt < 30_000
+  ) {
+    return null;
   }
+  if (reconnectFailures > RECONNECT_MAX_FAILURES) reconnectFailures = 0;
   try {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
     // Per-port flag — set on the first onMessage so the onDisconnect handler

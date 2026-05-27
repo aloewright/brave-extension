@@ -42,7 +42,9 @@ export const test = base.extend<Fixtures>({
       os.homedir(),
       "Library/Application Support/Chromium/NativeMessagingHosts/com.aidev.sidebar.json"
     )
-    if (fs.existsSync(srcManifest)) {
+    // Set AI_DEV_SIDEBAR_SKIP_NM_INSTALL=1 to test the unreachable-host
+    // path (verifying reconnect backoff is bounded).
+    if (fs.existsSync(srcManifest) && !process.env.AI_DEV_SIDEBAR_SKIP_NM_INSTALL) {
       const dstDir = path.join(userDataDir, "NativeMessagingHosts")
       fs.mkdirSync(dstDir, { recursive: true })
       fs.copyFileSync(srcManifest, path.join(dstDir, "com.aidev.sidebar.json"))
