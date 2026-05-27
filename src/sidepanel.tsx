@@ -17,6 +17,7 @@ import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
 import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { JoplinSection } from "./sections/joplin/JoplinSection";
+import { ChatSection } from "./sections/ai-chat/ChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
 const ACTIVE_KEY = "ui.activeSection";
@@ -85,6 +86,7 @@ function SidePanel() {
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
           {active === "joplin" && <JoplinSection />}
+          {active === "aiChat" && <ChatSection />}
           {active === "settings" && <SettingsSection />}
         </main>
       </div>
