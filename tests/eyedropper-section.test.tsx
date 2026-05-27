@@ -8,8 +8,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import React from "react"
 import { createRoot, type Root } from "react-dom/client"
-import React from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { act } from "react"
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
