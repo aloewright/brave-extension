@@ -4,10 +4,12 @@
  * tree (node-pty, esbuild, rollup *.node, fsevents.node, swift-manifest, …).
  * See README macOS Gatekeeper section (ALO-472).
  */
-import { resolve, join } from "path"
+import { resolve, join, dirname } from "path"
+import { fileURLToPath } from "url"
 import { scrubQuarantineAll } from "../native-host/installer.mjs"
 
-const repoRoot = resolve(join(import.meta.dirname, ".."))
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const repoRoot = resolve(join(__dirname, ".."))
 const { errors } = scrubQuarantineAll(repoRoot)
 for (const e of errors) {
   console.warn(`[scrub-quarantine] ${e.path}: ${e.message}`)

@@ -10,7 +10,8 @@
  * With `--fix`, re-runs the macOS quarantine scrub. Idempotent — safe to re-run.
  */
 
-import { resolve, join, relative } from "path"
+import { resolve, join, relative, dirname } from "path"
+import { fileURLToPath } from "url"
 import {
   findNativeArtifacts,
   findSwiftToolchainArtifacts,
@@ -20,7 +21,8 @@ import {
 } from "../native-host/installer.mjs"
 
 const fix = process.argv.includes("--fix")
-const repoRoot = resolve(join(import.meta.dirname, ".."))
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const repoRoot = resolve(join(__dirname, ".."))
 const roots = repoNodeModuleRoots(repoRoot)
 
 console.log(`Repo root: ${repoRoot}`)
@@ -28,8 +30,7 @@ console.log(`Platform: ${process.platform} ${process.arch}`)
 console.log("")
 
 if (roots.length === 0) {
-  console.log("No node_modules trees found. Run `pnpm install` first.")
-  process.exit(0)
+  console.log("Warning: No node_modules trees found. Run `pnpm install` first.")
 }
 
 const artifacts = [
@@ -39,7 +40,7 @@ const artifacts = [
   ])
 ].sort()
 if (artifacts.length === 0) {
-  console.log("No native artifacts found under node_modules.")
+  console.log("No native artifacts found.")
   process.exit(0)
 }
 
@@ -59,6 +60,7 @@ for (const path of artifacts) {
   }
   if (info.gatekeeperStatus === "rejected") {
     flags.push("GATEKEEPER_REJECTED")
+    problemCount++
   }
   const flagText = flags.length > 0 ? ` ⚠ ${flags.join(",")}` : ""
   console.log(`  ${short}`)

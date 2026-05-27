@@ -545,10 +545,18 @@ export function scrubQuarantinePaths(paths, options = {}) {
   const errors = []
   for (const path of paths) {
     const res = spawn("xattr", ["-d", "com.apple.quarantine", path], {
-      stdio: "ignore"
+      stdio: "pipe",
+      encoding: "utf8"
     })
     if (res.error) {
       errors.push({ path, message: res.error.message })
+      continue
+    }
+    if (res.status !== 0) {
+      const stderr = res.stderr || ""
+      const stdout = res.stdout || ""
+      const detail = (stderr + stdout).trim() || `exit code ${res.status}`
+      errors.push({ path, message: detail })
       continue
     }
     scrubbed.push(path)

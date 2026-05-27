@@ -6,13 +6,15 @@
  * copy of prebuilds/darwin-arm64/pty.node (or darwin-x64).
  */
 import { spawnSync } from "child_process"
-import { resolve, join } from "path"
+import { resolve, join, dirname } from "path"
+import { fileURLToPath } from "url"
 import {
   prepareNodePtyForGatekeeper,
   NODE_PTY_GATEKEEPER_HINT
 } from "../native-host/installer.mjs"
 
-const repoRoot = resolve(join(import.meta.dirname, ".."))
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const repoRoot = resolve(join(__dirname, ".."))
 const nativeHostDir = join(repoRoot, "native-host")
 
 if (process.platform !== "darwin") {

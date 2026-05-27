@@ -1,8 +1,8 @@
 /**
- * Tests for the simplified EyedropperSection (PR: removed saved-colors feature).
+ * Tests for the EyedropperSection with saved-colors feature.
  *
- * The component no longer imports chrome.storage, getSavedColors, savePickedColor,
- * or renders SavedColorCard. Tests verify the remaining pick/copy/display behaviour.
+ * The component imports chrome.storage, getSavedColors, savePickedColor,
+ * and renders SavedColorCard. Tests verify pick/copy/display and saved-colors behaviour.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -51,43 +51,41 @@ beforeEach(() => {
 // Structural / source-level checks
 // ---------------------------------------------------------------------------
 
-describe("EyedropperSection source: removed saved-colors feature", () => {
-  it("no longer imports chrome.storage or saved-color helpers", async () => {
+describe("EyedropperSection source: saved-colors feature present", () => {
+  it("imports chrome.storage and saved-color helpers", async () => {
     const { readFileSync } = await import("node:fs")
     const { join } = await import("node:path")
     const source = readFileSync(
       join(process.cwd(), "src/sections/eyedropper/EyedropperSection.tsx"),
       "utf8"
     )
-    expect(source).not.toContain("getSavedColors")
-    expect(source).not.toContain("savePickedColor")
-    expect(source).not.toContain("chrome.storage")
-    expect(source).not.toContain("SavedColorCard")
-    expect(source).not.toContain("savedColors")
+    expect(source).toContain("getSavedColors")
+    expect(source).toContain("savePickedColor")
+    expect(source).toContain("SavedColorCard")
+    expect(source).toContain("savedColors")
   })
 
-  it("no longer imports from ../../lib/eyedropper", async () => {
+  it("imports from ../../lib/eyedropper", async () => {
     const { readFileSync } = await import("node:fs")
     const { join } = await import("node:path")
     const source = readFileSync(
       join(process.cwd(), "src/sections/eyedropper/EyedropperSection.tsx"),
       "utf8"
     )
-    expect(source).not.toContain("lib/eyedropper")
+    expect(source).toContain("lib/eyedropper")
   })
 
-  it("does not use useEffect or useRef (removed with saved-colors)", async () => {
+  it("uses useEffect for loading saved colors", async () => {
     const { readFileSync } = await import("node:fs")
     const { join } = await import("node:path")
     const source = readFileSync(
       join(process.cwd(), "src/sections/eyedropper/EyedropperSection.tsx"),
       "utf8"
     )
-    expect(source).not.toContain("useEffect")
-    expect(source).not.toContain("useRef")
+    expect(source).toContain("useEffect")
   })
 
-  it("still exports EyedropperSection", async () => {
+  it("exports EyedropperSection", async () => {
     const mod = await import("../src/sections/eyedropper/EyedropperSection")
     expect(typeof mod.EyedropperSection).toBe("function")
   })
@@ -134,11 +132,11 @@ describe("EyedropperSection rendering", () => {
     }
   })
 
-  it("does not render a saved-colors section", async () => {
+  it("renders a saved-colors section with placeholder text", async () => {
     const { host, cleanup } = await renderEyedropperSection()
     try {
-      expect(host.textContent?.toLowerCase()).not.toContain("saved color")
-      expect(host.querySelector('[data-testid="saved-color-card"]')).toBeNull()
+      expect(host.textContent?.toLowerCase()).toContain("saved color")
+      expect(host.textContent).toContain("Pick a color to keep it here.")
     } finally {
       cleanup()
     }
@@ -218,7 +216,7 @@ describe("EyedropperSection: successful pick", () => {
     }
   })
 
-  it("does NOT persist color to chrome.storage after pick", async () => {
+  it("persists color to chrome.storage after pick", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn(async () => {}) }
@@ -241,9 +239,9 @@ describe("EyedropperSection: successful pick", () => {
         await new Promise((r) => setTimeout(r, 0))
       })
 
-      // chrome.storage.local should remain empty — no saved colors persisted.
+      // chrome.storage.local should have saved colors persisted.
       const dump = (await chrome.storage.local.get(null)) as Record<string, unknown>
-      expect(Object.keys(dump)).toHaveLength(0)
+      expect(Object.keys(dump).length).toBeGreaterThan(0)
     } finally {
       cleanup()
     }
