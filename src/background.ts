@@ -2,7 +2,6 @@ import { ulid } from "./lib/ulid";
 import { MENU_ID_TO_MODE } from "./lib/joplin-types";
 import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
 import { handleClipRequest } from "./lib/joplin-clip-handler";
-import { Storage } from "@plasmohq/storage";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { getSettings } from "./storage";
@@ -69,11 +68,9 @@ const HEARTBEAT_ALARM = "native-heartbeat";
 
 // ─── Joplin clipper integration ──────────────────────────────────────────────
 
-const settingsStorage = new Storage();
-
 async function getJoplinToken(): Promise<string> {
-  const settings = await settingsStorage.get<{ joplinToken?: string }>("ai-dev-settings");
-  return settings?.joplinToken ?? "";
+  const settings = await getSettings();
+  return settings.joplinToken ?? "";
 }
 
 function broadcastClipResult(event: ClipResultEvent) {
@@ -91,6 +88,7 @@ async function dispatchClip(req: ClipRequest) {
     now: () => new Date()
   });
 }
+
 const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
 const RSS_FEED_MENU_ID = "save-rss-feed";

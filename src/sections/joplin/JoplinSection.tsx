@@ -5,6 +5,7 @@
 // of "joplin/clip-result" — background owns the actual clip logic.
 
 import { useEffect, useMemo, useState } from "react"
+import { Storage } from "@plasmohq/storage"
 import {
   CLIP_MODES,
   CLIP_MODE_LABELS,
@@ -19,6 +20,7 @@ import {
 } from "../../lib/joplin-recents"
 
 const LAST_MODE_KEY = "ai-dev-joplin-last-mode"
+const lastModeStorage = new Storage()
 
 export function JoplinSection() {
   const [mode, setMode] = useState<ClipMode>("simplified")
@@ -30,8 +32,7 @@ export function JoplinSection() {
   // Mount: load recents + last mode + ping.
   useEffect(() => {
     void (async () => {
-      const stored = await chrome.storage.local.get(LAST_MODE_KEY)
-      const lastMode = stored[LAST_MODE_KEY] as ClipMode | undefined
+      const lastMode = await lastModeStorage.get<ClipMode>(LAST_MODE_KEY)
       if (lastMode && CLIP_MODES.includes(lastMode)) setMode(lastMode)
       setRecents(await getRecentClips())
       setStatus((await ping()) ? "green" : "red")
@@ -74,7 +75,7 @@ export function JoplinSection() {
 
   const onSelectMode = (m: ClipMode) => {
     setMode(m)
-    void chrome.storage.local.set({ [LAST_MODE_KEY]: m })
+    void lastModeStorage.set(LAST_MODE_KEY, m)
   }
 
   const onClip = async () => {
