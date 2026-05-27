@@ -13,6 +13,89 @@ interface SharedTask {
   completed: boolean
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function asBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return value !== 0
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "completed", "done"].includes(normalized)) return true
+    if (["false", "0", "no", "pending", "todo"].includes(normalized)) return false
+  }
+  return null
+}
+
+function coerceTask(value: unknown): SharedTask | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const id = asString(record.id) || asString(record.taskId) || asString(record._id)
+  const title = asString(record.title) || asString(record.name) || asString(record.text)
+  if (!id || !title) return null
+
+  const startDate =
+    asString(record.startDate) ||
+    asString(record.start_date) ||
+    asString(record.date) ||
+    null
+  const scheduledTime =
+    asString(record.scheduledTime) ||
+    asString(record.scheduled_time) ||
+    asString(record.time) ||
+    null
+  const plannedTime =
+    asNumber(record.plannedTime) ??
+    asNumber(record.planned_time) ??
+    asNumber(record.plannedMinutes) ??
+    asNumber(record.durationMinutes) ??
+    asNumber(record.duration) ??
+    0
+
+  const completed =
+    asBoolean(record.completed) ??
+    asBoolean(record.isCompleted) ??
+    asBoolean(record.done) ??
+    Boolean(record.completedAt || record.completed_at)
+
+  return { id, title, startDate, scheduledTime, plannedTime, completed }
+}
+
+function extractTasks(payload: unknown): SharedTask[] {
+  const record = asRecord(payload)
+  const candidates: unknown[] = []
+  if (Array.isArray(payload)) candidates.push(payload)
+  if (record) {
+    candidates.push(record.tasks, record.items, record.results)
+    const dataRecord = asRecord(record.data)
+    if (dataRecord) candidates.push(dataRecord.tasks, dataRecord.items, dataRecord.results)
+  }
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue
+    const tasks = candidate.map(coerceTask).filter((task): task is SharedTask => task !== null)
+    if (tasks.length > 0 || candidate.length === 0) return tasks
+  }
+  return []
+}
+
 function todayInputValue(): string {
   return new Date().toISOString().slice(0, 10)
 }
@@ -45,7 +128,16 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
     }
   })
   if (!response?.ok) {
-    throw new Error(response?.error || `Task request failed: ${response?.status ?? "unknown"}`)
+    const upstreamError = asRecord(response?.data)?.error
+    const detail =
+      asString(upstreamError) ||
+      asString(asRecord(response?.data)?.message) ||
+      asString(asRecord(response?.data)?.text)
+    throw new Error(
+      [response?.error || `Task request failed: ${response?.status ?? "unknown"}`, detail]
+        .filter(Boolean)
+        .join(" — ")
+    )
   }
   return response.data as T
 }
@@ -68,7 +160,7 @@ export function TasksSection() {
     setError(null)
     try {
       const data = await requestJson<{ tasks?: SharedTask[] }>("/tasks-data")
-      setTasks(data.tasks ?? [])
+      setTasks(extractTasks(data))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tasks")
     } finally {

@@ -21,15 +21,22 @@ describe("tasks section", () => {
       "utf8"
     )
     const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
+    const proxy = readFileSync(
+      join(process.cwd(), "src/background/cal-tasks-proxy.ts"),
+      "utf8"
+    )
 
     expect(source).toContain('type: "TASKS_API_REQUEST"')
     expect(source).toContain('requestJson<{ tasks?: SharedTask[] }>("/tasks-data")')
     expect(source).toContain('method: "POST"')
     expect(source).toContain('method: "DELETE"')
     expect(source).toContain("Timed items appear on Calendar.")
-    expect(background).toContain('const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
-    expect(background).toContain("getCalFlyPmCookieHeader");
-    expect(background).toContain('headers.cookie = cookieHeader');
+    // CAL_TASKS_API_BASE moved out of background.ts into the cal-tasks-proxy module
+    // when the cal-tab fetch proxy was introduced. Verify the constant + import.
+    expect(proxy).toContain('export const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
+    expect(background).toMatch(/from\s+["']\.\/background\/cal-tasks-proxy["']/)
+    expect(background).toContain("getCalFlyPmCookieHeader")
+    expect(background).toContain("headers.cookie = cookieHeader")
     expect(background).toContain('if (method !== "GET" && typeof message.init?.body === "string")')
     expect(background).toContain('credentials: "include"')
     // Forwarding ALL cookies the browser would send (no name whitelist) is
@@ -39,5 +46,8 @@ describe("tasks section", () => {
     expect(background).toMatch(
       /cookies\.map\(\(cookie\) => `\$\{cookie\.name\}=\$\{cookie\.value\}`\)\.join\("; "\)/,
     )
+    // Cal-tab proxy bug fix: args must be JSON-serializable so body coerces
+    // to "" when missing. Regression catch.
+    expect(proxy).toMatch(/args:\s*\[path,\s*method,\s*headers,\s*body\s*\?\?\s*""\]/)
   })
 })

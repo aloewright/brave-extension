@@ -60,6 +60,11 @@ import {
 } from "./background/third-party-cookies";
 import { ensureCalTasksOriginRule } from "./background/cal-tasks-origin";
 import {
+  CAL_TASKS_API_BASE,
+  fetchCalTasksViaPageContext,
+  type CalTasksTabFetchResult,
+} from "./background/cal-tasks-proxy";
+import {
   parseProgram,
   executeProgram,
   type ProgramDeps,
@@ -102,8 +107,6 @@ const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
 const RSS_FEED_MENU_ID = "save-rss-feed";
 const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
-const CAL_TASKS_API_BASE = "https://cal.fly.pm";
-
 // chrome.cookies.getAll({ url }) returns only cookies the browser would send
 // to that URL (Domain/Path/Secure already filtered). Forward all of them —
 // don't whitelist by name. better-auth uses prefixes like __Host- on HTTPS
@@ -1054,29 +1057,47 @@ type TasksApiMessage = {
   };
 };
 
-async function handleTasksApiRequest(message: TasksApiMessage) {
-  const path = typeof message.path === "string" ? message.path : "";
-  const isTasksDataPath = path.startsWith("/tasks-data");
-  const isTasksPath = path.startsWith("/tasks");
-  if (!isTasksDataPath && !isTasksPath) {
-    return { ok: false, status: 400, error: "Unsupported task API path" };
+function parseTasksApiResponse(
+  status: number,
+  ok: boolean,
+  text: string,
+): { ok: boolean; status: number; error?: string; data?: unknown } {
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { text };
+    }
   }
-  const method = (message.init?.method || "GET").toUpperCase();
-  if (!["GET", "POST", "DELETE"].includes(method)) {
-    return { ok: false, status: 405, error: "Unsupported task API method" };
+
+  if (status === 401 || status === 403) {
+    return {
+      ok: false,
+      status,
+      error:
+        "Tasks auth failed. Sign in at cal.fly.pm in this browser profile, then reload tasks.",
+      data,
+    };
   }
+  if (!ok) {
+    return {
+      ok: false,
+      status,
+      error: `Task request failed: ${status}`,
+      data,
+    };
+  }
+  return { ok: true, status, data };
+}
+
+async function fetchTasksViaServiceWorker(
+  message: TasksApiMessage,
+  path: string,
+  method: string,
+  isTasksDataPath: boolean,
+) {
   const taskUrl = new URL(path, CAL_TASKS_API_BASE);
-  if (
-    taskUrl.origin !== CAL_TASKS_API_BASE ||
-    (!(
-      taskUrl.pathname === "/tasks-data" ||
-      taskUrl.pathname.startsWith("/tasks-data/") ||
-      taskUrl.pathname === "/tasks" ||
-      taskUrl.pathname.startsWith("/tasks/")
-    ))
-  ) {
-    return { ok: false, status: 400, error: "Unsupported task API path" };
-  }
   const headers: Record<string, string> = {
     accept: "application/json",
   };
@@ -1103,10 +1124,6 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
   const hasAuthorizationHeader = Object.keys(headers).some(
     (key) => key.toLowerCase() === "authorization",
   );
-  // Cookie auth takes precedence over token auth. Servers commonly evaluate
-  // `Authorization: Bearer ...` first and 401 on mismatch before ever looking
-  // at the session cookie, so when a cal.fly.pm session cookie exists we send
-  // it alone. Tokens remain a fallback for unauthenticated profiles.
   if (!cookieHeader && tasksToken && !hasSidebarHeader) {
     headers["x-sidebar-token"] = tasksToken;
   }
@@ -1122,47 +1139,137 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
     init.body = message.init.body;
   }
   const urls: string[] = [taskUrl.toString()];
-  // Upstream may expose /tasks instead of /tasks-data for API routes.
   if (isTasksDataPath) {
     urls.push(taskUrl.toString().replace("/tasks-data", "/tasks"));
   }
 
   for (let i = 0; i < urls.length; i++) {
     const response = await fetch(urls[i], init);
-    const text = await response.text();
-    let data: unknown = null;
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { text };
-      }
-    }
-
-    if (response.status === 401 || response.status === 403) {
-      return {
-        ok: false,
-        status: response.status,
-        error:
-          "Tasks auth failed. Sign in at cal.fly.pm in this browser profile, then reload tasks.",
-        data,
-      };
-    }
-    if (!response.ok) {
-      const shouldTryFallback =
-        i < urls.length - 1 && (response.status === 404 || response.status === 405);
-      if (shouldTryFallback) continue;
-      return {
-        ok: false,
-        status: response.status,
-        error: `Task request failed: ${response.status}`,
-        data,
-      };
-    }
-    return { ok: true, status: response.status, data };
+    const parsed = parseTasksApiResponse(
+      response.status,
+      response.ok,
+      await response.text(),
+    );
+    if (parsed.ok) return parsed;
+    if (parsed.status === 401 || parsed.status === 403) return parsed;
+    const shouldTryFallback =
+      i < urls.length - 1 &&
+      (parsed.status === 404 || parsed.status === 405);
+    if (shouldTryFallback) continue;
+    return parsed;
   }
 
-  return { ok: false, status: 500, error: "Task request failed: exhausted task API routes" };
+  return {
+    ok: false,
+    status: 500,
+    error: "Task request failed: exhausted task API routes",
+  };
+}
+
+async function fetchTasksViaCalTab(
+  message: TasksApiMessage,
+  path: string,
+  method: string,
+  isTasksDataPath: boolean,
+) {
+  const requestHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(message.init?.headers || {})) {
+    if (key.toLowerCase() === "content-type" && typeof value === "string") {
+      requestHeaders[key] = value;
+    }
+  }
+  const body =
+    method !== "GET" && typeof message.init?.body === "string"
+      ? message.init.body
+      : undefined;
+
+  const paths = [path];
+  if (isTasksDataPath) {
+    paths.push(path.replace("/tasks-data", "/tasks"));
+  }
+
+  let ephemeralTabId: number | null = null;
+  try {
+    for (let i = 0; i < paths.length; i++) {
+      let tabResult: CalTasksTabFetchResult | null = null;
+      try {
+        tabResult = await fetchCalTasksViaPageContext({
+          path: paths[i],
+          method,
+          headers: requestHeaders,
+          body,
+          onEphemeralTab: (tabId) => {
+            ephemeralTabId = tabId;
+          },
+        });
+      } catch (err) {
+        safeRuntimeWarning("cal.fly.pm tab task fetch failed", err);
+        return null;
+      }
+      if (!tabResult) return null;
+
+      const parsed = parseTasksApiResponse(
+        tabResult.status,
+        tabResult.ok,
+        tabResult.text,
+      );
+      if (parsed.ok) return parsed;
+      if (parsed.status === 401 || parsed.status === 403) return parsed;
+      const shouldTryFallback =
+        i < paths.length - 1 &&
+        (parsed.status === 404 || parsed.status === 405);
+      if (shouldTryFallback) continue;
+      return parsed;
+    }
+  } finally {
+    if (ephemeralTabId != null) {
+      chrome.tabs.remove(ephemeralTabId).catch(() => {});
+    }
+  }
+
+  return {
+    ok: false,
+    status: 500,
+    error: "Task request failed: exhausted task API routes",
+  };
+}
+
+async function handleTasksApiRequest(message: TasksApiMessage) {
+  const path = typeof message.path === "string" ? message.path : "";
+  const isTasksDataPath = path.startsWith("/tasks-data");
+  const isTasksPath = path.startsWith("/tasks");
+  if (!isTasksDataPath && !isTasksPath) {
+    return { ok: false, status: 400, error: "Unsupported task API path" };
+  }
+  const method = (message.init?.method || "GET").toUpperCase();
+  if (!["GET", "POST", "DELETE"].includes(method)) {
+    return { ok: false, status: 405, error: "Unsupported task API method" };
+  }
+  const taskUrl = new URL(path, CAL_TASKS_API_BASE);
+  if (
+    taskUrl.origin !== CAL_TASKS_API_BASE ||
+    (!(
+      taskUrl.pathname === "/tasks-data" ||
+      taskUrl.pathname.startsWith("/tasks-data/") ||
+      taskUrl.pathname === "/tasks" ||
+      taskUrl.pathname.startsWith("/tasks/")
+    ))
+  ) {
+    return { ok: false, status: 400, error: "Unsupported task API path" };
+  }
+
+  const cookieHeader = await getCalFlyPmCookieHeader();
+  if (cookieHeader) {
+    const tabResult = await fetchTasksViaCalTab(
+      message,
+      path,
+      method,
+      isTasksDataPath,
+    );
+    if (tabResult) return tabResult;
+  }
+
+  return fetchTasksViaServiceWorker(message, path, method, isTasksDataPath);
 }
 
 function normalizeFeeds(feeds: unknown): FeedInfo[] {
