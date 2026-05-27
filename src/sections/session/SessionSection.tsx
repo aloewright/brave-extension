@@ -59,14 +59,19 @@ export function SessionSection() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden" data-testid="session-section">
-      <div className="flex border-b border-border px-2 gap-1">
+      <div className="flex border-b border-border px-1 gap-0.5">
         {TABS.map((t) => (
-          <LeoTabButton key={t.id} onClick={() => setTab(t.id)} active={tab === t.id}>
+          <LeoTabButton
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            active={tab === t.id}
+            className="flex-1 min-w-0 px-1 truncate"
+          >
             {t.label}
           </LeoTabButton>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-3">
         {tab === "links" && (
           <LxLinksSection
             links={links}
