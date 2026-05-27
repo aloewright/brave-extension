@@ -195,9 +195,20 @@ export async function executeProgram(
 ): Promise<{ steps: StepEntry[]; finalObservation: ObservationLite | null | undefined }> {
   let observation = initialObservation
   const steps: StepEntry[] = []
+  let halted = false
   for (const op of program) {
+    if (halted) {
+      steps.push(
+        summarizeStep(op, { ok: false, skipped: true, reason: "halted after error" }, observation)
+      )
+      continue
+    }
     const result = await runOp(op, observation, deps, tabId)
     steps.push(summarizeStep(op, result, observation))
+    if (!result.ok && !result.skipped) {
+      halted = true
+      continue
+    }
     if (op.kind === "browser.observe" && result.data) {
       observation = result.data as ObservationLite
     } else if (STRUCTURAL_OPS.has(op.kind) && result.ok && !result.skipped) {

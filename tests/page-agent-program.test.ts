@@ -122,4 +122,30 @@ describe("executeProgram", () => {
     expect(result.steps[0].label).toBe("Sign in")
     expect(result.steps[1].label).toBe("Email")
   })
+
+  it("halts on first non-skipped failure and marks remaining ops 'halted after error'", async () => {
+    const program: Op[] = [
+      { kind: "browser.click", ref: "el12" },
+      { kind: "browser.type", ref: "el18", value: "alice" },
+      { kind: "browser.observe" }
+    ]
+    let calls = 0
+    const deps = makeDeps({
+      runTool: async (name) => {
+        calls += 1
+        if (calls === 1) return { ok: false, reason: "click intercepted" }
+        return { ok: true }
+      }
+    })
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps).toHaveLength(3)
+    expect(result.steps[0].ok).toBe(false)
+    expect(result.steps[0].reason).toBe("click intercepted")
+    expect(result.steps[1].ok).toBe(false)
+    expect(result.steps[1].skipped).toBe(true)
+    expect(result.steps[1].reason).toBe("halted after error")
+    expect(result.steps[2].ok).toBe(false)
+    expect(result.steps[2].skipped).toBe(true)
+    expect(result.steps[2].reason).toBe("halted after error")
+  })
 })
