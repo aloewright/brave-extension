@@ -56,6 +56,7 @@ import {
   handleThirdPartyCookieMessage,
   isThirdPartyCookieMessage,
 } from "./background/third-party-cookies";
+import { ensureCalTasksOriginRule } from "./background/cal-tasks-origin";
 import type {
   PickerCapture,
   PickerMessage,
@@ -94,6 +95,22 @@ const STALE_ERROR_CAPTURE_CLEANUP_KEY =
 const RSS_FEED_MENU_ID = "save-rss-feed";
 const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
 const CAL_TASKS_API_BASE = "https://cal.fly.pm";
+
+// chrome.cookies.getAll({ url }) returns only cookies the browser would send
+// to that URL (Domain/Path/Secure already filtered). Forward all of them —
+// don't whitelist by name. better-auth uses prefixes like __Host- on HTTPS
+// (e.g. __Host-better-auth.session_token) and ships a CSRF cookie checked on
+// state-changing requests; a name whitelist drops both and yields 401s.
+async function getCalFlyPmCookieHeader(): Promise<string | null> {
+  try {
+    const cookies = await chrome.cookies.getAll({ url: `${CAL_TASKS_API_BASE}/` });
+    if (cookies.length === 0) return null;
+    return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+  } catch (err) {
+    safeRuntimeWarning("failed to read cal.fly.pm session cookies", err);
+    return null;
+  }
+}
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
@@ -130,6 +147,10 @@ function postToNative(port: chrome.runtime.Port, message: unknown) {
 
 void ensureThirdPartyCookieRules().catch((err) => {
   safeRuntimeWarning("failed to initialize third-party cookie rules", err);
+});
+
+void ensureCalTasksOriginRule().catch((err) => {
+  safeRuntimeWarning("failed to initialize cal.fly.pm origin rewrite rule", err);
 });
 
 void ensureBookmarkSnapshot().catch((err) => {
@@ -1155,7 +1176,9 @@ type TasksApiMessage = {
 
 async function handleTasksApiRequest(message: TasksApiMessage) {
   const path = typeof message.path === "string" ? message.path : "";
-  if (!path.startsWith("/tasks-data")) {
+  const isTasksDataPath = path.startsWith("/tasks-data");
+  const isTasksPath = path.startsWith("/tasks");
+  if (!isTasksDataPath && !isTasksPath) {
     return { ok: false, status: 400, error: "Unsupported task API path" };
   }
   const method = (message.init?.method || "GET").toUpperCase();
@@ -1165,16 +1188,50 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
   const taskUrl = new URL(path, CAL_TASKS_API_BASE);
   if (
     taskUrl.origin !== CAL_TASKS_API_BASE ||
-    (taskUrl.pathname !== "/tasks-data" && !taskUrl.pathname.startsWith("/tasks-data/"))
+    (!(
+      taskUrl.pathname === "/tasks-data" ||
+      taskUrl.pathname.startsWith("/tasks-data/") ||
+      taskUrl.pathname === "/tasks" ||
+      taskUrl.pathname.startsWith("/tasks/")
+    ))
   ) {
     return { ok: false, status: 400, error: "Unsupported task API path" };
   }
-  const url = taskUrl.toString();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    accept: "application/json",
+  };
   for (const [key, value] of Object.entries(message.init?.headers || {})) {
-    if (key.toLowerCase() === "content-type" && typeof value === "string") {
+    if (
+      (key.toLowerCase() === "content-type" ||
+        key.toLowerCase() === "x-sidebar-token" ||
+        key.toLowerCase() === "authorization") &&
+      typeof value === "string"
+    ) {
       headers[key] = value;
     }
+  }
+  const cookieHeader = await getCalFlyPmCookieHeader();
+  if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  }
+  const settings = await getSettings().catch(() => null);
+  const sidebarToken = settings?.sidebarApiToken?.trim();
+  const tasksToken = settings?.tasksApiToken?.trim() || sidebarToken;
+  const hasSidebarHeader = Object.keys(headers).some(
+    (key) => key.toLowerCase() === "x-sidebar-token",
+  );
+  const hasAuthorizationHeader = Object.keys(headers).some(
+    (key) => key.toLowerCase() === "authorization",
+  );
+  // Cookie auth takes precedence over token auth. Servers commonly evaluate
+  // `Authorization: Bearer ...` first and 401 on mismatch before ever looking
+  // at the session cookie, so when a cal.fly.pm session cookie exists we send
+  // it alone. Tokens remain a fallback for unauthenticated profiles.
+  if (!cookieHeader && tasksToken && !hasSidebarHeader) {
+    headers["x-sidebar-token"] = tasksToken;
+  }
+  if (!cookieHeader && tasksToken && !hasAuthorizationHeader) {
+    headers.authorization = `Bearer ${tasksToken}`;
   }
   const init: RequestInit = {
     method,
@@ -1184,23 +1241,48 @@ async function handleTasksApiRequest(message: TasksApiMessage) {
   if (method !== "GET" && typeof message.init?.body === "string") {
     init.body = message.init.body;
   }
-  const response = await fetch(url, init);
-  const text = await response.text();
-  let data: unknown = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { text };
+  const urls: string[] = [taskUrl.toString()];
+  // Upstream may expose /tasks instead of /tasks-data for API routes.
+  if (isTasksDataPath) {
+    urls.push(taskUrl.toString().replace("/tasks-data", "/tasks"));
+  }
+
+  for (let i = 0; i < urls.length; i++) {
+    const response = await fetch(urls[i], init);
+    const text = await response.text();
+    let data: unknown = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { text };
+      }
     }
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        ok: false,
+        status: response.status,
+        error:
+          "Tasks auth failed. Sign in at cal.fly.pm in this browser profile, then reload tasks.",
+        data,
+      };
+    }
+    if (!response.ok) {
+      const shouldTryFallback =
+        i < urls.length - 1 && (response.status === 404 || response.status === 405);
+      if (shouldTryFallback) continue;
+      return {
+        ok: false,
+        status: response.status,
+        error: `Task request failed: ${response.status}`,
+        data,
+      };
+    }
+    return { ok: true, status: response.status, data };
   }
-  if (response.status === 401) {
-    return { ok: false, status: 401, error: "Sign in at cal.fly.pm.", data };
-  }
-  if (!response.ok) {
-    return { ok: false, status: response.status, error: `Task request failed: ${response.status}`, data };
-  }
-  return { ok: true, status: response.status, data };
+
+  return { ok: false, status: 500, error: "Task request failed: exhausted task API routes" };
 }
 
 function normalizeFeeds(feeds: unknown): FeedInfo[] {

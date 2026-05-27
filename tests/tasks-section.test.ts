@@ -28,8 +28,16 @@ describe("tasks section", () => {
     expect(source).toContain('method: "DELETE"')
     expect(source).toContain("Timed items appear on Calendar.")
     expect(background).toContain('const CAL_TASKS_API_BASE = "https://cal.fly.pm"')
-    expect(background).not.toContain("headers: { ...init.headers, cookie:")
+    expect(background).toContain("getCalFlyPmCookieHeader");
+    expect(background).toContain('headers.cookie = cookieHeader');
     expect(background).toContain('if (method !== "GET" && typeof message.init?.body === "string")')
     expect(background).toContain('credentials: "include"')
+    // Forwarding ALL cookies the browser would send (no name whitelist) is
+    // required so __Host-/__Secure- prefixed better-auth session cookies and
+    // the CSRF cookie reach cal.fly.pm. Filtering by name caused 401s.
+    expect(background).not.toContain("CAL_SESSION_COOKIE_NAMES")
+    expect(background).toMatch(
+      /cookies\.map\(\(cookie\) => `\$\{cookie\.name\}=\$\{cookie\.value\}`\)\.join\("; "\)/,
+    )
   })
 })
