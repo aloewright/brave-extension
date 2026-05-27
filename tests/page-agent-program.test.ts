@@ -50,4 +50,24 @@ describe("parseProgram", () => {
     }
     expect(parseProgram(plan)).toEqual([{ kind: "browser.observe" }])
   })
+
+  it("clamps to MAX_OPS = 8", () => {
+    const program = Array.from({ length: 20 }, () => ({ op: "browser.observe" }))
+    const plan = { program }
+    expect(parseProgram(plan)).toHaveLength(MAX_OPS)
+  })
+
+  it("drops ops with unknown kinds and keeps known ones", () => {
+    const plan = {
+      program: [
+        { op: "browser.observe" },
+        { op: "telepathy" },
+        { op: "browser.click", ref: "el1" }
+      ]
+    }
+    expect(parseProgram(plan)).toEqual([
+      { kind: "browser.observe" },
+      { kind: "browser.click", ref: "el1" }
+    ])
+  })
 })
