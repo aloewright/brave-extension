@@ -11,6 +11,11 @@ import {
   MAX_BATCH,
   type ProposedCategory,
 } from "../../lib/bookmark-categorize";
+import {
+  compareByVisit,
+  loadLastVisitMap,
+  normalizeUrl,
+} from "../../lib/bookmark-history";
 import { getSettings } from "../../storage";
 
 type BookmarkView = "alphabetical" | "favorites" | "categories";
@@ -21,7 +26,47 @@ const VIEWS: { id: BookmarkView; label: string }[] = [
   { id: "categories", label: "Categories" },
 ];
 
+type BookmarkSort = "alpha" | "visit-new" | "visit-old" | "added-new" | "added-old";
+
+const SORT_OPTIONS: { id: BookmarkSort; label: string }[] = [
+  { id: "alpha", label: "A → Z" },
+  { id: "visit-new", label: "Recently visited" },
+  { id: "visit-old", label: "Least recently visited" },
+  { id: "added-new", label: "Recently added" },
+  { id: "added-old", label: "Oldest added" },
+];
+
 const BOOKMARK_HIDDEN_FAVORITES_KEY = "bookmarks.hiddenFavorites.v1";
+const BOOKMARK_SORT_KEY = "bookmarks.sort.v1";
+
+function isBookmarkSort(value: unknown): value is BookmarkSort {
+  return (
+    typeof value === "string" &&
+    SORT_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+function relativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return "soon";
+  const m = 60_000;
+  const h = 60 * m;
+  const d = 24 * h;
+  if (diff < m) return "now";
+  if (diff < h) return `${Math.floor(diff / m)}m ago`;
+  if (diff < d) return `${Math.floor(diff / h)}h ago`;
+  if (diff < 30 * d) return `${Math.floor(diff / d)}d ago`;
+  if (diff < 365 * d) return `${Math.floor(diff / (30 * d))}mo ago`;
+  return `${Math.floor(diff / (365 * d))}y ago`;
+}
+
+function shortDate(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: ms < Date.now() - 365 * 24 * 60 * 60 * 1000 ? "numeric" : undefined,
+  });
+}
 
 function sanitizeBookmarkIds(input: unknown): string[] {
   return Array.isArray(input)
@@ -36,7 +81,48 @@ function compareBookmarks(a: StoredBookmark, b: StoredBookmark) {
   );
 }
 
-function groupByCategory(bookmarks: StoredBookmark[]) {
+function compareByDateAdded(
+  a: StoredBookmark,
+  b: StoredBookmark,
+  direction: "newest-first" | "oldest-first",
+): number {
+  const ta = a.dateAdded;
+  const tb = b.dateAdded;
+  const aMissing = ta == null;
+  const bMissing = tb == null;
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  return direction === "newest-first" ? tb - ta : ta - tb;
+}
+
+function makeComparator(
+  sort: BookmarkSort,
+  visitMap: Map<string, number>,
+): (a: StoredBookmark, b: StoredBookmark) => number {
+  switch (sort) {
+    case "visit-new":
+      return (a, b) =>
+        compareByVisit(a, b, visitMap, "newest-first") || compareBookmarks(a, b);
+    case "visit-old":
+      return (a, b) =>
+        compareByVisit(a, b, visitMap, "oldest-first") || compareBookmarks(a, b);
+    case "added-new":
+      return (a, b) =>
+        compareByDateAdded(a, b, "newest-first") || compareBookmarks(a, b);
+    case "added-old":
+      return (a, b) =>
+        compareByDateAdded(a, b, "oldest-first") || compareBookmarks(a, b);
+    case "alpha":
+    default:
+      return compareBookmarks;
+  }
+}
+
+function groupByCategory(
+  bookmarks: StoredBookmark[],
+  comparator: (a: StoredBookmark, b: StoredBookmark) => number = compareBookmarks,
+) {
   const groups = new Map<string, StoredBookmark[]>();
   for (const bookmark of bookmarks) {
     const key = bookmark.category || "Unfiled";
@@ -45,7 +131,7 @@ function groupByCategory(bookmarks: StoredBookmark[]) {
   return [...groups.entries()]
     .map(([category, items]) => ({
       category,
-      items: [...items].sort(compareBookmarks),
+      items: [...items].sort(comparator),
     }))
     .sort((a, b) =>
       a.category.localeCompare(b.category, undefined, { sensitivity: "base" }),
@@ -56,10 +142,12 @@ function BookmarkRow({
   bookmark,
   proposedCategory,
   onRemoveFromFavorites,
+  metaSuffix,
 }: {
   bookmark: StoredBookmark;
   proposedCategory?: ProposedCategory;
   onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
+  metaSuffix?: string;
 }) {
   let host = bookmark.url;
   try {
@@ -91,7 +179,13 @@ function BookmarkRow({
         <span className="truncate font-medium text-fg">{bookmark.title}</span>
         <span className="truncate text-xs text-fg/45">
           {host}
-          {bookmark.category ? ` · ${bookmark.category}` : ""}
+          {metaSuffix !== undefined
+            ? metaSuffix
+              ? ` · ${metaSuffix}`
+              : ""
+            : bookmark.category
+              ? ` · ${bookmark.category}`
+              : ""}
           {proposedCategory && (
             <span className="ml-2 inline-flex items-center rounded bg-primary/20 px-1.5 text-[10px] text-primary">
               AI: {proposedCategory.category} ({proposedCategory.confidence})
@@ -131,11 +225,13 @@ function BookmarkGroup({
   items,
   proposedCategories,
   onRemoveFromFavorites,
+  rowMeta,
 }: {
   category: string;
   items: StoredBookmark[];
   proposedCategories: Record<string, ProposedCategory>;
   onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
+  rowMeta?: (bookmark: StoredBookmark) => string | undefined;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -159,6 +255,7 @@ function BookmarkGroup({
               bookmark={bookmark}
               proposedCategory={proposedCategories[bookmark.id]}
               onRemoveFromFavorites={onRemoveFromFavorites}
+              metaSuffix={rowMeta ? rowMeta(bookmark) : undefined}
             />
           ))}
         </div>
@@ -180,6 +277,11 @@ export function BookmarksSection() {
   );
   const [categorizing, setCategorizing] = useState(false);
   const [categorizeError, setCategorizeError] = useState<string | null>(null);
+  const [sort, setSort] = useState<BookmarkSort>("alpha");
+  const [lastVisitMap, setLastVisitMap] = useState<Map<string, number>>(
+    () => new Map(),
+  );
+  const [historyAvailable, setHistoryAvailable] = useState(true);
 
   const syncBookmarks = (force = false) => {
     setSyncing(true);
@@ -199,7 +301,11 @@ export function BookmarksSection() {
 
   useEffect(() => {
     chrome.storage.local
-      .get([BOOKMARK_SNAPSHOT_KEY, BOOKMARK_HIDDEN_FAVORITES_KEY])
+      .get([
+        BOOKMARK_SNAPSHOT_KEY,
+        BOOKMARK_HIDDEN_FAVORITES_KEY,
+        BOOKMARK_SORT_KEY,
+      ])
       .then((got) => {
         const stored = got[BOOKMARK_SNAPSHOT_KEY] as
           | BookmarkSnapshot
@@ -207,9 +313,26 @@ export function BookmarksSection() {
         setHiddenFavoriteIds(
           new Set(sanitizeBookmarkIds(got[BOOKMARK_HIDDEN_FAVORITES_KEY])),
         );
+        const storedSort = got[BOOKMARK_SORT_KEY];
+        if (isBookmarkSort(storedSort)) setSort(storedSort);
         if (stored?.bookmarks) setSnapshot(stored);
         else syncBookmarks(false);
       });
+
+    const searchFn = chrome.history?.search?.bind(chrome.history);
+    if (!searchFn) {
+      setHistoryAvailable(false);
+    } else {
+      void loadLastVisitMap(searchFn).then((map) => {
+        setLastVisitMap(map);
+        // Empty map after a successful search likely means no history at all
+        // (fresh profile) — don't show the unavailable banner in that case.
+        // Only treat truly-broken APIs as unavailable; loadLastVisitMap
+        // already swallows thrown errors and returns an empty map, so we
+        // can't distinguish here. Default to available; the banner only
+        // appears when chrome.history.search itself is missing.
+      });
+    }
 
     const onChange = (
       changes: Record<string, chrome.storage.StorageChange>,
@@ -231,10 +354,19 @@ export function BookmarksSection() {
           ),
         );
       }
+      if (BOOKMARK_SORT_KEY in changes) {
+        const next = changes[BOOKMARK_SORT_KEY].newValue;
+        if (isBookmarkSort(next)) setSort(next);
+      }
     };
     chrome.storage.onChanged.addListener(onChange);
     return () => chrome.storage.onChanged.removeListener(onChange);
   }, []);
+
+  const onSortChange = (next: BookmarkSort) => {
+    setSort(next);
+    void chrome.storage.local.set({ [BOOKMARK_SORT_KEY]: next });
+  };
 
   const bookmarks = snapshot?.bookmarks ?? [];
 
@@ -326,9 +458,13 @@ export function BookmarksSection() {
     setCategorizeError(null);
   };
 
+  const comparator = useMemo(
+    () => makeComparator(sort, lastVisitMap),
+    [sort, lastVisitMap],
+  );
   const alphabetical = useMemo(
-    () => [...bookmarks].sort(compareBookmarks),
-    [bookmarks],
+    () => [...bookmarks].sort(comparator),
+    [bookmarks, comparator],
   );
   const favorites = useMemo(
     () =>
@@ -337,11 +473,28 @@ export function BookmarksSection() {
           (bookmark) =>
             bookmark.isFavorite && !hiddenFavoriteIds.has(bookmark.id),
         )
-        .sort(compareBookmarks),
-    [bookmarks, hiddenFavoriteIds],
+        .sort(comparator),
+    [bookmarks, hiddenFavoriteIds, comparator],
   );
-  const favoriteGroups = useMemo(() => groupByCategory(favorites), [favorites]);
-  const categories = useMemo(() => groupByCategory(bookmarks), [bookmarks]);
+  const favoriteGroups = useMemo(
+    () => groupByCategory(favorites, comparator),
+    [favorites, comparator],
+  );
+  const categories = useMemo(
+    () => groupByCategory(bookmarks, comparator),
+    [bookmarks, comparator],
+  );
+
+  const metaFor = (bookmark: StoredBookmark): string | undefined => {
+    if (sort === "visit-new" || sort === "visit-old") {
+      const t = lastVisitMap.get(normalizeUrl(bookmark.url));
+      return t == null ? "never visited" : relativeTime(t);
+    }
+    if (sort === "added-new" || sort === "added-old") {
+      return bookmark.dateAdded == null ? "no add date" : `added ${shortDate(bookmark.dateAdded)}`;
+    }
+    return undefined;
+  };
   const pulledLabel = snapshot?.pulledAt
     ? new Date(snapshot.pulledAt).toLocaleString()
     : "Not pulled yet";
@@ -409,17 +562,41 @@ export function BookmarksSection() {
             {categorizeError}
           </div>
         )}
-        <div className="mt-3 flex gap-1">
-          {VIEWS.map((item) => (
-            <LeoTabButton
-              key={item.id}
-              active={view === item.id}
-              onClick={() => setView(item.id)}
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="flex gap-1">
+            {VIEWS.map((item) => (
+              <LeoTabButton
+                key={item.id}
+                active={view === item.id}
+                onClick={() => setView(item.id)}
+              >
+                {item.label}
+              </LeoTabButton>
+            ))}
+          </div>
+          <label className="flex items-center gap-1.5 text-[11px] text-fg/50">
+            <span>Sort:</span>
+            <select
+              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg focus:border-primary focus:outline-none"
+              value={sort}
+              onChange={(event) =>
+                onSortChange(event.currentTarget.value as BookmarkSort)
+              }
+              aria-label="Sort bookmarks"
             >
-              {item.label}
-            </LeoTabButton>
-          ))}
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+        {!historyAvailable && (sort === "visit-new" || sort === "visit-old") && (
+          <div className="mt-2 rounded bg-warning/10 px-2 py-1 text-[11px] text-warning">
+            Visit data unavailable — sorting by title instead.
+          </div>
+        )}
       </div>
 
       {error && (
@@ -436,6 +613,7 @@ export function BookmarksSection() {
                 key={bookmark.id}
                 bookmark={bookmark}
                 proposedCategory={proposedCategories[bookmark.id]}
+                metaSuffix={metaFor(bookmark)}
               />
             ))}
           </div>
@@ -451,6 +629,7 @@ export function BookmarksSection() {
                   items={group.items}
                   proposedCategories={proposedCategories}
                   onRemoveFromFavorites={removeFromFavorites}
+                  rowMeta={metaFor}
                 />
               ))
             ) : (
@@ -468,6 +647,7 @@ export function BookmarksSection() {
                 items={group.items}
                 proposedCategories={proposedCategories}
                 onRemoveFromFavorites={removeFromFavorites}
+                rowMeta={metaFor}
               />
             ))}
           </div>

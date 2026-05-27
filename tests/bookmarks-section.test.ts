@@ -104,4 +104,20 @@ describe("bookmark snapshot and section", () => {
     expect(backgroundSource).toContain("ensureBookmarkSnapshot()");
     expect(backgroundSource).toContain("SYNC_BOOKMARK_SNAPSHOT");
   });
+
+  it("renders a sort dropdown wired to bookmark-history and persisted under bookmarks.sort.v1", () => {
+    const sectionSource = readFileSync(
+      join(process.cwd(), "src/sections/bookmarks/BookmarksSection.tsx"),
+      "utf8",
+    );
+    expect(sectionSource).toContain('const BOOKMARK_SORT_KEY = "bookmarks.sort.v1"');
+    expect(sectionSource).toContain("loadLastVisitMap");
+    expect(sectionSource).toContain("compareByVisit");
+    // Five sort options visible to the user
+    expect(sectionSource).toMatch(/A\s*[→-]\s*Z/);
+    expect(sectionSource).toContain("Recently visited");
+    expect(sectionSource).toContain("Least recently visited");
+    expect(sectionSource).toContain("Recently added");
+    expect(sectionSource).toContain("Oldest added");
+  });
 });
