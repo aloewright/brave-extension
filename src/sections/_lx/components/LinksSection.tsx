@@ -43,12 +43,12 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">Collected Links</h2>
           <p className="text-xs text-fg/40 mt-0.5">{links.length} links saved</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap justify-end">
           <label className="flex items-center gap-2 text-xs text-fg/50">
             <input
               type="checkbox"
@@ -67,10 +67,10 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
               setCopied(true)
               setTimeout(() => setCopied(false), 2000)
             }}
-            className="text-xs py-1.5 px-3 rounded bg-accent hover:bg-accent/80 transition-colors">
+            className="text-xs py-1.5 px-3 rounded bg-accent hover:bg-accent/80 transition-colors whitespace-nowrap">
             {copied ? "Copied!" : "Copy as Markdown"}
           </button>
-          <button onClick={sendToNotebook} className="text-xs py-1.5 px-3 rounded bg-chart-5/20 text-chart-5 hover:bg-chart-5/30 transition-colors">
+          <button onClick={sendToNotebook} className="text-xs py-1.5 px-3 rounded bg-chart-5/20 text-chart-5 hover:bg-chart-5/30 transition-colors whitespace-nowrap">
             Send to NotebookLM
           </button>
           <button
@@ -84,10 +84,10 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
               a.click()
               URL.revokeObjectURL(url)
             }}
-            className="text-xs py-1.5 px-3 rounded bg-accent hover:bg-accent/80 transition-colors">
+            className="text-xs py-1.5 px-3 rounded bg-accent hover:bg-accent/80 transition-colors whitespace-nowrap">
             Export JSON
           </button>
-          <button onClick={onClear} className="text-xs py-1.5 px-3 rounded text-destructive hover:bg-destructive/10 transition-colors">Clear All</button>
+          <button onClick={onClear} className="text-xs py-1.5 px-3 rounded text-destructive hover:bg-destructive/10 transition-colors whitespace-nowrap">Clear All</button>
         </div>
       </div>
 
