@@ -69,7 +69,17 @@ export class DopplerClient {
   }
 
   setDefaults(input = {}) {
-    const next = normalizeDefaults({ ...this.defaults, ...input })
+    const merged = { ...this.defaults }
+    if (typeof input.project === "string" && input.project.trim()) {
+      merged.project = input.project.trim()
+    }
+    if (typeof input.config === "string" && input.config.trim()) {
+      merged.config = input.config.trim()
+    }
+    if (typeof input.scope === "string" && input.scope.trim()) {
+      merged.scope = input.scope.trim()
+    }
+    const next = normalizeDefaults(merged)
     const path = dopplerDefaultsPath(this.home)
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, JSON.stringify(next, null, 2), { mode: 0o600 })
@@ -154,8 +164,7 @@ export class DopplerClient {
 
   async downloadSecrets(args = {}) {
     const { token } = await this._getToken({ scope: args.scope || this.defaults.scope })
-    const project = stringOrDefault(args.project, this.defaults.project)
-    const config = stringOrDefault(args.config, this.defaults.config)
+    const { project, config } = await this.resolveProjectConfig(args)
     const names = normalizeSecretNames(args.secrets)
     const url = this._apiUrl("/v3/configs/config/secrets/download")
 
@@ -171,6 +180,39 @@ export class DopplerClient {
     }
 
     return this._apiJson(url, { token })
+  }
+
+  async resolveProjectConfig(args = {}) {
+    let project = stringOrDefault(args.project, this.defaults.project)
+    let config = stringOrDefault(args.config, this.defaults.config)
+    if (project && config) return { project, config }
+
+    const scope = args.scope || this.defaults.scope
+    const fromCli = await this._getCliProjectConfig(scope)
+    return {
+      project: project || fromCli.project,
+      config: config || fromCli.config
+    }
+  }
+
+  async _getCliProjectConfig(scope) {
+    const scopes = candidateScopes(scope, this.defaults.scope, process.cwd(), this.home)
+    for (const candidate of scopes) {
+      const projectResult = await this._runDoppler(
+        ["configure", "get", "project", "--plain", "--scope", candidate],
+        { timeoutMs: 10_000 }
+      )
+      const configResult = await this._runDoppler(
+        ["configure", "get", "config", "--plain", "--scope", candidate],
+        { timeoutMs: 10_000 }
+      )
+      const project = projectResult.stdout.trim()
+      const config = configResult.stdout.trim()
+      if (projectResult.code === 0 && configResult.code === 0 && project && config) {
+        return { project, config }
+      }
+    }
+    return { project: "", config: "" }
   }
 
   async getSecret(args = {}) {

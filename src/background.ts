@@ -124,6 +124,15 @@ async function getCalFlyPmCookieHeader(): Promise<string | null> {
 }
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
+// Exponential-backoff state for native-host reconnects. Each disconnect that
+// didn't deliver at least one message counts as a failure; a delivered
+// message resets the counter. After RECONNECT_MAX_FAILURES rapid failures
+// in a row we stop auto-retrying — the every-30s heartbeat alarm will pick
+// it back up so we don't loop forever when the host is fundamentally
+// unreachable (manifest missing, allowed_origins mismatch, etc.).
+let reconnectFailures = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const RECONNECT_MAX_FAILURES = 6;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
 const pendingNativeRequests = new Map<string, (msg: any) => void>();
 const rssFeedContextMenuCache = new Map<number, FeedInfo[]>();
@@ -337,10 +346,21 @@ function untrackActivePtySession(sessionId: string) {
 
 function connectNativeHost() {
   if (nativePort) return nativePort;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   try {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
+    // Per-port flag — set on the first onMessage so the onDisconnect handler
+    // can tell "host launched, then exited" from "host never launched."
+    let receivedAnyMessage = false;
 
     nativePort.onMessage.addListener((msg: any) => {
+      if (!receivedAnyMessage) {
+        receivedAnyMessage = true;
+        reconnectFailures = 0;
+      }
       if (typeof msg?.requestId === "string") {
         const pending = pendingNativeRequests.get(msg.requestId);
         if (pending) {
@@ -388,18 +408,42 @@ function connectNativeHost() {
       activePtySessions.clear();
       reconcileTerminalKeepAlive();
 
-      // Silent auto-reconnect for transient drops (typical: SW recycled,
-      // host process EOF'd, then we wake on the next message). The host
-      // re-loads persisted hasSession so the CLI conversation continues.
-      // Only surface the failure to the sidebar if reconnects are flapping
-      // (multiple disconnects within 5s = real problem, not a recycle).
       if (sidebarPorts.size === 0 && !shouldKeepNativeHostAlive()) return;
-      const reconnected = connectNativeHost();
-      if (reconnected && (sinceLast > 5000 || sidebarPorts.size === 0)) return;
 
-      for (const [, port] of sidebarPorts) {
-        postToSidebar(port, { type: "native-disconnected", error: err });
+      // If this disconnect happened without us ever receiving a message,
+      // the host never came up — count it as a failure for backoff
+      // purposes. A connection that delivered at least one message
+      // already reset the counter via onMessage above.
+      if (!receivedAnyMessage) reconnectFailures += 1;
+
+      // Surface the disconnect to the sidebar on rapid flapping
+      // (two disconnects within 5s) — single transient drops are normal
+      // when the SW gets recycled and the host EOFs.
+      const isFlapping = sinceLast <= 5000 && reconnectFailures >= 2;
+      if (isFlapping) {
+        for (const [, port] of sidebarPorts) {
+          postToSidebar(port, { type: "native-disconnected", error: err });
+        }
       }
+
+      // Give up after a streak of fast failures — the every-30s heartbeat
+      // alarm will retry, so we don't burn CPU in a tight reconnect loop
+      // when the host is fundamentally unreachable.
+      if (reconnectFailures > RECONNECT_MAX_FAILURES) return;
+
+      // Schedule reconnect with exponential backoff. Healthy reconnects
+      // (post-message-received) fire immediately; failing reconnects back
+      // off 500ms, 1s, 2s, 4s, 8s, 16s, capped at 30s.
+      const delay =
+        reconnectFailures === 0
+          ? 0
+          : Math.min(500 * 2 ** (reconnectFailures - 1), 30_000);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (sidebarPorts.size === 0 && !shouldKeepNativeHostAlive()) return;
+        connectNativeHost();
+      }, delay);
     });
 
     return nativePort;
