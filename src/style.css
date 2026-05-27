@@ -312,6 +312,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: min(56vh, 440px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .newtab-quick-links-modal__item {
