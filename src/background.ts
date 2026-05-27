@@ -18,6 +18,8 @@ import {
 } from "./lib/passwords";
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools";
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools";
+import { runChatTurn, stopTurn } from "./background/chat-orchestrator";
+import type { ChatSendRequest, ChatStopRequest } from "./lib/ai-chat-types";
 import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools";
 import { EXTENSIONS_TOOL_HANDLERS } from "./background/extensions-tools";
 import { SEARCH_TOOL_HANDLERS } from "./background/search-tools";
@@ -540,12 +542,39 @@ chrome.windows?.onRemoved?.addListener?.((windowId) => {
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
-  if (message && typeof message === "object" && (message as { type?: string }).type === "joplin/clip") {
+  const m = message as { type?: string };
+
+  if (m.type === "joplin/clip") {
     dispatchClip(message as ClipRequest)
       .then(() => sendResponse2({ ok: true }))
       .catch((err) => sendResponse2({ ok: false, error: String(err) }));
     return true; // keep the message channel open for the async response
   }
+
+  if (m.type === "ai-chat/send") {
+    const req = message as ChatSendRequest;
+    runChatTurn({
+      userMessageId: req.userMessageId,
+      text: req.text,
+      ambient: req.ambient,
+    })
+      .then(() => sendResponse2({ ok: true }))
+      .catch((err) =>
+        sendResponse2({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true; // keep channel open for async response
+  }
+
+  if (m.type === "ai-chat/stop") {
+    const req = message as ChatStopRequest;
+    stopTurn(req.turnId);
+    sendResponse2({ ok: true });
+    return undefined;
+  }
+
   return undefined;
 });
 
