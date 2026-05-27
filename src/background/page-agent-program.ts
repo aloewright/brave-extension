@@ -29,12 +29,40 @@ function coerceOp(raw: unknown): Op | null {
   return op
 }
 
+const LEGACY_KIND_MAP: Record<string, BrowserAgentOperation> = {
+  observe: "browser.observe",
+  click: "browser.click",
+  type: "browser.type",
+  scroll: "browser.scroll",
+  wait: "browser.wait",
+  navigate: "browser.navigate",
+  remember: "memory.remember",
+  compact: "session.compact"
+}
+
+function legacyActionToOp(action: unknown): Op | null {
+  if (!action || typeof action !== "object") return null
+  const a = action as Record<string, unknown>
+  const rawKind = typeof a.kind === "string" ? a.kind.toLowerCase() : ""
+  const mapped = LEGACY_KIND_MAP[rawKind]
+  if (!mapped) return null
+  const op: Op = { kind: mapped }
+  if (typeof a.ref === "string") op.ref = a.ref
+  if (typeof a.value === "string") op.value = a.value
+  return op
+}
+
 export function parseProgram(plan: unknown): Op[] {
   if (!plan || typeof plan !== "object") return []
-  const program = (plan as Record<string, unknown>).program
-  if (!Array.isArray(program)) return []
-  const ops = program.map(coerceOp).filter((op): op is Op => op !== null)
-  return ops.slice(0, MAX_OPS)
+  const p = plan as Record<string, unknown>
+
+  if (Array.isArray(p.program)) {
+    const ops = p.program.map(coerceOp).filter((op): op is Op => op !== null)
+    return ops.slice(0, MAX_OPS)
+  }
+
+  const legacy = legacyActionToOp(p.action)
+  return legacy ? [legacy] : []
 }
 
 export { BROWSER_AGENT_OPERATIONS }
