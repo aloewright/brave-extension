@@ -5,6 +5,9 @@
   "description": "Native messaging host for Brave Dev Extension — bridges browser to local CLI tools and PTY shells.",
   "type": "module",
   "main": "ai-dev-host.mjs",
+  "scripts": {
+    "postinstall": "node ./scripts/scrub-quarantine.mjs"
+  },
   "dependencies": {
     "node-pty": "^1.1.0"
   },

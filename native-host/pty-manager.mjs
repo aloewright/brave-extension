@@ -15,25 +15,33 @@
  */
 
 import { homedir } from "os"
+import { dirname, join } from "path"
+import { fileURLToPath } from "url"
+import { prepareNodePtyForGatekeeper, NODE_PTY_GATEKEEPER_HINT } from "./installer.mjs"
 
 const CHUNK_BYTES = 768 * 1024
+const NATIVE_HOST_DIR = dirname(fileURLToPath(import.meta.url))
 
 let ptyModule = null
 
 async function loadPty() {
   if (ptyModule) return ptyModule
+  if (process.platform === "darwin") {
+    prepareNodePtyForGatekeeper(NATIVE_HOST_DIR)
+  }
   try {
-    // We use Microsoft's official `node-pty` because it ships notarized
-    // Darwin prebuilds (signed by Microsoft Corporation, Developer ID UBF8T346G9).
-    // The `@homebridge/node-pty-prebuilt-multiarch` fork only had Linux
-    // prebuilds, forcing a node-gyp source build on macOS — the resulting
-    // ad-hoc-signed `.node` would trip Gatekeeper's online malware check
-    // every time it was loaded.
+    // Official `node-pty` ships darwin prebuilds (linker-signed adhoc). macOS
+    // may block the first dlopen until the user clicks Open on a dialog that
+    // names XProtect's scan-cache file (`.<hex>-00000000.node`) — that is
+    // this package's `pty.node`. Run `pnpm warm-pty` after install to approve
+    // once; the grant persists for the same node-pty version.
     ptyModule = await import("node-pty")
     return ptyModule
   } catch (err) {
+    const hint =
+      process.platform === "darwin" ? ` ${NODE_PTY_GATEKEEPER_HINT}` : ""
     throw new Error(
-      `node-pty unavailable: ${err.message}. Run \`pnpm install\` inside native-host/.`
+      `node-pty unavailable: ${err.message}. Run \`pnpm install-host\` and \`pnpm warm-pty\`.${hint}`
     )
   }
 }
