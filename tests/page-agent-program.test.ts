@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseProgram, MAX_OPS } from "../src/background/page-agent-program"
+import { parseProgram, MAX_OPS, executeProgram, type Op, type ProgramDeps } from "../src/background/page-agent-program"
 
 describe("parseProgram", () => {
   it("accepts a modern program field with valid ops", () => {
@@ -69,5 +69,57 @@ describe("parseProgram", () => {
       { kind: "browser.observe" },
       { kind: "browser.click", ref: "el1" }
     ])
+  })
+})
+
+const initialObs = {
+  nodes: [
+    { ref: "el12", name: "Sign in", selector: "button.sign-in" },
+    { ref: "el18", name: "Email", selector: "input#email" }
+  ]
+}
+
+function makeDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
+  const calls: any[] = []
+  const deps: ProgramDeps = {
+    runTool: async (name, args) => {
+      calls.push({ tool: "runTool", name, args })
+      return { ok: true, data: null }
+    },
+    observe: async () => {
+      calls.push({ tool: "observe" })
+      return initialObs
+    },
+    wait: async (ms) => {
+      calls.push({ tool: "wait", ms })
+    },
+    now: (() => {
+      let t = 1000
+      return () => (t += 100)
+    })(),
+    ...overrides
+  }
+  ;(deps as any)._calls = calls
+  return deps
+}
+
+describe("executeProgram", () => {
+  it("runs ops linearly and produces a step entry per op", async () => {
+    const program: Op[] = [
+      { kind: "browser.click", ref: "el12" },
+      { kind: "browser.type", ref: "el18", value: "alice" },
+      { kind: "browser.observe" }
+    ]
+    const deps = makeDeps()
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps).toHaveLength(3)
+    expect(result.steps.map((s) => s.kind)).toEqual([
+      "browser.click",
+      "browser.type",
+      "browser.observe"
+    ])
+    expect(result.steps.every((s) => s.ok)).toBe(true)
+    expect(result.steps[0].label).toBe("Sign in")
+    expect(result.steps[1].label).toBe("Email")
   })
 })

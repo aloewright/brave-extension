@@ -115,3 +115,94 @@ export function summarizeStep(op: Op, result: OpResult, observation: Observation
   if (result.selector) step.selector = result.selector
   return step
 }
+
+export type ToolName = "browser_observe" | "click" | "type" | "scroll_to" | "navigate"
+
+export type ProgramDeps = {
+  runTool(name: ToolName, args: Record<string, unknown>): Promise<OpResult>
+  observe(tabId: number): Promise<ObservationLite>
+  wait(ms: number): Promise<void>
+  now(): number
+}
+
+const STRUCTURAL_OPS = new Set<string>(["browser.click", "browser.type", "browser.navigate"])
+const WAIT_MAX_MS = 2000
+
+function resolveSelector(op: Op, observation: ObservationLite | null | undefined): string | null {
+  if (!op.ref) return null
+  const node = observation?.nodes?.find((n) => n?.ref === op.ref)
+  const selector = typeof node?.selector === "string" ? node.selector.trim() : ""
+  return selector || null
+}
+
+async function runOp(
+  op: Op,
+  observation: ObservationLite | null | undefined,
+  deps: ProgramDeps,
+  tabId: number
+): Promise<OpResult> {
+  const t0 = deps.now()
+  const elapsed = (): number => deps.now() - t0
+
+  if (op.kind === "browser.observe") {
+    const data = await deps.observe(tabId)
+    return { ok: true, durationMs: elapsed(), data }
+  }
+  if (op.kind === "browser.wait") {
+    const requested = op.ms ?? 0
+    const ms = Math.min(Math.max(0, requested), WAIT_MAX_MS)
+    await deps.wait(ms)
+    return { ok: true, durationMs: elapsed(), reason: ms !== requested ? `clamped to ${ms}ms` : undefined }
+  }
+  if (op.kind === "browser.navigate") {
+    if (!op.url || !/^https?:\/\//i.test(op.url)) {
+      return { ok: false, skipped: true, reason: "navigate requires http(s) url", durationMs: elapsed() }
+    }
+    const r = await deps.runTool("navigate", { tabId, url: op.url })
+    return { ...r, durationMs: elapsed() }
+  }
+  if (op.kind === "browser.click" || op.kind === "browser.type" || op.kind === "browser.scroll") {
+    if (op.kind === "browser.scroll" && op.y != null && !op.ref) {
+      const r = await deps.runTool("scroll_to", { tabId, y: op.y })
+      return { ...r, durationMs: elapsed() }
+    }
+    const selector = resolveSelector(op, observation)
+    if (!selector) {
+      return { ok: false, skipped: true, reason: "ref not in observation", durationMs: elapsed() }
+    }
+    if (op.kind === "browser.click") {
+      const r = await deps.runTool("click", { tabId, selector })
+      return { ...r, selector, durationMs: elapsed() }
+    }
+    if (op.kind === "browser.type") {
+      const r = await deps.runTool("type", { tabId, selector, value: op.value ?? "" })
+      return { ...r, selector, durationMs: elapsed() }
+    }
+    const r = await deps.runTool("scroll_to", { tabId, selector })
+    return { ...r, selector, durationMs: elapsed() }
+  }
+  if (op.kind === "memory.search" || op.kind === "memory.remember" || op.kind === "session.compact") {
+    return { ok: false, skipped: true, reason: "memory not wired", durationMs: elapsed() }
+  }
+  return { ok: false, skipped: true, reason: `unknown op ${op.kind}`, durationMs: elapsed() }
+}
+
+export async function executeProgram(
+  tabId: number,
+  program: Op[],
+  initialObservation: ObservationLite | null | undefined,
+  deps: ProgramDeps
+): Promise<{ steps: StepEntry[]; finalObservation: ObservationLite | null | undefined }> {
+  let observation = initialObservation
+  const steps: StepEntry[] = []
+  for (const op of program) {
+    const result = await runOp(op, observation, deps, tabId)
+    steps.push(summarizeStep(op, result, observation))
+    if (op.kind === "browser.observe" && result.data) {
+      observation = result.data as ObservationLite
+    } else if (STRUCTURAL_OPS.has(op.kind) && result.ok && !result.skipped) {
+      observation = await deps.observe(tabId)
+    }
+  }
+  return { steps, finalObservation: observation }
+}
