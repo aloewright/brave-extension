@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from "fs"
 import { homedir } from "os"
-import { join, dirname } from "path"
+import { join, dirname, resolve as resolvePath } from "path"
 import { randomBytes } from "crypto"
 import { spawnSync as defaultSpawnSync } from "child_process"
 
@@ -359,12 +359,54 @@ export function removeTokenAndEnv(home = homedir()) {
  * Names we always treat as native artifacts even without an extension. Add
  * here if a future dependency ships a binary helper with an unusual name.
  */
-const NATIVE_HELPER_NAMES = new Set(["spawn-helper"])
+const NATIVE_HELPER_NAMES = new Set([
+  "spawn-helper",
+  // esbuild ships platform `@esbuild/darwin-*` Mach-O bins without a `.node` suffix.
+  "esbuild",
+  // chokidar/vitest optional dep — Gatekeeper popup names the file "fsevents.node".
+  "fsevents.node",
+  // SwiftPM helper invoked when the native host runs foundation-models-bridge.swift.
+  "swift-manifest"
+])
 
 function isLikelyNativeFile(path) {
   if (path.endsWith(".node")) return true
   const base = path.split("/").pop() || ""
   return NATIVE_HELPER_NAMES.has(base)
+}
+
+/** pnpm package folder names for non-macOS optional native deps. */
+function shouldSkipNativeDir(name, platform) {
+  if (platform !== "darwin") return false
+  if (/^@esbuild\+(?!darwin-)/.test(name)) return true
+  if (/^@rollup\+rollup-(?!darwin-)/.test(name)) return true
+  if (/^@swc\+core-(?!darwin-)/.test(name)) return true
+  if (/^lightningcss-(?!darwin-)/.test(name)) return true
+  return [
+    "win32-arm64", "win32-x64", "win32-ia32",
+    "linux-arm64", "linux-arm", "linux-x64", "linux-ia32", "linux-loong64",
+    "linux-mips64el", "linux-ppc64", "linux-riscv64", "linux-s390x",
+    "android-arm64", "android-arm", "android-x64",
+    "freebsd-arm64", "freebsd-x64", "openbsd-arm64", "openbsd-x64",
+    "openharmony-arm64", "sunos-x64", "aix-ppc64", "netbsd-arm64", "netbsd-x64"
+  ].includes(name)
+}
+
+/** On macOS, skip optional native deps for other OSes (esbuild, rollup, …). */
+export function isRelevantNativeArtifact(path, platform = process.platform) {
+  if (platform !== "darwin") return true
+  const lower = path.toLowerCase()
+  if (lower.endsWith("/esbuild")) return lower.includes("darwin")
+  if (lower.endsWith(".node")) {
+    if (/\/prebuilds\/(win32|linux|freebsd|android|openbsd|sunos|aix|netbsd|openharmony)-/.test(lower)) {
+      return false
+    }
+    if (/@esbuild\//.test(lower) && !/darwin/.test(lower)) return false
+    if (/@rollup\/rollup-/.test(lower) && !/darwin/.test(lower)) return false
+    if (/@swc\/core-/.test(lower) && !/darwin/.test(lower)) return false
+    if (/lightningcss-/.test(lower) && !/darwin/.test(lower)) return false
+  }
+  return true
 }
 
 /**
@@ -373,8 +415,9 @@ function isLikelyNativeFile(path) {
  *
  * Exported for unit tests — pure modulo the filesystem.
  */
-export function findNativeArtifacts(root) {
+export function findNativeArtifacts(root, options = {}) {
   if (!existsSync(root)) return []
+  const platform = options.platform ?? process.platform
   const out = []
   const stack = [root]
   while (stack.length > 0) {
@@ -391,8 +434,9 @@ export function findNativeArtifacts(root) {
       if (ent.isSymbolicLink()) continue
       if (ent.isDirectory()) {
         if (ent.name === ".bin") continue
+        if (shouldSkipNativeDir(ent.name, platform)) continue
         stack.push(full)
-      } else if (ent.isFile() && isLikelyNativeFile(full)) {
+      } else if (ent.isFile() && isLikelyNativeFile(full) && isRelevantNativeArtifact(full, platform)) {
         out.push(full)
       }
     }
@@ -401,43 +445,233 @@ export function findNativeArtifacts(root) {
 }
 
 /**
- * Strip `com.apple.quarantine` from every native artifact found under
- * `root`. On non-darwin platforms this is a no-op so callers don't need
- * to platform-gate at the call site.
- *
- * The spawn function is injectable so tests don't actually shell out.
- * Returns `{ scrubbed, errors }` where `scrubbed` lists files we ran
- * `xattr -d com.apple.quarantine` against (regardless of whether the
- * attr was already absent — xattr exits 0 either way on macOS once we
- * use `-d` against a missing key combined with `|| true` semantics from
- * spawnSync's stdio:"ignore", and the worst case is a harmless retry).
+ * Find files with exact basenames under `root` (used for swift-manifest in caches).
  */
-export function scrubQuarantine(root, options = {}) {
+export function findNamedBinariesUnder(root, names, options = {}) {
+  if (!existsSync(root)) return []
+  const want = new Set(names)
+  const out = []
+  const stack = [root]
+  while (stack.length > 0) {
+    const dir = stack.pop()
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const ent of entries) {
+      const full = join(dir, ent.name)
+      if (ent.isSymbolicLink()) continue
+      if (ent.isDirectory()) {
+        stack.push(full)
+      } else if (ent.isFile() && want.has(ent.name)) {
+        out.push(full)
+      }
+    }
+  }
+  return out.sort()
+}
+
+/**
+ * SwiftPM / `swift` script host binaries that live outside node_modules.
+ * Gatekeeper often names `swift-manifest` when Foundation Models bridge runs.
+ */
+export function findSwiftToolchainArtifacts(options = {}) {
+  if ((options.platform ?? process.platform) !== "darwin") return []
+  const spawn = options.spawnSync ?? defaultSpawnSync
+  const home = options.home ?? homedir()
+  const repoRoot = options.repoRoot
+  const nativeHostDir =
+    options.nativeHostDir ?? (repoRoot ? join(repoRoot, "native-host") : null)
+  const out = new Set()
+  const add = (p) => {
+    if (!p) return
+    const resolved = resolvePath(p)
+    if (existsSync(resolved)) out.add(resolved)
+  }
+
+  const xcr = spawn("xcrun", ["-f", "swift-manifest"], { encoding: "utf8" })
+  if (xcr.status === 0 && typeof xcr.stdout === "string") {
+    add(xcr.stdout.trim())
+  }
+
+  const which = spawn("which", ["swift"], { encoding: "utf8" })
+  if (which.status === 0 && typeof which.stdout === "string") {
+    const swiftBin = which.stdout.trim()
+    const binDir = dirname(swiftBin)
+    add(join(binDir, "swift-manifest"))
+    add(join(binDir, "..", "libexec", "swift", "pm", "swift-manifest"))
+    add(join(binDir, "..", "lib", "swift", "pm", "swift-manifest"))
+    add(join(binDir, "..", "libexec", "swiftpm", "swift-manifest"))
+  }
+
+  for (const p of [
+    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-manifest",
+    "/Library/Developer/CommandLineTools/usr/bin/swift-manifest"
+  ]) {
+    add(p)
+  }
+
+  if (nativeHostDir) {
+    for (const sub of [".build", ".swiftpm"]) {
+      for (const p of findNamedBinariesUnder(join(nativeHostDir, sub), ["swift-manifest"], options)) {
+        out.add(p)
+      }
+    }
+  }
+
+  for (const cache of [
+    join(home, "Library", "Caches", "org.swift.swiftpm"),
+    join(home, "Library", "Caches", "swift-build")
+  ]) {
+    for (const p of findNamedBinariesUnder(cache, ["swift-manifest"], options)) {
+      out.add(p)
+    }
+  }
+
+  return [...out].sort()
+}
+
+/**
+ * Strip `com.apple.quarantine` from explicit paths. Injectable spawn for tests.
+ */
+export function scrubQuarantinePaths(paths, options = {}) {
   if ((options.platform ?? process.platform) !== "darwin") {
     return { scrubbed: [], errors: [] }
   }
   const spawn = options.spawnSync ?? defaultSpawnSync
-  const artifacts = findNativeArtifacts(root)
   const scrubbed = []
   const errors = []
-  for (const path of artifacts) {
+  for (const path of paths) {
     const res = spawn("xattr", ["-d", "com.apple.quarantine", path], {
-      stdio: "ignore"
+      stdio: "pipe",
+      encoding: "utf8"
     })
-    // xattr returns 1 if the attribute wasn't set; that's fine.
     if (res.error) {
       errors.push({ path, message: res.error.message })
       continue
     }
+    if (res.status !== 0) {
+      const stderr = res.stderr || ""
+      const stdout = res.stdout || ""
+      const detail = (stderr + stdout).trim() || `exit code ${res.status}`
+      errors.push({ path, message: detail })
+      continue
+    }
     scrubbed.push(path)
-    // spawn-helper must remain executable after the scrub — chmodSync is
-    // platform-safe and a no-op for a file that's already 0755.
     const base = path.split("/").pop()
     if (base === "spawn-helper") {
       try { chmodSync(path, 0o755) } catch { /* best effort */ }
     }
   }
   return { scrubbed, errors }
+}
+
+/**
+ * Strip `com.apple.quarantine` from every native artifact found under
+ * `root`. On non-darwin platforms this is a no-op so callers don't need
+ * to platform-gate at the call site.
+ */
+export function scrubQuarantine(root, options = {}) {
+  if ((options.platform ?? process.platform) !== "darwin") {
+    return { scrubbed: [], errors: [] }
+  }
+  return scrubQuarantinePaths(findNativeArtifacts(root, options), options)
+}
+
+/** Scrub `swift-manifest` and other Swift toolchain Mach-O helpers. */
+export function scrubSwiftToolchain(options = {}) {
+  return scrubQuarantinePaths(findSwiftToolchainArtifacts(options), options)
+}
+
+/**
+ * node-pty `pty.node` + `spawn-helper` for the current platform/arch.
+ * Gatekeeper popups often show XProtect's scan-cache name
+ * (e.g. `.99bfbbed9bcd5adb-00000000.node`) but the file on disk is
+ * `prebuilds/darwin-{arm64,x64}/pty.node`.
+ */
+export function resolveNodePtyNativePaths(nativeHostDir, options = {}) {
+  const platform = options.platform ?? process.platform
+  const arch = options.arch ?? process.arch
+  if (platform !== "darwin") return []
+  const nm = join(nativeHostDir, "node_modules")
+  if (!existsSync(nm)) return []
+  const needle = `/prebuilds/${platform}-${arch}/`
+  return findNativeArtifacts(nm, { platform }).filter(
+    (p) => p.includes("/node-pty/") && p.includes(needle)
+  )
+}
+
+/** Run `spctl --assess` for a Mach-O executable. */
+export function assessNativeExecutable(path, options = {}) {
+  if ((options.platform ?? process.platform) !== "darwin") {
+    return { path, status: "skipped", detail: "non-darwin" }
+  }
+  if (!existsSync(path)) {
+    return { path, status: "missing", detail: "file not found" }
+  }
+  const spawn = options.spawnSync ?? defaultSpawnSync
+  const res = spawn("spctl", ["-a", "-vv", "-t", "execute", path], {
+    encoding: "utf8"
+  })
+  const out = `${res.stdout ?? ""}${res.stderr ?? ""}`.trim()
+  if (res.status === 0) {
+    return { path, status: "allowed", detail: out || "accepted" }
+  }
+  if (/rejected/i.test(out)) {
+    return { path, status: "rejected", detail: out }
+  }
+  return { path, status: "unknown", detail: out || `spctl exit ${res.status}` }
+}
+
+/**
+ * Scrub quarantine on node-pty Mach-O helpers and return Gatekeeper assessment.
+ * Quarantine removal alone does not satisfy Gatekeeper for linker-signed
+ * prebuilds — the user must approve once via the dialog or Allow Anyway.
+ */
+export function prepareNodePtyForGatekeeper(nativeHostDir, options = {}) {
+  const paths = resolveNodePtyNativePaths(nativeHostDir, options)
+  const scrub = scrubQuarantinePaths(paths, options)
+  const assessments = paths.map((p) => assessNativeExecutable(p, options))
+  return { paths, scrub, assessments }
+}
+
+export const NODE_PTY_GATEKEEPER_HINT =
+  "If macOS shows '.<hex>-00000000.node Not Opened', that is node-pty's pty.node " +
+  "during XProtect scan. Click Open (not Cancel), or use System Settings → " +
+  "Privacy & Security → Allow Anyway once per node-pty version."
+
+/**
+ * Default `node_modules` trees in this monorepo that may ship Mach-O addons
+ * (node-pty, esbuild, rollup, fsevents, @swc/core, lightningcss, …).
+ */
+export function repoNodeModuleRoots(repoRoot) {
+  return [
+    join(repoRoot, "node_modules"),
+    join(repoRoot, "native-host", "node_modules"),
+    join(repoRoot, "worker", "node_modules")
+  ].filter((p) => existsSync(p))
+}
+
+/** Scrub quarantine across every repo `node_modules` tree. Idempotent. */
+export function scrubQuarantineAll(repoRoot, options = {}) {
+  const roots = options.roots ?? repoNodeModuleRoots(repoRoot)
+  const scrubbed = []
+  const errors = []
+  for (const root of roots) {
+    const result = scrubQuarantine(root, options)
+    scrubbed.push(...result.scrubbed)
+    errors.push(...result.errors)
+  }
+  const swift = scrubSwiftToolchain({
+    ...options,
+    repoRoot,
+    nativeHostDir: join(repoRoot, "native-host")
+  })
+  scrubbed.push(...swift.scrubbed)
+  errors.push(...swift.errors)
+  return { scrubbed, errors, roots }
 }
 
 /**
@@ -477,6 +711,10 @@ export function inspectNativeArtifact(path, options = {}) {
     const idMatch = out.match(/Identifier=(\S+)/)
     identifier = idMatch?.[1] ?? null
   }
+  const gatekeeper =
+    exists && (options.platform ?? process.platform) === "darwin"
+      ? assessNativeExecutable(path, options)
+      : null
   return {
     path,
     exists: true,
@@ -485,6 +723,8 @@ export function inspectNativeArtifact(path, options = {}) {
     hasQuarantine: xattrs.includes("com.apple.quarantine"),
     signing,
     identifier,
-    teamIdentifier
+    teamIdentifier,
+    gatekeeperStatus: gatekeeper?.status ?? null,
+    gatekeeperDetail: gatekeeper?.detail ?? null
   }
 }

@@ -98,24 +98,31 @@ pnpm test:coverage  # vitest + v8 coverage (60% line / 50% branch floor)
 pnpm test:e2e       # playwright e2e suite
 ```
 
-### macOS: "Apple could not verify '<random>.node' is free of malware" (ALO-472)
+### macOS: "Apple could not verify '<name>' is free of malware" (ALO-472)
 
-`pnpm install-host` strips `com.apple.quarantine` from every `.node` and
-`spawn-helper` under `native-host/node_modules` before the first sidebar
-terminal launches. The popup's hash-prefixed filename
-(`.9db7f7fe3f8cd7ea-00000000.node`) is XProtect's internal scan-cache
-name; the file on disk is one of node-pty's prebuilt
-`prebuilds/darwin-{arm64,x64}/pty.node` (plus its `spawn-helper`).
+`pnpm install`, `pnpm install-host`, `pnpm dev`, and `pnpm build` all strip
+`com.apple.quarantine` from native addons under every repo `node_modules` tree
+(root, `native-host/`, `worker/`): node-pty `.node` files, **esbuild**,
+**rollup.darwin-*.node**, **fsevents.node**, **swift-manifest** (Foundation Models /
+`swift` bridge), @swc/core, lightningcss, etc.
+The popup's hash-prefixed filename (e.g. `.99bfbbed9bcd5adb-00000000.node` or
+`.9db7f7fe3f8cd7ea-00000000.node`) is XProtect's internal scan-cache name for
+node-pty's `prebuilds/darwin-{arm64,x64}/pty.node` (plus `spawn-helper`).
+Quarantine scrubbing alone does not satisfy Gatekeeper for these linker-signed
+prebuilds — you must approve once per node-pty version.
 
 If the popup still appears:
 
 1. Run `pnpm diagnose-host` — confirms which artifacts carry the
    quarantine xattr and what their signing state is.
-2. Re-run with `pnpm diagnose-host --fix` to re-scrub.
-3. If Gatekeeper has already cached a denial decision, open **System
-   Settings → Privacy & Security** and click "Allow Anyway" once. The
-   shipped Microsoft prebuilds are ad-hoc signed with stable CDHashes per
-   `node-pty` version, so the grant persists across reinstalls.
+2. Run `pnpm warm-pty` — pre-loads node-pty so macOS can show the approval
+   dialog now (click **Open**, not Cancel).
+3. Re-run with `pnpm diagnose-host --fix` or `pnpm scrub-native` to re-scrub.
+4. If Gatekeeper has already cached a denial decision, open **System
+   Settings → Privacy & Security** and click "Allow Anyway" once per
+   blocked binary (esbuild, rollup, fsevents, swift-manifest, node-pty). Ad-hoc-signed
+   prebuilds keep stable CDHashes per package version, so each grant
+   persists across reinstalls.
 
 The installer never re-signs the prebuilds (that would mint a new
 CDHash and invalidate any "Allow Anyway" the user has already granted).

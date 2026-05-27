@@ -20,6 +20,13 @@ import { fileURLToPath } from "url"
 import { PTYManager } from "./pty-manager.mjs"
 import { MCPServer } from "./mcp-server.mjs"
 import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
+import { prepareNodePtyForGatekeeper, scrubSwiftToolchain } from "./installer.mjs"
+
+const __hostDir = dirname(fileURLToPath(import.meta.url))
+if (process.platform === "darwin") {
+  prepareNodePtyForGatekeeper(__hostDir)
+  scrubSwiftToolchain({ nativeHostDir: __hostDir })
+}
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
 
@@ -439,6 +446,10 @@ function runFoundationModelsBridge(payload, timeoutMs = 15_000) {
       provider: "foundation-models",
       error: "Foundation Models bridge script is missing."
     })
+  }
+
+  if (process.platform === "darwin") {
+    scrubSwiftToolchain({ nativeHostDir: __hostDir })
   }
 
   return new Promise((resolve) => {

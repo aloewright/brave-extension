@@ -25,7 +25,18 @@ import {
   claudeJsonPath,
   resolveClaudeConfigPath,
   findNativeArtifacts,
+  findNamedBinariesUnder,
+  findSwiftToolchainArtifacts,
+  resolveNodePtyNativePaths,
+  assessNativeExecutable,
+  prepareNodePtyForGatekeeper,
   scrubQuarantine,
+  scrubQuarantinePaths,
+  scrubQuarantineAll,
+  scrubSwiftToolchain,
+  repoNodeModuleRoots,
+  isRelevantNativeArtifact,
+  NODE_PTY_GATEKEEPER_HINT,
   inspectNativeArtifact
 } from "../native-host/installer.mjs"
 
@@ -289,6 +300,122 @@ describe("native artifact discovery + quarantine scrub", () => {
     expect(findNativeArtifacts(join(fakeRoot, "does-not-exist"))).toEqual([])
   })
 
+  it("findNativeArtifacts includes fsevents.node (chokidar/vitest optional dep)", () => {
+    mkdirSync(join(fakeRoot, "fsevents"), { recursive: true })
+    writeFileSync(join(fakeRoot, "fsevents/fsevents.node"), "x")
+
+    const found = findNativeArtifacts(fakeRoot, { platform: "darwin" })
+    expect(found).toEqual([join(fakeRoot, "fsevents/fsevents.node")])
+  })
+
+  it("findNativeArtifacts includes esbuild Mach-O bins and rollup prebuilds", () => {
+    mkdirSync(join(fakeRoot, "@esbuild/darwin-arm64/bin"), { recursive: true })
+    mkdirSync(join(fakeRoot, "@rollup/rollup-darwin-arm64"), { recursive: true })
+    mkdirSync(join(fakeRoot, "fsevents"), { recursive: true })
+    writeFileSync(join(fakeRoot, "@esbuild/darwin-arm64/bin/esbuild"), "x")
+    writeFileSync(join(fakeRoot, "@rollup/rollup-darwin-arm64/rollup.darwin-arm64.node"), "x")
+    writeFileSync(join(fakeRoot, "fsevents/fsevents.node"), "x")
+
+    const found = findNativeArtifacts(fakeRoot)
+    expect(found).toHaveLength(3)
+    expect(found.some((p: string) => p.endsWith("/bin/esbuild"))).toBe(true)
+    expect(found.some((p: string) => p.endsWith("rollup.darwin-arm64.node"))).toBe(true)
+    expect(found.some((p: string) => p.endsWith("fsevents.node"))).toBe(true)
+  })
+
+  it("resolveNodePtyNativePaths returns pty.node and spawn-helper for current arch", () => {
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-x64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-x64/pty.node"), "x")
+
+    const found = resolveNodePtyNativePaths(fakeRoot, { platform: "darwin", arch: "arm64" })
+    expect(found).toHaveLength(2)
+    expect(found.every((p: string) => p.includes("darwin-arm64"))).toBe(true)
+  })
+
+  it("assessNativeExecutable maps spctl output to allowed/rejected", () => {
+    const path = join(fakeRoot, "bin")
+    mkdirSync(path, { recursive: true })
+    writeFileSync(join(path, "tool"), "x")
+    const allowed = assessNativeExecutable(join(path, "tool"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 0, stdout: "accepted\n", stderr: "" })
+    })
+    expect(allowed.status).toBe("allowed")
+    const rejected = assessNativeExecutable(join(path, "tool"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 3, stdout: "", stderr: "rejected\nsource=Unnotarized Developer ID\n" })
+    })
+    expect(rejected.status).toBe("rejected")
+  })
+
+  it("findNamedBinariesUnder finds swift-manifest in a cache tree", () => {
+    mkdirSync(join(fakeRoot, "org.swift.swiftpm", "artifacts"), { recursive: true })
+    writeFileSync(join(fakeRoot, "org.swift.swiftpm", "artifacts", "swift-manifest"), "x")
+    writeFileSync(join(fakeRoot, "org.swift.swiftpm", "artifacts", "other-tool"), "x")
+
+    const found = findNamedBinariesUnder(join(fakeRoot, "org.swift.swiftpm"), ["swift-manifest"])
+    expect(found).toHaveLength(1)
+    expect(found[0].endsWith("swift-manifest")).toBe(true)
+  })
+
+  it("findSwiftToolchainArtifacts discovers swift-manifest next to swift", () => {
+    mkdirSync(join(fakeRoot, "bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "bin", "swift"), "x")
+    writeFileSync(join(fakeRoot, "bin", "swift-manifest"), "x")
+
+    const found = findSwiftToolchainArtifacts({
+      platform: "darwin",
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "which" && args[0] === "swift") {
+          return { status: 0, stdout: join(fakeRoot, "bin", "swift") + "\n" }
+        }
+        if (cmd === "xcrun" && args[0] === "-f") {
+          return { status: 1, stdout: "" }
+        }
+        return { status: 1 }
+      }
+    })
+    expect(found.some((p: string) => p.endsWith("/bin/swift-manifest"))).toBe(true)
+  })
+
+  it("scrubQuarantineAll walks every existing repo node_modules root", () => {
+    const repo = mkdtempSync(join(tmpdir(), "aids-repo-"))
+    const roots = [
+      join(repo, "node_modules"),
+      join(repo, "native-host", "node_modules"),
+      join(repo, "worker", "node_modules")
+    ]
+    for (const root of roots) {
+      mkdirSync(join(root, "fsevents"), { recursive: true })
+      writeFileSync(join(root, "fsevents/fsevents.node"), "x")
+    }
+    const calls: string[] = []
+    const result = scrubQuarantineAll(repo, {
+      platform: "darwin",
+      spawnSync: (_cmd: string, args: string[]) => {
+        calls.push(args[2])
+        return { status: 0 }
+      }
+    })
+    expect(result.roots).toHaveLength(3)
+    expect(result.scrubbed.length).toBeGreaterThanOrEqual(3)
+    expect(calls.filter((p) => p?.includes("fsevents.node"))).toHaveLength(3)
+  })
+
+  it("findNativeArtifacts skips non-darwin optional deps on macOS", () => {
+    mkdirSync(join(fakeRoot, "@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin"), { recursive: true })
+    mkdirSync(join(fakeRoot, "@esbuild+linux-x64@0.25.12/node_modules/@esbuild/linux-x64/bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild"), "x")
+    writeFileSync(join(fakeRoot, "@esbuild+linux-x64@0.25.12/node_modules/@esbuild/linux-x64/bin/esbuild"), "x")
+
+    const found = findNativeArtifacts(fakeRoot, { platform: "darwin" })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain("darwin-arm64")
+  })
+
   it("scrubQuarantine is a no-op on non-darwin platforms", () => {
     mkdirSync(join(fakeRoot, "pkg"), { recursive: true })
     writeFileSync(join(fakeRoot, "pkg/pty.node"), "x")
@@ -379,5 +506,301 @@ describe("native artifact discovery + quarantine scrub", () => {
   it("inspectNativeArtifact reports `exists: false` for a missing path", () => {
     const info = inspectNativeArtifact(join(fakeRoot, "missing.node"))
     expect(info).toEqual({ path: join(fakeRoot, "missing.node"), exists: false })
+  })
+
+  it("inspectNativeArtifact includes gatekeeperStatus and gatekeeperDetail fields", () => {
+    mkdirSync(join(fakeRoot, "gk"), { recursive: true })
+    const path = join(fakeRoot, "gk/pty.node")
+    writeFileSync(path, "x")
+    const info = inspectNativeArtifact(path, {
+      platform: "darwin",
+      spawnSync: (cmd: string) => {
+        if (cmd === "xattr") return { status: 0, stdout: "" }
+        if (cmd === "codesign") return { status: 0, stdout: "", stderr: "Signature=adhoc\n" }
+        if (cmd === "spctl") return { status: 0, stdout: "accepted", stderr: "" }
+        return { status: 1 }
+      }
+    })
+    expect(info.exists).toBe(true)
+    expect(info).toHaveProperty("gatekeeperStatus")
+    expect(info).toHaveProperty("gatekeeperDetail")
+    expect(info.gatekeeperStatus).toBe("allowed")
+    expect(typeof info.gatekeeperDetail).toBe("string")
+  })
+
+  it("inspectNativeArtifact gatekeeperStatus is null on non-darwin", () => {
+    mkdirSync(join(fakeRoot, "gk2"), { recursive: true })
+    const path = join(fakeRoot, "gk2/pty.node")
+    writeFileSync(path, "x")
+    const info = inspectNativeArtifact(path, {
+      platform: "linux",
+      spawnSync: () => ({ status: 0, stdout: "", stderr: "" })
+    })
+    expect(info.gatekeeperStatus).toBeNull()
+    expect(info.gatekeeperDetail).toBeNull()
+  })
+
+  it("isRelevantNativeArtifact allows darwin esbuild and rejects linux esbuild", () => {
+    expect(isRelevantNativeArtifact("/nm/@esbuild/darwin-arm64/bin/esbuild", "darwin")).toBe(true)
+    expect(isRelevantNativeArtifact("/nm/@esbuild/linux-x64/bin/esbuild", "darwin")).toBe(false)
+    expect(isRelevantNativeArtifact("/nm/@esbuild/linux-x64/bin/esbuild", "linux")).toBe(true)
+  })
+
+  it("isRelevantNativeArtifact rejects non-darwin prebuilds .node files on macOS", () => {
+    expect(isRelevantNativeArtifact("/nm/pkg/prebuilds/linux-x64/pty.node", "darwin")).toBe(false)
+    expect(isRelevantNativeArtifact("/nm/pkg/prebuilds/win32-x64/pty.node", "darwin")).toBe(false)
+    expect(isRelevantNativeArtifact("/nm/pkg/prebuilds/darwin-arm64/pty.node", "darwin")).toBe(true)
+  })
+
+  it("isRelevantNativeArtifact rejects non-darwin rollup and swc .node files on macOS", () => {
+    expect(isRelevantNativeArtifact("/nm/@rollup/rollup-linux-x64/rollup.linux-x64.node", "darwin")).toBe(false)
+    expect(isRelevantNativeArtifact("/nm/@rollup/rollup-darwin-arm64/rollup.darwin-arm64.node", "darwin")).toBe(true)
+    expect(isRelevantNativeArtifact("/nm/@swc/core-linux-x64/swc.linux-x64.node", "darwin")).toBe(false)
+    expect(isRelevantNativeArtifact("/nm/@swc/core-darwin-arm64/swc.darwin-arm64.node", "darwin")).toBe(true)
+  })
+
+  it("isRelevantNativeArtifact allows everything on non-darwin", () => {
+    expect(isRelevantNativeArtifact("/nm/@rollup/rollup-linux-x64/rollup.linux-x64.node", "linux")).toBe(true)
+    expect(isRelevantNativeArtifact("/nm/@esbuild/win32-x64/esbuild", "win32")).toBe(true)
+  })
+
+  it("scrubQuarantinePaths strips quarantine from an explicit path list", () => {
+    mkdirSync(join(fakeRoot, "explicit"), { recursive: true })
+    writeFileSync(join(fakeRoot, "explicit/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "explicit/spawn-helper"), "x")
+    const calls: { cmd: string; args: string[] }[] = []
+    const result = scrubQuarantinePaths(
+      [join(fakeRoot, "explicit/pty.node"), join(fakeRoot, "explicit/spawn-helper")],
+      {
+        platform: "darwin",
+        spawnSync: (cmd: string, args: string[]) => {
+          calls.push({ cmd, args })
+          return { status: 0 }
+        }
+      }
+    )
+    expect(result.scrubbed).toHaveLength(2)
+    expect(result.errors).toEqual([])
+    expect(calls).toHaveLength(2)
+    expect(calls.every((c) => c.cmd === "xattr" && c.args[0] === "-d" && c.args[1] === "com.apple.quarantine")).toBe(true)
+  })
+
+  it("scrubQuarantinePaths is a no-op on non-darwin", () => {
+    const calls: unknown[] = []
+    const result = scrubQuarantinePaths(
+      ["/some/pty.node"],
+      {
+        platform: "linux",
+        spawnSync: (...args: unknown[]) => { calls.push(args); return { status: 0 } }
+      }
+    )
+    expect(result.scrubbed).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it("scrubSwiftToolchain scrubs toolchain artifacts returned by findSwiftToolchainArtifacts", () => {
+    mkdirSync(join(fakeRoot, "swift-bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "swift-bin", "swift"), "x")
+    writeFileSync(join(fakeRoot, "swift-bin", "swift-manifest"), "x")
+    const scrubbed: string[] = []
+    const result = scrubSwiftToolchain({
+      platform: "darwin",
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "xcrun") return { status: 1, stdout: "" }
+        if (cmd === "which" && args[0] === "swift") {
+          return { status: 0, stdout: join(fakeRoot, "swift-bin", "swift") + "\n" }
+        }
+        if (cmd === "xattr") {
+          scrubbed.push(args[2])
+          return { status: 0 }
+        }
+        return { status: 1 }
+      }
+    })
+    expect(result.scrubbed.length).toBeGreaterThanOrEqual(1)
+    expect(result.scrubbed.some((p: string) => p.endsWith("swift-manifest"))).toBe(true)
+  })
+
+  it("scrubSwiftToolchain returns empty on non-darwin", () => {
+    const calls: unknown[] = []
+    const result = scrubSwiftToolchain({
+      platform: "linux",
+      spawnSync: (...args: unknown[]) => { calls.push(args); return { status: 0 } }
+    })
+    expect(result.scrubbed).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it("repoNodeModuleRoots returns only the node_modules dirs that exist", () => {
+    const repo = mkdtempSync(join(tmpdir(), "aids-roots-"))
+    // Create only root and native-host, not worker
+    mkdirSync(join(repo, "node_modules"), { recursive: true })
+    mkdirSync(join(repo, "native-host", "node_modules"), { recursive: true })
+    const roots = repoNodeModuleRoots(repo)
+    expect(roots).toHaveLength(2)
+    expect(roots).toContain(join(repo, "node_modules"))
+    expect(roots).toContain(join(repo, "native-host", "node_modules"))
+    expect(roots).not.toContain(join(repo, "worker", "node_modules"))
+  })
+
+  it("repoNodeModuleRoots returns empty array when no node_modules exist", () => {
+    const repo = mkdtempSync(join(tmpdir(), "aids-roots-empty-"))
+    expect(repoNodeModuleRoots(repo)).toEqual([])
+  })
+
+  it("assessNativeExecutable returns skipped on non-darwin", () => {
+    const result = assessNativeExecutable("/some/pty.node", { platform: "linux" })
+    expect(result.status).toBe("skipped")
+    expect(result.detail).toBe("non-darwin")
+  })
+
+  it("assessNativeExecutable returns missing for non-existent path on darwin", () => {
+    const result = assessNativeExecutable(join(fakeRoot, "nonexistent.node"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 0, stdout: "", stderr: "" })
+    })
+    expect(result.status).toBe("missing")
+    expect(result.detail).toBe("file not found")
+  })
+
+  it("assessNativeExecutable returns unknown status for non-zero exit without 'rejected'", () => {
+    mkdirSync(join(fakeRoot, "assess"), { recursive: true })
+    writeFileSync(join(fakeRoot, "assess/tool"), "x")
+    const result = assessNativeExecutable(join(fakeRoot, "assess/tool"), {
+      platform: "darwin",
+      spawnSync: () => ({ status: 3, stdout: "some error output", stderr: "" })
+    })
+    expect(result.status).toBe("unknown")
+    expect(result.detail).toContain("some error output")
+  })
+
+  it("NODE_PTY_GATEKEEPER_HINT is a non-empty descriptive string", () => {
+    expect(typeof NODE_PTY_GATEKEEPER_HINT).toBe("string")
+    expect(NODE_PTY_GATEKEEPER_HINT.length).toBeGreaterThan(20)
+    expect(NODE_PTY_GATEKEEPER_HINT).toContain("node-pty")
+    expect(NODE_PTY_GATEKEEPER_HINT).toContain("pty.node")
+  })
+
+  it("resolveNodePtyNativePaths returns empty for non-darwin platform", () => {
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/linux-x64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/linux-x64/pty.node"), "x")
+    const result = resolveNodePtyNativePaths(fakeRoot, { platform: "linux", arch: "x64" })
+    expect(result).toEqual([])
+  })
+
+  it("resolveNodePtyNativePaths returns empty when node_modules does not exist", () => {
+    const result = resolveNodePtyNativePaths(join(fakeRoot, "no-such-dir"), { platform: "darwin", arch: "arm64" })
+    expect(result).toEqual([])
+  })
+
+  it("prepareNodePtyForGatekeeper returns paths, scrub, and assessments together", () => {
+    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64"), { recursive: true })
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/pty.node"), "x")
+    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
+
+    const result = prepareNodePtyForGatekeeper(fakeRoot, {
+      platform: "darwin",
+      arch: "arm64",
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "xattr") return { status: 0 }
+        if (cmd === "spctl") return { status: 0, stdout: "accepted", stderr: "" }
+        return { status: 1 }
+      }
+    })
+    expect(result.paths).toHaveLength(2)
+    expect(result.scrub.scrubbed).toHaveLength(2)
+    expect(result.assessments).toHaveLength(2)
+    expect(result.assessments.every((a: { status: string }) => a.status === "allowed")).toBe(true)
+  })
+
+  it("scrubQuarantineAll is a no-op on non-darwin", () => {
+    const repo = mkdtempSync(join(tmpdir(), "aids-nodarwin-"))
+    mkdirSync(join(repo, "node_modules/fsevents"), { recursive: true })
+    writeFileSync(join(repo, "node_modules/fsevents/fsevents.node"), "x")
+    const calls: unknown[] = []
+    const result = scrubQuarantineAll(repo, {
+      platform: "linux",
+      spawnSync: (...args: unknown[]) => { calls.push(args); return { status: 0 } }
+    })
+    expect(result.scrubbed).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it("scrubQuarantineAll accepts explicit roots override", () => {
+    const rootA = mkdtempSync(join(tmpdir(), "aids-root-a-"))
+    const rootB = mkdtempSync(join(tmpdir(), "aids-root-b-"))
+    mkdirSync(join(rootA, "pkg"), { recursive: true })
+    mkdirSync(join(rootB, "pkg"), { recursive: true })
+    writeFileSync(join(rootA, "pkg/pty.node"), "x")
+    writeFileSync(join(rootB, "pkg/other.node"), "x")
+    const scrubbed: string[] = []
+    const result = scrubQuarantineAll("ignored-repo-root", {
+      platform: "darwin",
+      roots: [rootA, rootB],
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "xattr") { scrubbed.push(args[2]); return { status: 0 } }
+        return { status: 1 }
+      }
+    })
+    expect(result.roots).toEqual([rootA, rootB])
+    expect(result.scrubbed).toHaveLength(2)
+    expect(scrubbed.some((p) => p.endsWith("pty.node"))).toBe(true)
+    expect(scrubbed.some((p) => p.endsWith("other.node"))).toBe(true)
+  })
+
+  it("findSwiftToolchainArtifacts returns empty on non-darwin", () => {
+    const result = findSwiftToolchainArtifacts({ platform: "linux" })
+    expect(result).toEqual([])
+  })
+
+  it("findSwiftToolchainArtifacts uses xcrun -f swift-manifest result when exit 0", () => {
+    mkdirSync(join(fakeRoot, "xcrun-bin"), { recursive: true })
+    writeFileSync(join(fakeRoot, "xcrun-bin", "swift-manifest"), "x")
+    const found = findSwiftToolchainArtifacts({
+      platform: "darwin",
+      spawnSync: (cmd: string, args: string[]) => {
+        if (cmd === "xcrun" && args[0] === "-f" && args[1] === "swift-manifest") {
+          return { status: 0, stdout: join(fakeRoot, "xcrun-bin", "swift-manifest") + "\n" }
+        }
+        if (cmd === "which") return { status: 1, stdout: "" }
+        return { status: 1 }
+      }
+    })
+    expect(found.some((p: string) => p.endsWith("swift-manifest"))).toBe(true)
+  })
+
+  it("findSwiftToolchainArtifacts searches cache dirs for swift-manifest", () => {
+    const home = mkdtempSync(join(tmpdir(), "aids-swift-home-"))
+    const cacheDir = join(home, "Library", "Caches", "org.swift.swiftpm", "nested")
+    mkdirSync(cacheDir, { recursive: true })
+    writeFileSync(join(cacheDir, "swift-manifest"), "x")
+    const found = findSwiftToolchainArtifacts({
+      platform: "darwin",
+      home,
+      spawnSync: (cmd: string) => {
+        if (cmd === "xcrun") return { status: 1, stdout: "" }
+        if (cmd === "which") return { status: 1, stdout: "" }
+        return { status: 1 }
+      }
+    })
+    expect(found.some((p: string) => p.endsWith("swift-manifest"))).toBe(true)
+  })
+
+  it("findNamedBinariesUnder returns empty for non-existent root", () => {
+    const result = findNamedBinariesUnder(join(fakeRoot, "no-such"), ["swift-manifest"])
+    expect(result).toEqual([])
+  })
+
+  it("findNamedBinariesUnder returns sorted results and ignores symlinks", () => {
+    const dir = join(fakeRoot, "named-search")
+    mkdirSync(join(dir, "a"), { recursive: true })
+    mkdirSync(join(dir, "b"), { recursive: true })
+    writeFileSync(join(dir, "b", "swift-manifest"), "x")
+    writeFileSync(join(dir, "a", "swift-manifest"), "x")
+    writeFileSync(join(dir, "a", "other-binary"), "x")
+    const found = findNamedBinariesUnder(dir, ["swift-manifest"])
+    expect(found).toHaveLength(2)
+    expect(found).toEqual([...found].sort())
+    expect(found.every((p: string) => p.endsWith("swift-manifest"))).toBe(true)
   })
 })
