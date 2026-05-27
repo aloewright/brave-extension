@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { LeoTabButton } from "../../components/leo"
 import { openExternalLink } from "../../lib/open-url"
 import { useLinks, useSettings as useLxSettings } from "../_lx/hooks/useStorage"
 import { LinksSection as LxLinksSection } from "../_lx/components/LinksSection"
@@ -58,21 +57,27 @@ export function SessionSection() {
   }, [totalFeedPages])
 
   return (
-    <div className="h-full flex flex-col overflow-hidden" data-testid="session-section">
-      <div className="flex border-b border-border px-1 gap-0.5">
-        {TABS.map((t) => (
-          <LeoTabButton
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            active={tab === t.id}
-            className="flex-1 min-w-0 px-1 truncate"
-          >
-            {t.label}
-          </LeoTabButton>
-        ))}
+    <div className="session-section" data-testid="session-section">
+      <div className="session-tab-strip" role="tablist" aria-label="Session views">
+        {TABS.map((t) => {
+          const selected = tab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              className={`session-tab-strip__tab${selected ? " session-tab-strip__tab--active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          )
+        })}
       </div>
-      <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-3">
+      <div className="session-section__body">
         {tab === "links" && (
+          <div className="session-section__panel">
           <LxLinksSection
             links={links}
             onAdd={addLink}
@@ -82,12 +87,15 @@ export function SessionSection() {
             settings={settings}
             onUpdateSettings={updateSettings}
           />
+          </div>
         )}
         {tab === "snippets" && (
-          <SnippetList snippets={snippets} onRemove={(id) => removeSnippet(id).then(() => getSnippets()).then(setSnippets)} />
+          <div className="session-section__panel">
+            <SnippetList snippets={snippets} onRemove={(id) => removeSnippet(id).then(() => getSnippets()).then(setSnippets)} />
+          </div>
         )}
         {tab === "feeds" && (
-          <div className="space-y-2">
+          <div className="session-section__panel space-y-2">
             <RssPanel feeds={pagedFeeds} allFeeds={info.feeds} onCopy={(t, label) => {
               void navigator.clipboard.writeText(t).catch(() => {})
             }} onSaveFeed={(feed) => {
@@ -120,8 +128,16 @@ export function SessionSection() {
             )}
           </div>
         )}
-        {tab === "notes" && <StickyNotesPanel />}
-        {tab === "captures" && <LxCaptureSection />}
+        {tab === "notes" && (
+          <div className="session-section__panel">
+            <StickyNotesPanel />
+          </div>
+        )}
+        {tab === "captures" && (
+          <div className="session-section__panel">
+            <LxCaptureSection />
+          </div>
+        )}
       </div>
     </div>
   )

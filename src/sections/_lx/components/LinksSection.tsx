@@ -42,7 +42,7 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
   }
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold">Collected Links</h2>

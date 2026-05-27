@@ -150,6 +150,74 @@ body {
   opacity: 0.6;
 }
 
+/* Session sidebar section — tab strip must never scroll horizontally */
+.session-section {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.session-tab-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-bottom: 1px solid rgb(var(--border));
+}
+
+.session-tab-strip__tab {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.4rem 0.125rem;
+  font-size: 10px;
+  line-height: 1.25;
+  font-weight: 500;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: rgb(var(--foreground) / 0.4);
+  cursor: pointer;
+}
+
+.session-tab-strip__tab:hover,
+.session-tab-strip__tab:focus-visible {
+  color: rgb(var(--foreground));
+  outline: none;
+}
+
+.session-tab-strip__tab--active {
+  color: rgb(var(--foreground));
+  border-bottom-color: rgb(var(--primary));
+}
+
+.session-section__body {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.session-section__panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
 /* New tab workspace */
 .newtab-workspace {
   min-height: 100vh;
