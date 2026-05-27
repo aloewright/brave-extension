@@ -5,7 +5,72 @@ import { useSidebarSync } from "../../hooks/useSidebarSync"
 import { useEffect, useRef, useState } from "react"
 import type { DopplerStatus, MCPServer, MCPStatus } from "../../types"
 
-const SIDEBAR_API_SECRET_NAMES = ["SIDEBAR_API_URL", "SIDEBAR_API_TOKEN", "SIDEBAR_TOKEN"]
+const SIDEBAR_API_SECRET_NAMES = [
+  "SIDEBAR_API_URL",
+  "SIDEBAR_API_TOKEN",
+  "SIDEBAR_TOKEN",
+  "SIDEBAR_SERVICE_TOKEN",
+  "X_SIDEBAR_TOKEN",
+  "TASKS_API_TOKEN",
+  "TASKS_TOKEN",
+  "CAL_TASKS_API_TOKEN",
+  "CAL_TASKS_TOKEN"
+]
+
+const SIDEBAR_TOKEN_SECRET_NAMES = [
+  "SIDEBAR_API_TOKEN",
+  "SIDEBAR_TOKEN",
+  "SIDEBAR_SERVICE_TOKEN",
+  "X_SIDEBAR_TOKEN"
+]
+
+const TASKS_TOKEN_SECRET_NAMES = [
+  "TASKS_API_TOKEN",
+  "TASKS_TOKEN",
+  "CAL_TASKS_API_TOKEN",
+  "CAL_TASKS_TOKEN"
+]
+
+function pickSecretValue(
+  secrets: Record<string, string>,
+  names: string[]
+): string {
+  const direct = names
+    .map((name) => secrets[name])
+    .find((value) => typeof value === "string" && value.trim().length > 0)
+  if (direct) return direct.trim()
+
+  const normalized = Object.entries(secrets).reduce<Record<string, string>>(
+    (acc, [key, value]) => {
+      acc[key.trim().toUpperCase()] = value
+      return acc
+    },
+    {}
+  )
+  for (const name of names) {
+    const hit = normalized[name.trim().toUpperCase()]
+    if (typeof hit === "string" && hit.trim().length > 0) return hit.trim()
+  }
+  return ""
+}
+
+function syncDopplerDefaultsFromStatus(
+  settings: { dopplerProject: string; dopplerConfig: string; dopplerScope: string },
+  defaults?: { project?: string; config?: string; scope?: string }
+): Partial<{ dopplerProject: string; dopplerConfig: string; dopplerScope: string }> | null {
+  if (!defaults) return null
+  const patch: Partial<{ dopplerProject: string; dopplerConfig: string; dopplerScope: string }> = {}
+  if (!settings.dopplerProject.trim() && defaults.project?.trim()) {
+    patch.dopplerProject = defaults.project.trim()
+  }
+  if (!settings.dopplerConfig.trim() && defaults.config?.trim()) {
+    patch.dopplerConfig = defaults.config.trim()
+  }
+  if (!settings.dopplerScope.trim() && defaults.scope?.trim()) {
+    patch.dopplerScope = defaults.scope.trim()
+  }
+  return Object.keys(patch).length > 0 ? patch : null
+}
 const ACTION_LOADING_DELAY_MS = 700
 const ACTION_TIMEOUT_MS = 45_000
 const DOPPLER_LOGIN_TIMEOUT_MS = 5 * 60_000
@@ -33,7 +98,6 @@ export function SettingsSection() {
   const pendingActionsRef = useRef<PendingActionState>({})
   const loadingDelayTimers = useRef<Partial<Record<PendingAction, ReturnType<typeof setTimeout>>>>({})
   const pendingTimeoutTimers = useRef<Partial<Record<PendingAction, ReturnType<typeof setTimeout>>>>({})
-  const sidebarSecretRequestRef = useRef<string | null>(null)
   const showToast = (text: string) => {
     setToast(text)
     if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -126,6 +190,10 @@ export function SettingsSection() {
     onDopplerStatus: (s) => {
       setDopplerStatus(s)
       clearDopplerPendingForType("doppler.status")
+      if (settings) {
+        const patch = syncDopplerDefaultsFromStatus(settings, s.defaults)
+        if (patch) update(patch)
+      }
     },
     onDopplerRpcResult: (msg) => {
       clearDopplerPendingForType(msg.type)
@@ -141,15 +209,22 @@ export function SettingsSection() {
           break
         case "doppler.defaults.set":
           if (!msg.silent) showToast("Doppler defaults saved.")
+          if (settings && msg.defaults) {
+            const patch = syncDopplerDefaultsFromStatus(settings, msg.defaults)
+            if (patch) update(patch)
+          }
           break
         case "doppler.secrets.download": {
           const secrets = msg.secrets || {}
-          const sidebarApiUrl = secrets.SIDEBAR_API_URL?.trim()
-          const sidebarApiToken = (secrets.SIDEBAR_API_TOKEN || secrets.SIDEBAR_TOKEN || "").trim()
-          if (sidebarApiUrl || sidebarApiToken) {
+          const sidebarApiUrl = pickSecretValue(secrets, ["SIDEBAR_API_URL"])
+          const sidebarApiToken = pickSecretValue(secrets, SIDEBAR_TOKEN_SECRET_NAMES)
+          const tasksApiToken =
+            pickSecretValue(secrets, TASKS_TOKEN_SECRET_NAMES) || sidebarApiToken
+          if (sidebarApiUrl || sidebarApiToken || tasksApiToken) {
             update({
               ...(sidebarApiUrl ? { sidebarApiUrl } : {}),
-              ...(sidebarApiToken ? { sidebarApiToken } : {})
+              ...(sidebarApiToken ? { sidebarApiToken } : {}),
+              ...(tasksApiToken ? { tasksApiToken } : {})
             })
             if (!msg.silent) showToast("Sidebar API settings loaded from Doppler.")
           } else if (!msg.silent) {
@@ -182,11 +257,17 @@ export function SettingsSection() {
       nativeHost.getMCPServers(settings.claudeConfigPath)
       nativeHost.mcpEnsure(settings.claudeConfigPath)
       nativeHost.mcpStatus(settings.claudeConfigPath)
-      nativeHost.dopplerSetDefaults({
-        project: settings.dopplerProject,
-        config: settings.dopplerConfig,
-        scope: settings.dopplerScope || "/"
-      }, { silent: true })
+      const defaultsPayload: {
+        project?: string
+        config?: string
+        scope?: string
+      } = {}
+      if (settings.dopplerProject.trim()) defaultsPayload.project = settings.dopplerProject.trim()
+      if (settings.dopplerConfig.trim()) defaultsPayload.config = settings.dopplerConfig.trim()
+      if (settings.dopplerScope.trim()) defaultsPayload.scope = settings.dopplerScope.trim()
+      if (Object.keys(defaultsPayload).length > 0) {
+        nativeHost.dopplerSetDefaults(defaultsPayload, { silent: true })
+      }
       nativeHost.dopplerStatus()
     }
   }, [
@@ -198,27 +279,32 @@ export function SettingsSection() {
   ])
 
   useEffect(() => {
-    if (!settings || !nativeHost.connected || !dopplerStatus?.tokenSet || dopplerStatus.error) return
-    if (settings.sidebarApiUrl && settings.sidebarApiToken) return
-    const key = `${settings.dopplerProject}:${settings.dopplerConfig}:${settings.dopplerScope}`
-    if (sidebarSecretRequestRef.current === key) return
-    sidebarSecretRequestRef.current = key
+    if (!settings || !nativeHost.connected || !dopplerStatus?.tokenSet) return
+    if (settings.sidebarApiUrl && settings.sidebarApiToken && settings.tasksApiToken) return
     nativeHost.dopplerSecretsDownload({
-      project: settings.dopplerProject || undefined,
-      config: settings.dopplerConfig || undefined,
-      scope: settings.dopplerScope || "/",
+      project:
+        settings.dopplerProject.trim() ||
+        dopplerStatus?.defaults?.project?.trim() ||
+        undefined,
+      config:
+        settings.dopplerConfig.trim() ||
+        dopplerStatus?.defaults?.config?.trim() ||
+        undefined,
+      scope: settings.dopplerScope.trim() || dopplerStatus?.defaults?.scope || "/",
       secrets: SIDEBAR_API_SECRET_NAMES,
       silent: true
     })
   }, [
     settings?.sidebarApiUrl,
     settings?.sidebarApiToken,
+    settings?.tasksApiToken,
     settings?.dopplerProject,
     settings?.dopplerConfig,
     settings?.dopplerScope,
     nativeHost.connected,
     dopplerStatus?.tokenSet,
-    dopplerStatus?.error
+    dopplerStatus?.error,
+    dopplerStatus?.lastCheckedAt
   ])
 
   // Periodic refresh while panel is mounted (every 10s).

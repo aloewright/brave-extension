@@ -97,6 +97,9 @@ export interface Settings {
   sidebarSyncEnabled: boolean
   sidebarApiUrl: string
   sidebarApiToken: string
+  // Optional dedicated token for cal.fly.pm task endpoints.
+  // Falls back to sidebarApiToken when empty.
+  tasksApiToken: string
   sidebarPruneAfterSync: boolean
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosSyncEnabled: boolean
@@ -170,6 +173,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarSyncEnabled: false,
   sidebarApiUrl: "https://sidebar.pdx.software",
   sidebarApiToken: "",
+  tasksApiToken: "",
   sidebarPruneAfterSync: false,
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
