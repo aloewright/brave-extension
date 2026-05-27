@@ -1,13 +1,37 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
 // Mock joplin-client and @plasmohq/storage.
-const { createNoteMock, pingMock } = vi.hoisted(() => ({
+const {
+  createNoteMock,
+  pingMock,
+  getNoteMock,
+  appendToNoteMock,
+  searchNotesMock,
+  listFoldersMock,
+  listTagsMock,
+  findOrCreateFolderMock,
+  addTagToNoteByNameMock
+} = vi.hoisted(() => ({
   createNoteMock: vi.fn(),
-  pingMock: vi.fn()
+  pingMock: vi.fn(),
+  getNoteMock: vi.fn(),
+  appendToNoteMock: vi.fn(),
+  searchNotesMock: vi.fn(),
+  listFoldersMock: vi.fn(),
+  listTagsMock: vi.fn(),
+  findOrCreateFolderMock: vi.fn(),
+  addTagToNoteByNameMock: vi.fn()
 }))
 vi.mock("../src/lib/joplin", () => ({
   createNote: createNoteMock,
   ping: pingMock,
+  getNote: getNoteMock,
+  appendToNote: appendToNoteMock,
+  searchNotes: searchNotesMock,
+  listFolders: listFoldersMock,
+  listTags: listTagsMock,
+  findOrCreateFolder: findOrCreateFolderMock,
+  addTagToNoteByName: addTagToNoteByNameMock,
   JoplinClientError: class extends Error {
     constructor(message: string, public readonly status: number) {
       super(message)
@@ -47,16 +71,32 @@ describe("buildTools", () => {
   beforeEach(() => {
     createNoteMock.mockReset()
     pingMock.mockReset()
+    getNoteMock.mockReset()
+    appendToNoteMock.mockReset()
+    searchNotesMock.mockReset()
+    listFoldersMock.mockReset()
+    listTagsMock.mockReset()
+    findOrCreateFolderMock.mockReset()
+    addTagToNoteByNameMock.mockReset()
     mem.clear()
   })
 
-  it("returns exactly the three V1 tools by name", () => {
+  it("returns the V1 tool catalog by name", () => {
     const tools = buildTools(async () => STUB_TOKEN)
-    expect(tools.map((t) => t.name)).toEqual([
-      "joplin.createNote",
-      "joplin.ping",
-      "context.activeTab"
-    ])
+    expect(tools.map((t) => t.name).sort()).toEqual(
+      [
+        "joplin.createNote",
+        "joplin.ping",
+        "joplin.getNote",
+        "joplin.appendToNote",
+        "joplin.searchNotes",
+        "joplin.listFolders",
+        "joplin.listTags",
+        "joplin.findOrCreateFolder",
+        "joplin.addTagToNoteByName",
+        "context.activeTab"
+      ].sort()
+    )
   })
 
   it("joplin.createNote calls underlying createNote with args + token", async () => {

@@ -5,7 +5,17 @@
 // orchestrator imports buildTools(getToken) and runTool(tools, name, args).
 
 import { Storage } from "@plasmohq/storage"
-import { createNote, ping } from "./joplin"
+import {
+  createNote,
+  ping,
+  getNote,
+  appendToNote,
+  searchNotes,
+  listFolders,
+  listTags,
+  findOrCreateFolder,
+  addTagToNoteByName
+} from "./joplin"
 import type {
   AmbientContext,
   ToolDefinition,
@@ -68,6 +78,172 @@ export function buildTools(
             ok: false,
             error: err instanceof Error ? err.message : String(err)
           }
+        }
+      }
+    },
+    {
+      name: "joplin.getNote",
+      description:
+        "Get a Joplin note by id. Returns { id, title, body, parent_id, updated_time }. Defaults to a useful field set if not specified.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Joplin note id (32-char hex)." }
+        },
+        required: ["id"],
+        additionalProperties: false
+      },
+      async execute(args): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        const id = String(args.id ?? "")
+        try {
+          const note = await getNote(id, ["id", "title", "body", "parent_id", "updated_time"], token)
+          return { ok: true, result: note }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.appendToNote",
+      description:
+        "Append Markdown text to an existing Joplin note's body. Reads, concatenates with a paragraph separator if needed, writes back. Returns { id }.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          text: { type: "string", description: "Markdown to append." }
+        },
+        required: ["id", "text"],
+        additionalProperties: false
+      },
+      async execute(args): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        const id = String(args.id ?? "")
+        const text = String(args.text ?? "")
+        try {
+          await appendToNote(id, text, token)
+          return { ok: true, result: { id } }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.searchNotes",
+      description:
+        "Full-text search across the user's Joplin notes. Returns the top 20 matches by recency. Each match has { id, title, parent_id, updated_time }. Sets truncated: true if Joplin has more results.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description:
+              "Joplin search query. Supports their query DSL (tag:, notebook:, etc.); plain text matches title + body."
+          }
+        },
+        required: ["query"],
+        additionalProperties: false
+      },
+      async execute(args): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        const query = String(args.query ?? "")
+        try {
+          const result = await searchNotes(query, { cap: 20 }, token)
+          return { ok: true, result }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.listFolders",
+      description:
+        "List the user's Joplin notebooks (folders). Returns { items: [{id, title, parent_id}], truncated }.",
+      parametersSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      },
+      async execute(): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        try {
+          const result = await listFolders(token)
+          return { ok: true, result }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.listTags",
+      description:
+        "List the user's Joplin tags. Returns { items: [{id, title}], truncated }.",
+      parametersSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      },
+      async execute(): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        try {
+          const result = await listTags(token)
+          return { ok: true, result }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.findOrCreateFolder",
+      description:
+        "Find a Joplin notebook by title (optionally under a parent notebook), creating it if it doesn't exist. Title match is case-sensitive. Returns { id }.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          parentId: {
+            type: "string",
+            description: "Optional parent notebook id. Omit for top-level."
+          }
+        },
+        required: ["title"],
+        additionalProperties: false
+      },
+      async execute(args): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        const title = String(args.title ?? "")
+        const parentId = typeof args.parentId === "string" ? args.parentId : undefined
+        try {
+          const id = await findOrCreateFolder(title, parentId, token)
+          return { ok: true, result: { id } }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+    },
+    {
+      name: "joplin.addTagToNoteByName",
+      description:
+        "Apply a tag to a Joplin note by tag name. Creates the tag if it doesn't exist (Joplin tags are case-insensitive; stored lowercased). Returns { ok: true }.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          noteId: { type: "string" },
+          tagName: { type: "string" }
+        },
+        required: ["noteId", "tagName"],
+        additionalProperties: false
+      },
+      async execute(args): Promise<ToolExecutionResult> {
+        const token = await getToken()
+        const noteId = String(args.noteId ?? "")
+        const tagName = String(args.tagName ?? "")
+        try {
+          await addTagToNoteByName(noteId, tagName, token)
+          return { ok: true, result: { ok: true } }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
         }
       }
     },
