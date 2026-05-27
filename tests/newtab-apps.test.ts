@@ -1,10 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import React from "react";
+import { act } from "react-dom/test-utils";
+import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AppCard, EditAppModal } from "../src/newtab";
+import { AppCard, EditAppModal, QuickLinks } from "../src/newtab";
 import { WORKSPACE_APPS } from "../src/newtab-apps";
+import { DEFAULT_QUICK_LINKS } from "../src/newtab-quick-links";
 
 describe("new tab workspace apps", () => {
   it("keeps the requested apps in order with https links", () => {
@@ -234,6 +238,57 @@ describe("new tab workspace apps", () => {
     expect(
       options.map((option) => option.getAttribute("aria-label")),
     ).toContain("Use Lucide Mail icon");
+  });
+
+  it("opens the quick links manager modal instead of inline edit controls", async () => {
+    ;(globalThis as typeof globalThis & { React: typeof React }).React = React;
+    const host = document.createElement("div");
+    document.body.append(host);
+    let root: Root | null = null;
+
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        createElement(QuickLinks, {
+          links: DEFAULT_QUICK_LINKS.slice(0, 1),
+          onChange: () => {},
+        }),
+      );
+    });
+
+    try {
+      expect(host.querySelector(".newtab-quick-link-item__action")).toBeNull();
+
+      const editButton = host.querySelector<HTMLButtonElement>(
+        ".newtab-quick-links__toggle",
+      );
+      expect(editButton).toBeTruthy();
+
+      await act(async () => {
+        editButton?.click();
+      });
+
+      const dialog = host.querySelector<HTMLElement>('[role="dialog"]');
+      expect(dialog).toBeTruthy();
+      expect(dialog?.textContent).toContain("Edit links");
+      expect(dialog?.textContent).toContain("Add quick link");
+      expect(dialog?.textContent).toContain("Edit");
+      expect(dialog?.textContent).toContain("Remove");
+
+      const closeButton = host.querySelector<HTMLButtonElement>(
+        '[aria-label="Close edit links modal"]',
+      );
+      expect(closeButton).toBeTruthy();
+
+      await act(async () => {
+        closeButton?.click();
+      });
+
+      expect(host.querySelector('[role="dialog"]')).toBeNull();
+    } finally {
+      act(() => root?.unmount());
+      host.remove();
+    }
   });
 
   it("keeps the new tab layout grouped for search, cards, tabs, and history", () => {

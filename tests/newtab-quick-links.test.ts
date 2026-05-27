@@ -40,10 +40,12 @@ describe("new tab quick links", () => {
 
     expect(source).toContain("QUICK_LINKS_STORAGE_KEY");
     expect(source).toContain("persistQuickLinks");
-    expect(source).toContain('aria-pressed={editing}');
+    expect(source).toContain("QuickLinksManagerModal");
+    expect(source).toContain('aria-haspopup="dialog"');
+    expect(source).toContain("newtab-quick-links-modal__list");
   });
 
-  it("renders quick links with an edit toggle and modal hooks", () => {
+  it("renders quick links with a manager modal trigger and no inline edit controls", () => {
     const markup = renderToStaticMarkup(
       createElement(QuickLinks, {
         links: DEFAULT_QUICK_LINKS.slice(0, 2),
@@ -55,6 +57,7 @@ describe("new tab quick links", () => {
     expect(markup).toContain('aria-label="Chat"');
     expect(markup).toContain('href="https://alex.chat"');
     expect(markup).toContain("Edit links");
+    expect(markup).not.toContain("newtab-quick-link-item__action");
   });
 
   it("renders the quick link edit modal", () => {

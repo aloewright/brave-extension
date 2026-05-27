@@ -992,10 +992,14 @@ export function QuickLinks({
   links: QuickLink[];
   onChange: (next: QuickLink[]) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [modalLink, setModalLink] = useState<QuickLink | null>(null);
 
   const closeModal = () => setModalLink(null);
+  const closeManager = () => {
+    setManagerOpen(false);
+    closeModal();
+  };
 
   const saveLink = (original: QuickLink, updated: QuickLink) => {
     const exists = links.some((candidate) => candidate.id === original.id);
@@ -1015,9 +1019,7 @@ export function QuickLinks({
 
   return (
     <>
-      <div
-        className={`newtab-quick-links-row${editing ? " newtab-quick-links-row--editing" : ""}`}
-      >
+      <div className="newtab-quick-links-row">
         <nav className="newtab-quick-links" aria-label="Quick links">
           {links.map((link) => (
             <div key={link.id} className="newtab-quick-link-item">
@@ -1026,102 +1028,39 @@ export function QuickLinks({
                 href={link.url}
                 aria-label={link.label}
                 title={link.label}
-                tabIndex={editing ? -1 : undefined}
-                onClick={editing ? (event) => event.preventDefault() : undefined}
               >
                 <AppIcon name={link.icon} className="newtab-quick-link__icon" />
               </a>
-              {editing ? (
-                <div className="newtab-quick-link-item__actions">
-                  <button
-                    type="button"
-                    className="newtab-quick-link-item__action"
-                    aria-label={`Edit ${link.label}`}
-                    title={`Edit ${link.label}`}
-                    onClick={() => setModalLink(link)}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      fill="none"
-                      focusable="false"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.9"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17z" />
-                      <path d="M13.5 8.5 15.5 10.5" />
-                      <path d="M4 20l1-4" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    className="newtab-quick-link-item__action newtab-quick-link-item__action--remove"
-                    aria-label={`Remove ${link.label}`}
-                    title={`Remove ${link.label}`}
-                    onClick={() => removeLink(link.id)}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      fill="none"
-                      focusable="false"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.9"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ) : null}
             </div>
           ))}
-          {editing ? (
-            <button
-              type="button"
-              className="newtab-quick-link newtab-quick-link--add"
-              aria-label="Add quick link"
-              title="Add quick link"
-              onClick={() =>
-                setModalLink({
-                  id: createQuickLinkId(),
-                  label: "",
-                  url: "",
-                  icon: "link",
-                })
-              }
-            >
-              <svg
-                aria-hidden="true"
-                className="newtab-quick-link__icon"
-                fill="none"
-                focusable="false"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          ) : null}
         </nav>
         <button
           type="button"
           className="newtab-quick-links__toggle"
-          aria-pressed={editing}
-          onClick={() => {
-            setEditing((value) => !value);
-            closeModal();
-          }}
+          aria-expanded={managerOpen}
+          aria-haspopup="dialog"
+          onClick={() => setManagerOpen(true)}
         >
-          {editing ? "Done" : "Edit links"}
+          Edit links
         </button>
       </div>
+      {managerOpen ? (
+        <QuickLinksManagerModal
+          links={links}
+          onAdd={() =>
+            setModalLink({
+              id: createQuickLinkId(),
+              label: "",
+              url: "",
+              icon: "link",
+            })
+          }
+          onClose={closeManager}
+          onEdit={(link) => setModalLink(link)}
+          onRemove={removeLink}
+          nestedModalOpen={modalLink !== null}
+        />
+      ) : null}
       {modalLink ? (
         <EditQuickLinkModal
           link={modalLink}
@@ -1131,6 +1070,137 @@ export function QuickLinks({
         />
       ) : null}
     </>
+  );
+}
+
+function QuickLinksManagerModal({
+  links,
+  onClose,
+  onAdd,
+  onEdit,
+  onRemove,
+  nestedModalOpen,
+}: {
+  links: QuickLink[];
+  onClose: () => void;
+  onAdd: () => void;
+  onEdit: (link: QuickLink) => void;
+  onRemove: (id: string) => void;
+  nestedModalOpen: boolean;
+}) {
+  useEffect(() => {
+    if (nestedModalOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [nestedModalOpen, onClose]);
+
+  return (
+    <div
+      className="newtab-modal"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="newtab-edit-modal newtab-edit-modal--quick-links"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newtab-quick-links-modal-title"
+      >
+        <div className="newtab-edit-modal__header">
+          <div>
+            <h2 id="newtab-quick-links-modal-title">Edit links</h2>
+            <p>Manage the links under search.</p>
+          </div>
+          <button
+            type="button"
+            className="newtab-edit-modal__close"
+            aria-label="Close edit links modal"
+            onClick={onClose}
+          >
+            <svg
+              aria-hidden="true"
+              fill="none"
+              focusable="false"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <section className="newtab-edit-modal__section">
+          <div className="newtab-edit-modal__section-header">
+            <h3>Quick links</h3>
+            <button
+              type="button"
+              className="newtab-edit-modal__button newtab-edit-modal__button--primary"
+              onClick={onAdd}
+            >
+              Add quick link
+            </button>
+          </div>
+
+          {links.length > 0 ? (
+            <div className="newtab-quick-links-modal__list">
+              {links.map((link) => (
+                <div key={link.id} className="newtab-quick-links-modal__item">
+                  <span className="newtab-quick-links-modal__mark" aria-hidden="true">
+                    <AppIcon name={link.icon} className="newtab-quick-link__icon" />
+                  </span>
+                  <div className="newtab-quick-links-modal__details">
+                    <strong className="newtab-quick-links-modal__label">
+                      {link.label}
+                    </strong>
+                    <span className="newtab-quick-links-modal__url">
+                      {link.url}
+                    </span>
+                  </div>
+                  <div className="newtab-quick-links-modal__actions">
+                    <button
+                      type="button"
+                      className="newtab-quick-links-modal__action"
+                      onClick={() => onEdit(link)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="newtab-quick-links-modal__action newtab-quick-links-modal__action--remove"
+                      onClick={() => onRemove(link.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="newtab-quick-links-modal__empty">
+              No quick links yet.
+            </p>
+          )}
+        </section>
+
+        <div className="newtab-edit-modal__footer">
+          <button
+            type="button"
+            className="newtab-edit-modal__button"
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
