@@ -31,6 +31,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   recorder: "radio-checked",
   eyedropper: "paint-brush",
   joplin: "file-export",
+  aiChat: "robot",
   settings: "settings"
 }
 

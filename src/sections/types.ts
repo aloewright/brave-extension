@@ -13,6 +13,7 @@ export type SectionId =
   | "recorder"
   | "eyedropper"
   | "joplin"
+  | "aiChat"
   | "settings";
 
 export interface SectionDef {
@@ -39,5 +40,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "recorder", label: "Recorder" },
   { id: "eyedropper", label: "Eyedropper" },
   { id: "joplin", label: "Joplin" },
+  { id: "aiChat", label: "AI Chat" },
   { id: "settings", label: "Settings" },
 ];
