@@ -142,11 +142,15 @@ function BookmarkRow({
   bookmark,
   proposedCategory,
   onRemoveFromFavorites,
+  onCopy,
+  onDelete,
   metaSuffix,
 }: {
   bookmark: StoredBookmark;
   proposedCategory?: ProposedCategory;
   onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
+  onCopy?: (bookmark: StoredBookmark) => void;
+  onDelete?: (bookmark: StoredBookmark) => void;
   metaSuffix?: string;
 }) {
   let host = bookmark.url;
@@ -193,17 +197,41 @@ function BookmarkRow({
           )}
         </span>
       </button>
-      {canRemoveFromFavorites && (
-        <LeoIconButton
-          aria-label={`Remove ${bookmark.title} from Favorites`}
-          className="mr-1 shrink-0 text-fg/45 hover:text-destructive focus-visible:text-destructive"
-          icon="close"
-          iconSize={12}
-          onClick={() => onRemoveFromFavorites(bookmark)}
-          title={`Remove ${bookmark.title} from Favorites`}
-          variant="ghost"
-        />
-      )}
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        {onCopy && (
+          <LeoIconButton
+            aria-label="Copy URL"
+            className="text-fg/45 hover:text-fg focus-visible:text-fg"
+            icon="copy"
+            iconSize={12}
+            onClick={() => onCopy(bookmark)}
+            title="Copy URL"
+            variant="ghost"
+          />
+        )}
+        {onDelete && (
+          <LeoIconButton
+            aria-label="Delete bookmark"
+            className="mr-1 text-fg/45 hover:text-destructive focus-visible:text-destructive"
+            icon="trash"
+            iconSize={12}
+            onClick={() => onDelete(bookmark)}
+            title="Delete bookmark"
+            variant="ghost"
+          />
+        )}
+        {canRemoveFromFavorites && (
+          <LeoIconButton
+            aria-label={`Remove ${bookmark.title} from Favorites`}
+            className="mr-1 text-fg/45 hover:text-destructive focus-visible:text-destructive"
+            icon="close"
+            iconSize={12}
+            onClick={() => onRemoveFromFavorites(bookmark)}
+            title={`Remove ${bookmark.title} from Favorites`}
+            variant="ghost"
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -225,12 +253,16 @@ function BookmarkGroup({
   items,
   proposedCategories,
   onRemoveFromFavorites,
+  onCopy,
+  onDelete,
   rowMeta,
 }: {
   category: string;
   items: StoredBookmark[];
   proposedCategories: Record<string, ProposedCategory>;
   onRemoveFromFavorites?: (bookmark: StoredBookmark) => void;
+  onCopy?: (bookmark: StoredBookmark) => void;
+  onDelete?: (bookmark: StoredBookmark) => void;
   rowMeta?: (bookmark: StoredBookmark) => string | undefined;
 }) {
   const [open, setOpen] = useState(true);
@@ -255,6 +287,8 @@ function BookmarkGroup({
               bookmark={bookmark}
               proposedCategory={proposedCategories[bookmark.id]}
               onRemoveFromFavorites={onRemoveFromFavorites}
+              onCopy={onCopy}
+              onDelete={onDelete}
               metaSuffix={rowMeta ? rowMeta(bookmark) : undefined}
             />
           ))}
@@ -379,6 +413,28 @@ export function BookmarksSection() {
     });
   };
 
+  const copyUrl = (bookmark: StoredBookmark) => {
+    void navigator.clipboard.writeText(bookmark.url).catch(() => {
+      setError("Could not copy URL");
+    });
+  };
+
+  const deleteBookmark = (bookmark: StoredBookmark) => {
+    // Optimistic removal — chrome.bookmarks.onRemoved in the background
+    // rebuilds the snapshot and chrome.storage.onChanged will reconcile
+    // any drift on the next render.
+    if (snapshot) {
+      const nextSnapshot: BookmarkSnapshot = {
+        ...snapshot,
+        bookmarks: snapshot.bookmarks.filter((b) => b.id !== bookmark.id),
+      };
+      setSnapshot(nextSnapshot);
+    }
+    chrome.bookmarks.remove(bookmark.id).catch((err: unknown) =>
+      setError(err instanceof Error ? err.message : "Could not delete bookmark"),
+    );
+  };
+
   const runCategorize = async () => {
     setCategorizing(true);
     setCategorizeError(null);
@@ -475,10 +531,6 @@ export function BookmarksSection() {
         )
         .sort(comparator),
     [bookmarks, hiddenFavoriteIds, comparator],
-  );
-  const favoriteGroups = useMemo(
-    () => groupByCategory(favorites, comparator),
-    [favorites, comparator],
   );
   const categories = useMemo(
     () => groupByCategory(bookmarks, comparator),
@@ -613,6 +665,8 @@ export function BookmarksSection() {
                 key={bookmark.id}
                 bookmark={bookmark}
                 proposedCategory={proposedCategories[bookmark.id]}
+                onCopy={copyUrl}
+                onDelete={deleteBookmark}
                 metaSuffix={metaFor(bookmark)}
               />
             ))}
@@ -620,16 +674,17 @@ export function BookmarksSection() {
         )}
 
         {view === "favorites" && (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
             {favorites.length > 0 ? (
-              favoriteGroups.map((group) => (
-                <BookmarkGroup
-                  key={group.category}
-                  category={group.category}
-                  items={group.items}
-                  proposedCategories={proposedCategories}
+              favorites.map((bookmark) => (
+                <BookmarkRow
+                  key={bookmark.id}
+                  bookmark={bookmark}
+                  proposedCategory={proposedCategories[bookmark.id]}
                   onRemoveFromFavorites={removeFromFavorites}
-                  rowMeta={metaFor}
+                  onCopy={copyUrl}
+                  onDelete={deleteBookmark}
+                  metaSuffix={metaFor(bookmark)}
                 />
               ))
             ) : (
@@ -647,6 +702,8 @@ export function BookmarksSection() {
                 items={group.items}
                 proposedCategories={proposedCategories}
                 onRemoveFromFavorites={removeFromFavorites}
+                onCopy={copyUrl}
+                onDelete={deleteBookmark}
                 rowMeta={metaFor}
               />
             ))}

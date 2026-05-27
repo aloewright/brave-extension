@@ -18,6 +18,7 @@ export type LeoIconName =
   | "close"
   | "cloud"
   | "cookie"
+  | "copy"
   | "eye-on"
   | "file-export"
   | "globe"
@@ -73,6 +74,9 @@ const ICONS: Record<LeoIconName, ReactNode> = {
       <path fill="currentColor" d="M10.47 9.77a1.326 1.326 0 1 0 0-2.65 1.326 1.326 0 0 0 0 2.65m-2.042 5.096a1.326 1.326 0 1 0 .002-2.651 1.326 1.326 0 0 0-.002 2.651M15 16.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3" />
       <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M19.08 6.991a3.05 3.05 0 0 0 .467 2.82c.581.778 1.498 1.293 2.418 1.367C22.448 17.026 17.831 22 12 22c-5.52 0-10-4.474-10-9.987C2 6.475 7.022.873 13.887 2.196c-.45 2.958 2.232 5.5 5.194 4.795m-6.825-3.35.028.165c.414 2.503 2.407 4.492 4.92 4.866l.143.022.027.141a4.95 4.95 0 0 0 2.863 3.552l.13.059-.01.141c-.303 4.504-4.111 7.782-8.356 7.782-4.613 0-8.367-3.75-8.367-8.356 0-1.736.714-3.866 2.123-5.544 1.413-1.683 3.531-2.917 6.332-2.833z" />
     </>
+  ),
+  copy: (
+    <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M8 2.75A2.25 2.25 0 0 0 5.75 5v10A2.25 2.25 0 0 0 8 17.25h7A2.25 2.25 0 0 0 17.25 15V5A2.25 2.25 0 0 0 15 2.75zM7.25 5A.75.75 0 0 1 8 4.25h7a.75.75 0 0 1 .75.75v10a.75.75 0 0 1-.75.75H8a.75.75 0 0 1-.75-.75zM3.75 8.5A.75.75 0 0 1 4.5 9.25h.5a.75.75 0 0 1 0 1.5H4.5v8.5A.75.75 0 0 0 5.25 20h7a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 12.25 21.5h-7A2.25 2.25 0 0 1 3 19.25v-9c0-.414.336-.75.75-.75" />
   ),
   "eye-on": (
     <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M12 19.5c-6.496 0-10-5.323-10-7.5s3.504-7.5 10-7.5S22 9.823 22 12s-3.504 7.5-10 7.5m0-13.333c-5.653 0-8.333 4.679-8.333 5.833s2.68 5.833 8.333 5.833 8.333-4.679 8.333-5.833S17.653 6.167 12 6.167m0 10A4.17 4.17 0 0 1 7.833 12 4.17 4.17 0 0 1 12 7.833 4.17 4.17 0 0 1 16.167 12 4.17 4.17 0 0 1 12 16.167M12 9.5A2.503 2.503 0 0 0 9.5 12c0 1.378 1.122 2.5 2.5 2.5s2.5-1.122 2.5-2.5-1.122-2.5-2.5-2.5" />
@@ -346,11 +350,14 @@ export function LeoSwitch({
 
 interface LeoTabButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   active?: boolean
+  /** Narrow padding for multi-tab strips in the sidebar (Session, etc.). */
+  dense?: boolean
 }
 
 export function LeoTabButton({
   active = false,
   className,
+  dense = false,
   type = "button",
   ...props
 }: LeoTabButtonProps) {
@@ -358,7 +365,8 @@ export function LeoTabButton({
     <button
       type={type}
       className={cx(
-        "px-3 py-2 text-xs transition-colors border-b-2 -mb-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        dense ? "px-0.5 py-1.5 text-[10px] leading-tight" : "px-3 py-2 text-xs",
+        "transition-colors border-b-2 -mb-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         active
           ? "border-primary text-fg"
           : "border-transparent text-fg/40 hover:text-fg",

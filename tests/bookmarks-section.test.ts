@@ -120,4 +120,28 @@ describe("bookmark snapshot and section", () => {
     expect(sectionSource).toContain("Recently added");
     expect(sectionSource).toContain("Oldest added");
   });
+
+  it("favorites view renders a flat list (no category pagination/grouping)", () => {
+    const sectionSource = readFileSync(
+      join(process.cwd(), "src/sections/bookmarks/BookmarksSection.tsx"),
+      "utf8",
+    );
+    // The favorites tab used to render <BookmarkGroup> per category; removed
+    // per user request — favorites is now a flat list sorted by current sort.
+    expect(sectionSource).not.toMatch(/favoriteGroups\.map/);
+    expect(sectionSource).not.toContain("const favoriteGroups");
+  });
+
+  it("rows expose copy-URL and delete actions wired to navigator.clipboard and chrome.bookmarks.remove", () => {
+    const sectionSource = readFileSync(
+      join(process.cwd(), "src/sections/bookmarks/BookmarksSection.tsx"),
+      "utf8",
+    );
+    expect(sectionSource).toContain('icon="copy"');
+    expect(sectionSource).toContain('icon="trash"');
+    expect(sectionSource).toContain("navigator.clipboard.writeText");
+    expect(sectionSource).toContain("chrome.bookmarks.remove");
+    expect(sectionSource).toMatch(/aria-label=["']?Copy URL/i);
+    expect(sectionSource).toMatch(/aria-label=["']?Delete bookmark/i);
+  });
 });
