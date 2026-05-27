@@ -23,6 +23,7 @@ const SECTION_IDS: SectionId[] = [
   "cookies",
   "recorder",
   "eyedropper",
+  "joplin",
   "settings",
 ];
 
@@ -40,6 +41,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   cookies: "Cookies",
   recorder: "Recorder",
   eyedropper: "Eyedropper",
+  joplin: "Joplin",
   settings: "Settings",
 };
 

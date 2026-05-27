@@ -16,6 +16,7 @@ import { RecorderSection } from "./sections/recorder/RecorderSection";
 import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
 import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
+import { JoplinSection } from "./sections/joplin/JoplinSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
 const ACTIVE_KEY = "ui.activeSection";
@@ -47,7 +48,7 @@ function SidePanel() {
   };
 
   return (
-    <div className="w-full h-screen bg-bg text-fg font-sans flex flex-col">
+    <div className="flex h-screen w-full flex-col overflow-x-hidden bg-bg font-sans text-fg">
       <ConsentBanner />
       <div className="flex-1 min-h-0 flex">
         <SidebarRail active={active} onChange={change} />
@@ -71,7 +72,11 @@ function SidePanel() {
           {active === "inspector" && <InspectorSection />}
           {active === "extensions" && <ExtensionsSection />}
           {active === "tech" && <TechSection />}
-          {active === "session" && <SessionSection />}
+          <div
+            className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${active === "session" ? "" : "hidden"}`}
+          >
+            <SessionSection />
+          </div>
           {active === "quickInfo" && <QuickInfoSection />}
           {active === "tasks" && <TasksSection />}
           {active === "bookmarks" && <BookmarksSection />}
@@ -79,6 +84,7 @@ function SidePanel() {
           {active === "cookies" && <CookiesSection />}
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
+          {active === "joplin" && <JoplinSection />}
           {active === "settings" && <SettingsSection />}
         </main>
       </div>

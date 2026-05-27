@@ -30,6 +30,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   cookies: "cookie",
   recorder: "radio-checked",
   eyedropper: "paint-brush",
+  joplin: "file-export",
   settings: "settings"
 }
 
