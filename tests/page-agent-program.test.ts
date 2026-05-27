@@ -184,6 +184,25 @@ describe("executeProgram", () => {
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+describe("native-host planner emits program", () => {
+  const swift = readFileSync(join(process.cwd(), "native-host/foundation-models-bridge.swift"), "utf8")
+
+  it("declares an AgentOp Generable struct", () => {
+    expect(swift).toContain("struct AgentOp: Codable")
+    expect(swift).toContain('"browser.observe"')
+    expect(swift).toContain('"session.compact"')
+  })
+
+  it("AgentPlan has program: [AgentOp]?", () => {
+    expect(swift).toMatch(/var\s+program:\s*\[AgentOp\]\?/)
+  })
+
+  it("planner instructions teach the program preference", () => {
+    expect(swift).toContain("Prefer emitting a `program`")
+    expect(swift).toContain("when both are present, `program` wins")
+  })
+})
+
 describe("content script step rendering", () => {
   const cs = readFileSync(join(process.cwd(), "src/contents/page-agent.ts"), "utf8")
 

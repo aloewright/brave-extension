@@ -48,12 +48,37 @@ struct BridgeResponse: Codable {
     var contextSize: Int?
     var tokenEstimate: Int?
     var plan: AgentPlan?
+    var program: [AgentOp]?
     var action: AgentAction?
     var compactSummary: String?
     var status: String?
     var nextStep: String?
     var reply: String?
     var chatTurn: ChatTurnResponse?
+}
+
+@Generable
+struct AgentOp: Codable {
+    @Guide(description: "Operation kind.", .anyOf([
+        "browser.observe","browser.click","browser.type","browser.scroll",
+        "browser.wait","browser.navigate","memory.search","memory.remember","session.compact"
+    ]))
+    var op: String
+
+    @Guide(description: "Observation ref like el3 when the op targets an element.")
+    var ref: String?
+
+    @Guide(description: "Text, URL, or query value for the op.")
+    var value: String?
+
+    @Guide(description: "Wait duration in milliseconds (cap 2000).")
+    var ms: Int?
+
+    @Guide(description: "Scroll target y-coordinate in CSS pixels.")
+    var y: Int?
+
+    @Guide(description: "Navigate target URL (http or https).")
+    var url: String?
 }
 
 @Generable
@@ -93,6 +118,9 @@ struct AgentPlan: Codable {
 
     @Guide(description: "The single next browser action.")
     var action: AgentAction
+
+    @Guide(description: "Sequence of up to 8 ops; halt on first failure. Prefer this over action.", .maximumCount(8))
+    var program: [AgentOp]?
 }
 
 @Generable
@@ -276,6 +304,8 @@ func planResponse(for request: BridgeRequest, operation: String) async throws ->
     let instructions = """
     You are a local, privacy-preserving browser agent planner running on the user's Mac.
     You do not execute browser actions. You produce compact structured plans for a consent-gated browser tool layer.
+    Prefer emitting a `program` of 1-8 ops in order; the runner halts at the first failure.
+    The legacy `action` field is for backward compatibility only — when both are present, `program` wins.
     Keep output short. Do not invent page details that are not in the observation.
     """
     let prompt = makePlanPrompt(request: request)
@@ -290,15 +320,26 @@ func planResponse(for request: BridgeRequest, operation: String) async throws ->
         contextSize: SystemLanguageModel.default.contextSize,
         tokenEstimate: await tokenEstimate(for: prompt),
         plan: plan,
+        program: plan.program,
         action: plan.action,
         status: plan.status,
         nextStep: plan.nextStep,
-        reply: [
-            "Objective: \(plan.objective)",
-            "Status: \(plan.status)",
-            "Next step: \(plan.nextStep)",
-            "Action: \(plan.action.kind) - \(plan.action.reason)"
-        ].joined(separator: "\n")
+        reply: {
+            if let program = plan.program, !program.isEmpty {
+                return [
+                    "Objective: \(plan.objective)",
+                    "Status: \(plan.status)",
+                    "Next step: \(plan.nextStep)",
+                    "Program: \(program.count) ops"
+                ].joined(separator: "\n")
+            }
+            return [
+                "Objective: \(plan.objective)",
+                "Status: \(plan.status)",
+                "Next step: \(plan.nextStep)",
+                "Action: \(plan.action.kind) - \(plan.action.reason)"
+            ].joined(separator: "\n")
+        }()
     )
 }
 
