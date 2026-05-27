@@ -190,19 +190,20 @@ describe("page agent UI", () => {
     expect(pageAgent).not.toContain(">AI</button>")
   })
 
-  it("does not execute page-agent DOM actions against raw unmapped refs", () => {
+  it("delegates ref-safety and action execution to executeProgram from page-agent-program", () => {
     const background = readFileSync(
       join(process.cwd(), "src/background.ts"),
       "utf8"
     )
 
-    expect(background).toContain("function selectorForAgentAction(action: PageAgentAction, observation: any): string | null")
-    expect(background).toContain("if (!ref) return null")
-    expect(background).not.toContain("node?.selector || action.value || ref")
-    expect(background).toContain("planned click target is no longer in the page observation")
-    expect(background).toContain("friendlyPageAgentActionError")
-    expect(background).toContain('Action: ${actionResult.kind} failed - ${actionResult.reason || "execution failed"}')
-    expect(background).not.toContain("skipped: true,\n      reason: friendlyPageAgentActionError(err)")
+    // Old single-action helpers were deleted; ref safety now lives in page-agent-program
+    expect(background).not.toContain("selectorForAgentAction")
+    expect(background).not.toContain("friendlyPageAgentActionError")
+    expect(background).not.toContain("replyWithActionResult")
+    // New wiring delegates to executeProgram
+    expect(background).toContain("executeProgram")
+    expect(background).toContain("parseProgram")
+    expect(background).toMatch(/from\s+["']\.\/background\/page-agent-program["']/)
   })
 
   it("falls back locally when cloud page-agent chat fails", () => {

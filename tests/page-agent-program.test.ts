@@ -180,3 +180,24 @@ describe("executeProgram", () => {
     expect(result.steps[0].reason).toBeUndefined()
   })
 })
+
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+describe("background wiring", () => {
+  const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
+
+  it("imports executeProgram + parseProgram from page-agent-program", () => {
+    expect(background).toMatch(/from\s+["']\.\/background\/page-agent-program["']/)
+    expect(background).toContain("parseProgram")
+    expect(background).toContain("executeProgram")
+  })
+
+  it("no longer references replyWithActionResult", () => {
+    expect(background).not.toContain("replyWithActionResult")
+  })
+
+  it("PAGE_AGENT_MESSAGE response carries `steps`", () => {
+    expect(background).toMatch(/steps:\s*[A-Za-z_.]+\.steps/)
+  })
+})

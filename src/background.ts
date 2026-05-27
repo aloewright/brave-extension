@@ -59,6 +59,12 @@ import {
   isThirdPartyCookieMessage,
 } from "./background/third-party-cookies";
 import { ensureCalTasksOriginRule } from "./background/cal-tasks-origin";
+import {
+  parseProgram,
+  executeProgram,
+  type ProgramDeps,
+  type StepEntry
+} from "./background/page-agent-program";
 import type {
   PickerCapture,
   PickerMessage,
@@ -887,175 +893,6 @@ async function pageAgentObserve(tabId: number): Promise<unknown> {
   return JSON.parse(result.content[0]?.text || "null");
 }
 
-type PageAgentAction = {
-  kind?: string;
-  ref?: string;
-  value?: string;
-  text?: string;
-  reason?: string;
-};
-
-function extractPageAgentAction(plan: any): PageAgentAction | null {
-  const action = plan?.action || plan?.plan?.action;
-  if (!action || typeof action !== "object") return null;
-  const kind = String(action.kind || action.type || "").trim().toLowerCase();
-  if (!kind) return null;
-  return {
-    kind,
-    ref: typeof action.ref === "string" ? action.ref : undefined,
-    value: typeof action.value === "string" ? action.value : undefined,
-    text: typeof action.text === "string" ? action.text : undefined,
-    reason: typeof action.reason === "string" ? action.reason : undefined,
-  };
-}
-
-function selectorForAgentAction(action: PageAgentAction, observation: any): string | null {
-  const nodes = Array.isArray(observation?.nodes) ? observation.nodes : [];
-  const ref = action.ref || "";
-  if (!ref) return null;
-  const node = nodes.find((n: any) => n?.ref === ref);
-  const selector = typeof node?.selector === "string" ? node.selector.trim() : "";
-  return selector || null;
-}
-
-function skippedActionResult(action: PageAgentAction, reason: string) {
-  return {
-    kind: action.kind || "action",
-    ok: false,
-    skipped: true,
-    reason,
-  };
-}
-
-function friendlyPageAgentActionError(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  if (/no such rule/i.test(message)) {
-    return "the planned action did not match the current page observation";
-  }
-  return message || "the planned action could not be completed";
-}
-
-function parseToolJson(result: { content?: Array<{ text?: string }> }) {
-  const text = result.content?.[0]?.text || "";
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { text };
-  }
-}
-
-async function executePageAgentAction(
-  tabId: number,
-  observation: unknown,
-  plan: unknown,
-): Promise<null | {
-  kind: string;
-  toolName?: string;
-  ok: boolean;
-  skipped?: boolean;
-  reason?: string;
-  result?: any;
-}> {
-  const action = extractPageAgentAction(plan);
-  if (!action?.kind) return null;
-  if (["ask_user", "done", "remember", "compact"].includes(action.kind)) {
-    return {
-      kind: action.kind,
-      ok: action.kind === "done",
-      skipped: true,
-      reason: action.reason || "no browser action required",
-    };
-  }
-
-  let toolName: keyof typeof DOM_TOOL_HANDLERS | null = null;
-  let args: Record<string, unknown> = { tabId };
-
-  if (action.kind === "observe") {
-    toolName = "browser_observe";
-  } else if (action.kind === "click") {
-    toolName = "click";
-    const selector = selectorForAgentAction(action, observation);
-    if (!selector) {
-      return skippedActionResult(action, "planned click target is no longer in the page observation");
-    }
-    args.selector = selector;
-  } else if (action.kind === "type") {
-    toolName = "type";
-    const selector = selectorForAgentAction(action, observation);
-    if (!selector) {
-      return skippedActionResult(action, "planned typing target is no longer in the page observation");
-    }
-    args.selector = selector;
-    args.text = action.text || action.value || "";
-  } else if (action.kind === "scroll") {
-    toolName = "scroll_to";
-    const selector = selectorForAgentAction(action, observation);
-    if (!selector) {
-      return skippedActionResult(action, "planned scroll target is no longer in the page observation");
-    }
-    args.selector = selector;
-  } else if (action.kind === "wait") {
-    toolName = "wait_for_selector";
-    const selector = selectorForAgentAction(action, observation);
-    if (!selector) {
-      return skippedActionResult(action, "planned wait target is no longer in the page observation");
-    }
-    args.selector = selector;
-    args.timeoutMs = 3000;
-  } else if (action.kind === "navigate") {
-    toolName = "navigate";
-    args.url = action.value || action.text || "";
-  }
-
-  if (!toolName) {
-    return {
-      kind: action.kind,
-      ok: false,
-      skipped: true,
-      reason: "unsupported planned action",
-    };
-  }
-
-  try {
-    const decision = await requestConsent({ toolName, args });
-    if (decision === "deny") {
-      return {
-        kind: action.kind,
-        toolName,
-        ok: false,
-        skipped: true,
-        reason: "user denied tool call or approval timed out",
-      };
-    }
-
-    const result = await DOM_TOOL_HANDLERS[toolName](args);
-    return {
-      kind: action.kind,
-      toolName,
-      ok: !result.isError,
-      result: parseToolJson(result),
-    };
-  } catch (err) {
-    return {
-      kind: action.kind,
-      toolName,
-      ok: false,
-      reason: friendlyPageAgentActionError(err),
-    };
-  }
-}
-
-function replyWithActionResult(base: string, actionResult: Awaited<ReturnType<typeof executePageAgentAction>>): string {
-  if (!actionResult) return base;
-  if (actionResult.skipped) {
-    return `${base}\nAction: ${actionResult.kind} skipped - ${actionResult.reason || "not needed"}`;
-  }
-  if (!actionResult.ok) {
-    return `${base}\nAction: ${actionResult.kind} failed - ${actionResult.reason || "execution failed"}`;
-  }
-  return `${base}\nAction: ${actionResult.kind} completed.`;
-}
-
 async function handlePageAgentMessage(input: {
   tabId: number;
   sessionId?: string;
@@ -1064,69 +901,77 @@ async function handlePageAgentMessage(input: {
   sessionId: string;
   reply: string;
   provider: string;
-  observation: unknown;
-  plan?: unknown;
+  steps: StepEntry[];
 }> {
   const text = input.text.trim();
   if (!text) throw new Error("message required");
-  let observation = await pageAgentObserve(input.tabId);
+  const initialObservation = await pageAgentObserve(input.tabId);
   const sessionId = input.sessionId || `page_${crypto.randomUUID()}`;
   const localPlan = await requestNative(
-    { type: "foundationModels.plan", objective: text, observation },
+    { type: "foundationModels.plan", objective: text, observation: initialObservation },
     15000,
   ).catch(() => null);
-  const actionResult = await executePageAgentAction(input.tabId, observation, localPlan);
-  if (actionResult?.result?.observation) observation = actionResult.result.observation;
+
+  const programDeps: ProgramDeps = {
+    runTool: async (name, args) => {
+      const handler = DOM_TOOL_HANDLERS[name];
+      if (!handler) return { ok: false, reason: `unknown tool ${name}` };
+      const r = await handler(args);
+      if (r.isError) return { ok: false, reason: r.content?.[0]?.text || "tool error" };
+      try {
+        const parsed = JSON.parse(r.content?.[0]?.text || "null");
+        return { ok: true, data: parsed };
+      } catch {
+        return { ok: true, data: r.content?.[0]?.text };
+      }
+    },
+    observe: (tabId) => pageAgentObserve(tabId) as Promise<any>,
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now()
+  };
+
+  const program = parseProgram((localPlan as any)?.plan ?? localPlan);
+  const trace = await executeProgram(input.tabId, program, initialObservation as any, programDeps);
 
   const settings = await getSettings();
   if (settings.sidebarSyncEnabled && settings.sidebarApiUrl) {
     try {
-      const client = createSidebarApiClient(
-        settings.sidebarApiToken,
-        settings.sidebarApiUrl,
-      );
+      const client = createSidebarApiClient(settings.sidebarApiToken, settings.sidebarApiUrl);
       const res = await client.agent.chat(buildBrowserAgentCloudChatPayload({
         settings,
         sessionId,
         message: text,
         objective: text,
-        observation,
+        observation: trace.finalObservation
       }));
       return {
         sessionId: res.session.id,
-        reply: replyWithActionResult(localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply, actionResult),
-        provider: localPlan?.ok ? "foundation-models" : res.provider,
-        observation,
-        plan: localPlan?.plan || res.plan,
+        reply: (localPlan as any)?.ok && (localPlan as any).reply ? (localPlan as any).reply : res.reply,
+        provider: (localPlan as any)?.ok ? "foundation-models" : res.provider,
+        steps: trace.steps
       };
     } catch (err) {
       safeRuntimeWarning("page agent cloud chat failed; using local fallback", err);
     }
   }
 
-  const nodes = Array.isArray((observation as any)?.nodes)
-    ? (observation as any).nodes.length
+  const nodes = Array.isArray((trace.finalObservation as any)?.nodes)
+    ? (trace.finalObservation as any).nodes.length
     : 0;
   const reply =
-    localPlan?.ok && localPlan.reply
-      ? localPlan.reply
+    (localPlan as any)?.ok && (localPlan as any).reply
+      ? (localPlan as any).reply
       : [
           `Objective: ${text}`,
           `Status: observed ${nodes} visible page node${nodes === 1 ? "" : "s"}.`,
           "Plan: choose one safe browser action, request consent for write actions, then observe again.",
-          "Next step: configure sidebar-api sync for persistent memory or continue locally from this page observation.",
+          "Next step: configure sidebar-api sync for persistent memory or continue locally from this page observation."
         ].join("\n");
   return {
     sessionId,
-    reply: replyWithActionResult(reply, actionResult),
-    provider: localPlan?.ok ? "foundation-models" : "local-deterministic",
-    observation,
-    plan: localPlan?.plan || {
-      objective: text,
-      status: "planning",
-      nextStep: "Use browser_observe output to choose one consent-gated action.",
-      actionResult,
-    },
+    reply,
+    provider: (localPlan as any)?.ok ? "foundation-models" : "local-deterministic",
+    steps: trace.steps
   };
 }
 
