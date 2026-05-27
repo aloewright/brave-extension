@@ -52,6 +52,22 @@ export function ChatSection() {
         setTurnInFlight(ev.turnId)
         lastUpdateAtRef.current = Date.now()
       } else if (ev.type === "ai-chat/turn-done") {
+        // Surface error reasons as ephemeral assistant messages. Without
+        // this the orchestrator's emitError broadcasts only ever toggle
+        // turnInFlight off — the user sees their message clear and then
+        // nothing, which is the most common "no results" report.
+        if (ev.reason === "error" && ev.errorMessage) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: ulid(),
+              role: "assistant",
+              content: `✗ ${ev.errorMessage}`,
+              turnId: ev.turnId,
+              createdAt: new Date().toISOString()
+            }
+          ])
+        }
         setTurnInFlight(null)
       }
     }
@@ -159,12 +175,12 @@ export function ChatSection() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault()
               void onSend()
             }
           }}
-          placeholder="Ask anything (Cmd-Enter to send)"
+          placeholder="Ask anything (Enter to send, Shift+Enter for newline)"
           className="w-full px-2 py-1 rounded border border-default bg-bg text-fg text-sm resize-y"
           rows={2}
         />
