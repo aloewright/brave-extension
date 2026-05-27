@@ -32,6 +32,22 @@ export const test = base.extend<Fixtures>({
       )
     }
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-dev-sidebar-e2e-"))
+
+    // Native-messaging manifests are looked up per-profile by Chrome for
+    // Testing — system-wide installs under Chromium/Chrome don't apply to
+    // Playwright's bundled browser. Mirror the user-installed manifest into
+    // this profile so chrome.runtime.sendNativeMessage / connectNative can
+    // reach the local host during e2e runs.
+    const srcManifest = path.join(
+      os.homedir(),
+      "Library/Application Support/Chromium/NativeMessagingHosts/com.aidev.sidebar.json"
+    )
+    if (fs.existsSync(srcManifest)) {
+      const dstDir = path.join(userDataDir, "NativeMessagingHosts")
+      fs.mkdirSync(dstDir, { recursive: true })
+      fs.copyFileSync(srcManifest, path.join(dstDir, "com.aidev.sidebar.json"))
+    }
+
     const ctx = await chromium.launchPersistentContext(userDataDir, {
       headless: true,
       channel: "chromium",

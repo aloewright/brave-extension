@@ -544,6 +544,7 @@ async function foundationModelsRun(kind, msg) {
     plan: result.plan,
     action: result.action,
     compactSummary: result.compactSummary,
+    chatTurn: result.chatTurn,
     status: result.status,
     nextStep: result.nextStep,
     reply: result.reply
@@ -721,7 +722,8 @@ async function main() {
 
       case "foundationModels.plan":
       case "foundationModels.compact":
-      case "foundationModels.nextAction": {
+      case "foundationModels.nextAction":
+      case "foundationModels.chat": {
         sendMessage(await foundationModelsRun(msg.type, msg))
         break
       }

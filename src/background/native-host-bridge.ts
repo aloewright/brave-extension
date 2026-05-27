@@ -1,9 +1,14 @@
 // src/background/native-host-bridge.ts
 //
-// Thin wrappers around chrome.runtime.sendNativeMessage for the two
-// Foundation Models operations the chat needs ("chat" and "compact").
-// The shaping helpers (buildSystemPrompt, toBridgeHistory) are exported
-// so they're unit-testable directly.
+// Wrappers around a one-shot chrome.runtime.connectNative port for the two
+// Foundation Models operations the chat needs ("chat" and "compact"). We use
+// connectNative (not sendNativeMessage) because the host emits unrelated
+// startup messages (MCP registration stderr) before processing requests, and
+// the one-shot sendNativeMessage callback would resolve on the first message
+// out of the host — which is the startup notice, not our response. With a
+// port we filter incoming messages by `requestId` and resolve only on a
+// match. The shaping helpers (buildSystemPrompt, toBridgeHistory) are
+// exported so they're unit-testable directly.
 
 import type {
   AmbientContext,
@@ -11,7 +16,7 @@ import type {
   ToolDefinition
 } from "./../lib/ai-chat-types"
 
-const NATIVE_HOST_NAME = "ai_dev_host"
+const NATIVE_HOST_NAME = "com.aidev.sidebar"
 
 export interface BridgeRawResponse {
   ok: boolean
@@ -46,25 +51,29 @@ export async function runFoundationModelsChat(
   input: ChatBridgeInput,
   opts: { signal?: AbortSignal } = {}
 ): Promise<BridgeRawResponse> {
-  const payload = {
-    operation: "chat",
-    systemPrompt: buildSystemPrompt(input.compactedHead, input.tools, input.ambient),
-    history: input.history.map(toBridgeHistory),
-    toolsJson: JSON.stringify(
-      input.tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        parametersSchema: t.parametersSchema
-      }))
-    )
-  }
-  return await sendNativeMessage(payload, opts.signal)
+  return await requestNative(
+    {
+      type: "foundationModels.chat",
+      operation: "chat",
+      systemPrompt: buildSystemPrompt(input.compactedHead, input.tools, input.ambient),
+      history: input.history.map(toBridgeHistory),
+      toolsJson: JSON.stringify(
+        input.tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parametersSchema: t.parametersSchema
+        }))
+      )
+    },
+    opts.signal
+  )
 }
 
 export async function runFoundationModelsCompact(input: {
   compactSummary: string
 }): Promise<{ compactSummary: string }> {
-  const resp = await sendNativeMessage({
+  const resp = await requestNative({
+    type: "foundationModels.compact",
     operation: "compact",
     compactSummary: input.compactSummary
   })
@@ -132,8 +141,13 @@ export function toBridgeHistory(m: ChatMessage): BridgeHistoryRow {
   }
 }
 
-async function sendNativeMessage(
-  payload: object,
+let nextRequestId = 1
+function makeRequestId(): string {
+  return `fm-${Date.now().toString(36)}-${(nextRequestId++).toString(36)}`
+}
+
+async function requestNative(
+  payload: { type: string; [k: string]: unknown },
   signal?: AbortSignal
 ): Promise<BridgeRawResponse> {
   return new Promise((resolve, reject) => {
@@ -141,18 +155,49 @@ async function sendNativeMessage(
       reject(new Error("aborted"))
       return
     }
+    const requestId = makeRequestId()
+    let settled = false
+    let port: chrome.runtime.Port
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST_NAME)
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)))
+      return
+    }
+
+    const cleanup = () => {
+      settled = true
+      if (signal) signal.removeEventListener("abort", onAbort)
+      try { port.disconnect() } catch { /* already gone */ }
+    }
     const onAbort = () => {
+      if (settled) return
+      cleanup()
       reject(new Error("aborted"))
     }
     if (signal) signal.addEventListener("abort", onAbort)
 
-    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, payload, (response) => {
-      if (signal) signal.removeEventListener("abort", onAbort)
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message))
-        return
-      }
-      resolve(response as BridgeRawResponse)
+    port.onMessage.addListener((msg: { requestId?: string; type?: string } & Record<string, unknown>) => {
+      if (settled) return
+      // Filter for our response by requestId. The host emits unrelated
+      // startup messages (mcp stderr, etc.) that we ignore.
+      if (msg?.requestId !== requestId) return
+      cleanup()
+      resolve(msg as unknown as BridgeRawResponse)
     })
+    port.onDisconnect.addListener(() => {
+      if (settled) return
+      settled = true
+      if (signal) signal.removeEventListener("abort", onAbort)
+      const err = chrome.runtime.lastError?.message || "native host disconnected"
+      reject(new Error(err))
+    })
+
+    try {
+      port.postMessage({ ...payload, requestId })
+    } catch (err) {
+      cleanup()
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
   })
 }
