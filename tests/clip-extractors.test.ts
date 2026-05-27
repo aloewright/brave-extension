@@ -23,8 +23,7 @@ function resetDocument(html: string, title: string, url = "http://example.test/p
 describe("extractSimplifiedInPage", () => {
   beforeEach(() => {
     resetDocument("<body><article><h1>Hi</h1><p>p</p></article></body>", "T")
-    // @ts-expect-error — test stub
-    delete globalThis.__JoplinReadability__
+    delete (globalThis as { __JoplinReadability__?: unknown }).__JoplinReadability__
   })
 
   it("returns null when Readability is missing", () => {
