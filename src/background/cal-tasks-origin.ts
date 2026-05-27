@@ -39,7 +39,7 @@ function isManagedRuleId(id: number) {
   return id >= CAL_TASKS_ORIGIN_RULE_ID && id <= CAL_TASKS_ORIGIN_RULE_ID_MAX
 }
 
-export async function ensureCalTasksOriginRule() {
+async function runEnsureCalTasksOriginRule(): Promise<void> {
   if (!chrome.declarativeNetRequest?.updateDynamicRules) return
 
   const existing = await chrome.declarativeNetRequest.getDynamicRules()
@@ -49,4 +49,18 @@ export async function ensureCalTasksOriginRule() {
     removeRuleIds,
     addRules: [buildCalTasksOriginRule()]
   })
+}
+
+// Same serial-queue lock as third-party-cookies: concurrent callers can race
+// getDynamicRules → updateDynamicRules and Chrome will reject the second add
+// with "Rule with id X does not have a unique ID".
+let ensureInFlight: Promise<void> | null = null
+
+export function ensureCalTasksOriginRule(): Promise<void> {
+  const previous = ensureInFlight ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(runEnsureCalTasksOriginRule)
+  ensureInFlight = next.finally(() => {
+    if (ensureInFlight === next) ensureInFlight = null
+  })
+  return next
 }

@@ -148,7 +148,7 @@ async function setThirdPartyCookieGrants(grants: ThirdPartyCookieGrant[]) {
   await chrome.storage.local.set({ [THIRD_PARTY_COOKIE_GRANTS_KEY]: grants })
 }
 
-export async function ensureThirdPartyCookieRules() {
+async function runEnsureThirdPartyCookieRules(): Promise<void> {
   const grants = await getThirdPartyCookieGrants()
 
   if (chrome.privacy?.websites?.thirdPartyCookiesAllowed?.set) {
@@ -179,6 +179,21 @@ export async function ensureThirdPartyCookieRules() {
     removeRuleIds,
     addRules
   })
+}
+
+// Concurrent callers (SW startup + onInstalled fire at the same time on
+// extension reload) would otherwise race on getDynamicRules → updateDynamicRules
+// and Chrome rejects the loser with "Rule with id X does not have a unique ID".
+// Serialize so each caller runs after the previous finishes against fresh state.
+let ensureInFlight: Promise<void> | null = null
+
+export function ensureThirdPartyCookieRules(): Promise<void> {
+  const previous = ensureInFlight ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(runEnsureThirdPartyCookieRules)
+  ensureInFlight = next.finally(() => {
+    if (ensureInFlight === next) ensureInFlight = null
+  })
+  return next
 }
 
 export async function getThirdPartyCookieState(): Promise<ThirdPartyCookieState> {
