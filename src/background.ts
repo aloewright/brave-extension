@@ -893,6 +893,8 @@ async function pageAgentObserve(tabId: number): Promise<unknown> {
   return JSON.parse(result.content[0]?.text || "null");
 }
 
+type LocalPlanResponse = { ok?: boolean; reply?: string; plan?: unknown } | null;
+
 async function handlePageAgentMessage(input: {
   tabId: number;
   sessionId?: string;
@@ -907,10 +909,10 @@ async function handlePageAgentMessage(input: {
   if (!text) throw new Error("message required");
   const initialObservation = await pageAgentObserve(input.tabId);
   const sessionId = input.sessionId || `page_${crypto.randomUUID()}`;
-  const localPlan = await requestNative(
+  const localPlan = (await requestNative(
     { type: "foundationModels.plan", objective: text, observation: initialObservation },
     15000,
-  ).catch(() => null);
+  ).catch(() => null)) as LocalPlanResponse;
 
   const programDeps: ProgramDeps = {
     runTool: async (name, args) => {
@@ -918,19 +920,23 @@ async function handlePageAgentMessage(input: {
       if (!handler) return { ok: false, reason: `unknown tool ${name}` };
       const r = await handler(args);
       if (r.isError) return { ok: false, reason: r.content?.[0]?.text || "tool error" };
+      const text = r.content?.[0]?.text ?? "";
       try {
-        const parsed = JSON.parse(r.content?.[0]?.text || "null");
-        return { ok: true, data: parsed };
+        return { ok: true, data: text ? JSON.parse(text) : null };
       } catch {
-        return { ok: true, data: r.content?.[0]?.text };
+        safeRuntimeWarning("page agent runTool got non-JSON output", { name });
+        return { ok: true, data: null };
       }
     },
-    observe: (tabId) => pageAgentObserve(tabId) as Promise<any>,
+    observe: async (tabId) => {
+      const obs = await pageAgentObserve(tabId);
+      return (obs ?? { nodes: [] }) as Awaited<ReturnType<ProgramDeps["observe"]>>;
+    },
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now()
   };
 
-  const program = parseProgram((localPlan as any)?.plan ?? localPlan);
+  const program = parseProgram(localPlan?.plan ?? localPlan);
   const trace = await executeProgram(input.tabId, program, initialObservation as any, programDeps);
 
   const settings = await getSettings();
@@ -946,8 +952,8 @@ async function handlePageAgentMessage(input: {
       }));
       return {
         sessionId: res.session.id,
-        reply: (localPlan as any)?.ok && (localPlan as any).reply ? (localPlan as any).reply : res.reply,
-        provider: (localPlan as any)?.ok ? "foundation-models" : res.provider,
+        reply: localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply,
+        provider: localPlan?.ok ? "foundation-models" : res.provider,
         steps: trace.steps
       };
     } catch (err) {
@@ -959,8 +965,8 @@ async function handlePageAgentMessage(input: {
     ? (trace.finalObservation as any).nodes.length
     : 0;
   const reply =
-    (localPlan as any)?.ok && (localPlan as any).reply
-      ? (localPlan as any).reply
+    localPlan?.ok && localPlan.reply
+      ? localPlan.reply
       : [
           `Objective: ${text}`,
           `Status: observed ${nodes} visible page node${nodes === 1 ? "" : "s"}.`,
@@ -970,7 +976,7 @@ async function handlePageAgentMessage(input: {
   return {
     sessionId,
     reply,
-    provider: (localPlan as any)?.ok ? "foundation-models" : "local-deterministic",
+    provider: localPlan?.ok ? "foundation-models" : "local-deterministic",
     steps: trace.steps
   };
 }
