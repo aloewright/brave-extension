@@ -117,6 +117,8 @@ export interface Settings {
   dopplerProject: string
   dopplerConfig: string
   dopplerScope: string
+  // Phase 1 — Joplin clipper feature
+  joplinToken: string
 }
 
 /** Status reported by the native host's mcp.status RPC. */
@@ -182,7 +184,8 @@ export const DEFAULT_SETTINGS: Settings = {
   braveSearchApiKey: "",
   dopplerProject: "",
   dopplerConfig: "",
-  dopplerScope: "/"
+  dopplerScope: "/",
+  joplinToken: ""
 }
 
 // ─── Design inspector types (folded in from Alexometer) ───────────────
