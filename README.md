@@ -65,37 +65,14 @@ and a draggable grid of Workspace App tiles.
 
 ### Customizing the Quick Links row
 
-The five icon-only links above the app grid are hardcoded in
-[`src/newtab.tsx`](src/newtab.tsx) as the `QUICK_LINKS` constant
-(around line 304). Each entry has a `label`, a `url`, and an inline SVG
-`icon`. To point them at your own chat, email, calendar, task tracker,
-and shortlink service, edit the `url` fields in place:
+The five icon-only links under search are editable on the new tab page.
+Click **Edit links** to add, remove, or change each shortcut (name, URL, and
+icon). Changes persist in `chrome.storage.local` under `newtab.quickLinks`.
 
-```ts
-const QUICK_LINKS: { label: string; url: string; icon: ReactNode }[] = [
-  { label: "Chat",           url: "https://chat.example.com",     icon: (/* ... */) },
-  { label: "Email",          url: "https://mail.example.com",     icon: (/* ... */) },
-  { label: "Calendar",       url: "https://calendar.example.com", icon: (/* ... */) },
-  { label: "Tasks",          url: "https://tasks.example.com",    icon: (/* ... */) },
-  { label: "Link Shortener", url: "https://s.example.com",        icon: (/* ... */) },
-];
-```
-
-- **Change destination only**: edit `url`. The `label` is read aloud by
-  screen readers and shown as the hover tooltip, so update it to match
-  if you repurpose a slot (e.g. swap "Tasks" for "Notes").
-- **Add or remove a link**: add/remove an object in the array. The row
-  renders whatever is in `QUICK_LINKS`, in order. There's no upper limit,
-  but the layout is tuned for ~5 items.
-- **Use your own icon**: each `icon` is a fragment of SVG `<path>` /
-  `<rect>` elements that get drawn inside a shared 24×24 stroked
-  viewBox (`fill="none"`, `stroke="currentColor"`,
-  `strokeWidth="1.8"`). Drop in any path data from
-  [Lucide](https://lucide.dev/), [Tabler](https://tabler.io/icons), or
-  Hero­icons (outline set) and it will inherit the row's styling.
-
-After editing, run `pnpm dev` to hot-reload the unpacked extension or
-`pnpm build` to produce a fresh `build/` for packaging.
+Defaults ship in [`src/newtab-quick-links.ts`](src/newtab-quick-links.ts)
+as `DEFAULT_QUICK_LINKS`. To change the out-of-box list for new installs,
+edit that array (each entry needs `id`, `label`, `url`, and an `icon` slug
+from [`src/newtab-apps.ts`](src/newtab-apps.ts)).
 
 ### Customizing the Workspace App grid
 

@@ -13,6 +13,13 @@ import {
   type WorkspaceApp,
   type WorkspaceAppIcon,
 } from "./newtab-apps";
+import {
+  createQuickLinkId,
+  DEFAULT_QUICK_LINKS,
+  QUICK_LINKS_STORAGE_KEY,
+  sanitizeQuickLinks,
+  type QuickLink,
+} from "./newtab-quick-links";
 
 const TOP_APP_COUNT = 3;
 const FOCUS_APP_COUNT = 4;
@@ -492,11 +499,17 @@ interface BrowserShortcut {
   windowId?: number;
 }
 
-function AppIcon({ name }: { name: WorkspaceAppIcon }) {
+function AppIcon({
+  name,
+  className = "workspace-app-card__icon",
+}: {
+  name: WorkspaceAppIcon;
+  className?: string;
+}) {
   return (
     <svg
       aria-hidden="true"
-      className="workspace-app-card__icon"
+      className={className}
       fill="none"
       focusable="false"
       stroke="currentColor"
@@ -769,90 +782,425 @@ function BraveSearchForm() {
   );
 }
 
-const QUICK_LINKS: { label: string; url: string; icon: ReactNode }[] = [
-  {
-    label: "Chat",
-    url: "https://alex.chat",
-    icon: (
-      <>
-        <path d="M5 18.5V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9z" />
-        <path d="M8 8h8M8 12h5" />
-      </>
-    ),
-  },
-  {
-    label: "Email",
-    url: "https://mail.fly.pm",
-    icon: (
-      <>
-        <rect x="4" y="6" width="16" height="12" rx="2" />
-        <path d="m5 8 7 5 7-5" />
-      </>
-    ),
-  },
-  {
-    label: "Calendar",
-    url: "https://cal.fly.pm",
-    icon: (
-      <>
-        <rect x="4" y="5" width="16" height="15" rx="2" />
-        <path d="M8 3v4M16 3v4M4 10h16" />
-      </>
-    ),
-  },
-  {
-    label: "Tasks",
-    url: "https://alex.coffee",
-    icon: (
-      <>
-        <path d="M5 6h2M5 12h2M5 18h2" />
-        <path d="M10 6h9M10 12h9M10 18h9" />
-        <path d="m4.5 5.5 1 1 1.5-1.5" />
-        <path d="m4.5 11.5 1 1 1.5-1.5" />
-        <path d="m4.5 17.5 1 1 1.5-1.5" />
-      </>
-    ),
-  },
-  {
-    label: "Link Shortener",
-    url: "https://fly.pm",
-    icon: (
-      <>
-        <path d="M9.5 14.5 14.5 9.5" />
-        <path d="M10.5 7.5 12 6a4 4 0 0 1 5.66 5.66l-1.5 1.5" />
-        <path d="M13.5 16.5 12 18a4 4 0 0 1-5.66-5.66l1.5-1.5" />
-      </>
-    ),
-  },
-];
+export function EditQuickLinkModal({
+  link,
+  links,
+  onClose,
+  onSave,
+}: {
+  link: QuickLink;
+  links: QuickLink[];
+  onClose: () => void;
+  onSave: (link: QuickLink, updated: QuickLink) => void;
+}) {
+  const isNew = !links.some((candidate) => candidate.id === link.id);
+  const [label, setLabel] = useState(link.label);
+  const [url, setUrl] = useState(link.url);
+  const [icon, setIcon] = useState<WorkspaceAppIcon>(link.icon);
+  const [iconQuery, setIconQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-function QuickLinks() {
+  const selectedIcon = getIconChoice(icon);
+  const iconResults = useMemo(
+    () => searchIconChoices(iconQuery).slice(0, 30),
+    [iconQuery],
+  );
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const cleanLabel = label.trim();
+    if (!cleanLabel) {
+      setError("Add a link name.");
+      return;
+    }
+
+    const normalizedUrl = normalizeLinkUrl(url);
+    if (!normalizedUrl) {
+      setError("Enter a valid http or https URL.");
+      return;
+    }
+
+    const duplicate = links.some((candidate) => {
+      if (candidate.id === link.id) return false;
+      return normalizeLinkUrl(candidate.url) === normalizedUrl;
+    });
+    if (duplicate) {
+      setError("That URL is already in your quick links.");
+      return;
+    }
+
+    onSave(link, {
+      id: link.id || createQuickLinkId(),
+      label: cleanLabel,
+      url: normalizedUrl,
+      icon,
+    });
+  };
+
   return (
-    <nav className="newtab-quick-links" aria-label="Quick links">
-      {QUICK_LINKS.map((link) => (
-        <a
-          key={link.url}
-          className="newtab-quick-link"
-          href={link.url}
-          aria-label={link.label}
-          title={link.label}
-        >
-          <svg
-            aria-hidden="true"
-            className="newtab-quick-link__icon"
-            fill="none"
-            focusable="false"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.8"
-            viewBox="0 0 24 24"
+    <div
+      className="newtab-modal"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="newtab-edit-modal newtab-edit-modal--quick-link"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newtab-quick-link-modal-title"
+        onSubmit={submit}
+      >
+        <div className="newtab-edit-modal__header">
+          <div>
+            <h2 id="newtab-quick-link-modal-title">
+              {isNew ? "Add quick link" : "Edit quick link"}
+            </h2>
+            <p>Icon-only shortcuts under search</p>
+          </div>
+          <button
+            type="button"
+            className="newtab-edit-modal__close"
+            aria-label="Close quick link modal"
+            onClick={onClose}
           >
-            {link.icon}
-          </svg>
-        </a>
-      ))}
-    </nav>
+            <svg
+              aria-hidden="true"
+              fill="none"
+              focusable="false"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="newtab-edit-modal__preview newtab-edit-modal__preview--quick-link">
+          <span className="newtab-quick-link newtab-quick-link--preview" aria-hidden="true">
+            <AppIcon name={icon} className="newtab-quick-link__icon" />
+          </span>
+          <div>
+            <strong>{label.trim() || "Untitled link"}</strong>
+            <span>{normalizeLinkUrl(url) ?? url}</span>
+          </div>
+        </div>
+
+        <div className="newtab-edit-modal__fields">
+          <label className="newtab-edit-modal__field">
+            <span>Link name</span>
+            <input
+              autoFocus
+              value={label}
+              onChange={(event) => {
+                setLabel(event.currentTarget.value);
+                setError(null);
+              }}
+            />
+          </label>
+          <label className="newtab-edit-modal__field">
+            <span>Link URL</span>
+            <input
+              inputMode="url"
+              value={url}
+              onChange={(event) => {
+                setUrl(event.currentTarget.value);
+                setError(null);
+              }}
+            />
+          </label>
+        </div>
+
+        <section className="newtab-edit-modal__section">
+          <div className="newtab-edit-modal__section-header">
+            <h3>Icon</h3>
+            <span>
+              {selectedIcon.source} / {selectedIcon.label}
+            </span>
+          </div>
+          <label className="newtab-icon-search">
+            <SearchIcon className="newtab-icon-search__icon" />
+            <input
+              aria-label="Search Phosphor, Hero, or Lucide icons"
+              placeholder="Search Phosphor, Hero, or Lucide icons"
+              value={iconQuery}
+              onChange={(event) => setIconQuery(event.currentTarget.value)}
+            />
+          </label>
+          <div className="newtab-icon-grid" aria-label="Icon choices">
+            {iconResults.map((choice) => (
+              <button
+                key={choice.icon}
+                type="button"
+                className="newtab-icon-choice"
+                aria-label={`Use ${choice.source} ${choice.label} icon`}
+                aria-pressed={icon === choice.icon}
+                onClick={() => setIcon(choice.icon)}
+              >
+                <span className="newtab-icon-choice__mark" aria-hidden="true">
+                  <AppIcon name={choice.icon} />
+                </span>
+                <span className="newtab-icon-choice__label">
+                  {choice.label}
+                </span>
+                <span className="newtab-icon-choice__source">
+                  {choice.source}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {error ? <p className="newtab-edit-modal__error">{error}</p> : null}
+
+        <div className="newtab-edit-modal__footer">
+          <button
+            type="button"
+            className="newtab-edit-modal__button"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="newtab-edit-modal__button newtab-edit-modal__button--primary"
+          >
+            {isNew ? "Add link" : "Save link"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+export function QuickLinks({
+  links,
+  onChange,
+}: {
+  links: QuickLink[];
+  onChange: (next: QuickLink[]) => void;
+}) {
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [modalLink, setModalLink] = useState<QuickLink | null>(null);
+
+  const closeModal = () => setModalLink(null);
+  const closeManager = () => {
+    setManagerOpen(false);
+    closeModal();
+  };
+
+  const saveLink = (original: QuickLink, updated: QuickLink) => {
+    const exists = links.some((candidate) => candidate.id === original.id);
+    onChange(
+      exists
+        ? links.map((candidate) =>
+            candidate.id === original.id ? updated : candidate,
+          )
+        : [...links, updated],
+    );
+    closeModal();
+  };
+
+  const removeLink = (id: string) => {
+    onChange(links.filter((candidate) => candidate.id !== id));
+  };
+
+  return (
+    <>
+      <div className="newtab-quick-links-row">
+        <nav className="newtab-quick-links" aria-label="Quick links">
+          {links.map((link) => (
+            <div key={link.id} className="newtab-quick-link-item">
+              <a
+                className="newtab-quick-link"
+                href={link.url}
+                aria-label={link.label}
+                title={link.label}
+              >
+                <AppIcon name={link.icon} className="newtab-quick-link__icon" />
+              </a>
+            </div>
+          ))}
+        </nav>
+        <button
+          type="button"
+          className="newtab-quick-links__toggle"
+          aria-expanded={managerOpen}
+          aria-haspopup="dialog"
+          onClick={() => setManagerOpen(true)}
+        >
+          Edit links
+        </button>
+      </div>
+      {managerOpen ? (
+        <QuickLinksManagerModal
+          links={links}
+          onAdd={() =>
+            setModalLink({
+              id: createQuickLinkId(),
+              label: "",
+              url: "",
+              icon: "link",
+            })
+          }
+          onClose={closeManager}
+          onEdit={(link) => setModalLink(link)}
+          onRemove={removeLink}
+          nestedModalOpen={modalLink !== null}
+        />
+      ) : null}
+      {modalLink ? (
+        <EditQuickLinkModal
+          link={modalLink}
+          links={links}
+          onClose={closeModal}
+          onSave={saveLink}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function QuickLinksManagerModal({
+  links,
+  onClose,
+  onAdd,
+  onEdit,
+  onRemove,
+  nestedModalOpen,
+}: {
+  links: QuickLink[];
+  onClose: () => void;
+  onAdd: () => void;
+  onEdit: (link: QuickLink) => void;
+  onRemove: (id: string) => void;
+  nestedModalOpen: boolean;
+}) {
+  useEffect(() => {
+    if (nestedModalOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [nestedModalOpen, onClose]);
+
+  return (
+    <div
+      className="newtab-modal"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="newtab-edit-modal newtab-edit-modal--quick-links"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newtab-quick-links-modal-title"
+      >
+        <div className="newtab-edit-modal__header">
+          <div>
+            <h2 id="newtab-quick-links-modal-title">Edit links</h2>
+            <p>Manage the links under search.</p>
+          </div>
+          <button
+            type="button"
+            className="newtab-edit-modal__close"
+            aria-label="Close edit links modal"
+            onClick={onClose}
+          >
+            <svg
+              aria-hidden="true"
+              fill="none"
+              focusable="false"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <section className="newtab-edit-modal__section">
+          <div className="newtab-edit-modal__section-header">
+            <h3>Quick links</h3>
+            <button
+              type="button"
+              className="newtab-edit-modal__button newtab-edit-modal__button--primary"
+              onClick={onAdd}
+            >
+              Add quick link
+            </button>
+          </div>
+
+          {links.length > 0 ? (
+            <div className="newtab-quick-links-modal__list">
+              {links.map((link) => (
+                <div key={link.id} className="newtab-quick-links-modal__item">
+                  <span className="newtab-quick-links-modal__mark" aria-hidden="true">
+                    <AppIcon name={link.icon} className="newtab-quick-link__icon" />
+                  </span>
+                  <div className="newtab-quick-links-modal__details">
+                    <strong className="newtab-quick-links-modal__label">
+                      {link.label}
+                    </strong>
+                    <span className="newtab-quick-links-modal__url">
+                      {link.url}
+                    </span>
+                  </div>
+                  <div className="newtab-quick-links-modal__actions">
+                    <button
+                      type="button"
+                      className="newtab-quick-links-modal__action"
+                      onClick={() => onEdit(link)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="newtab-quick-links-modal__action newtab-quick-links-modal__action--remove"
+                      onClick={() => onRemove(link.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="newtab-quick-links-modal__empty">
+              No quick links yet.
+            </p>
+          )}
+        </section>
+
+        <div className="newtab-edit-modal__footer">
+          <button
+            type="button"
+            className="newtab-edit-modal__button"
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1418,6 +1766,9 @@ function applyIconOverrides(
 function NewTabWorkspace() {
   const { tabs, history, clearHistory } = useBrowserShortcuts();
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
+  const [quickLinks, setQuickLinks] = useState<QuickLink[]>(() =>
+    DEFAULT_QUICK_LINKS.slice(),
+  );
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [editingApp, setEditingApp] = useState<WorkspaceApp | null>(null);
@@ -1425,38 +1776,42 @@ function NewTabWorkspace() {
   useEffect(() => {
     let live = true;
     try {
-      chrome.storage.local.get(WORKSPACE_APP_STORAGE_KEYS, (result) => {
-        if (!live) return;
-        const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
-        const hidden = new Set(
-          Array.isArray(result?.[HIDDEN_APPS_STORAGE_KEY])
-            ? result[HIDDEN_APPS_STORAGE_KEY].filter(
-                (url): url is string => typeof url === "string",
-              )
-            : [],
-        );
-        const combined = [
-          ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
-          ...customs,
-        ];
-        const withIconOverrides = applyIconOverrides(
-          combined,
-          sanitizeIconOverrides(result?.[APP_ICON_STORAGE_KEY]),
-        );
-        const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
-        if (Array.isArray(storedOrder) && storedOrder.length > 0) {
-          setApps(
-            applyStoredOrder(
-              withIconOverrides,
-              storedOrder.filter(
-                (url): url is string => typeof url === "string",
-              ),
-            ),
+      chrome.storage.local.get(
+        [...WORKSPACE_APP_STORAGE_KEYS, QUICK_LINKS_STORAGE_KEY],
+        (result) => {
+          if (!live) return;
+          const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
+          const hidden = new Set(
+            Array.isArray(result?.[HIDDEN_APPS_STORAGE_KEY])
+              ? result[HIDDEN_APPS_STORAGE_KEY].filter(
+                  (url): url is string => typeof url === "string",
+                )
+              : [],
           );
-        } else {
-          setApps(withIconOverrides);
-        }
-      });
+          const combined = [
+            ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
+            ...customs,
+          ];
+          const withIconOverrides = applyIconOverrides(
+            combined,
+            sanitizeIconOverrides(result?.[APP_ICON_STORAGE_KEY]),
+          );
+          const storedOrder = result?.[APP_ORDER_STORAGE_KEY];
+          if (Array.isArray(storedOrder) && storedOrder.length > 0) {
+            setApps(
+              applyStoredOrder(
+                withIconOverrides,
+                storedOrder.filter(
+                  (url): url is string => typeof url === "string",
+                ),
+              ),
+            );
+          } else {
+            setApps(withIconOverrides);
+          }
+          setQuickLinks(sanitizeQuickLinks(result?.[QUICK_LINKS_STORAGE_KEY]));
+        },
+      );
     } catch {
       /* chrome.storage may be unavailable in some preview contexts */
     }
@@ -1464,6 +1819,15 @@ function NewTabWorkspace() {
       live = false;
     };
   }, []);
+
+  const persistQuickLinks = (next: QuickLink[]) => {
+    setQuickLinks(next);
+    try {
+      chrome.storage.local.set({ [QUICK_LINKS_STORAGE_KEY]: next });
+    } catch {
+      /* ignore */
+    }
+  };
 
   const persistOrder = (next: WorkspaceApp[]) => {
     setApps(next);
@@ -1663,7 +2027,7 @@ function NewTabWorkspace() {
     <div className="newtab-workspace">
       <main className="newtab-workspace__shell">
         <BraveSearchForm />
-        <QuickLinks />
+        <QuickLinks links={quickLinks} onChange={persistQuickLinks} />
 
         <header className="newtab-workspace__header">
           <span className="newtab-workspace__count">{apps.length} links</span>
