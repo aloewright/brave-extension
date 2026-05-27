@@ -30,6 +30,11 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
 - **Recorder:** start browser recording through Brave's native capture prompt,
   pause/resume/stop recordings, keep recent recording metadata, and mirror
   completed clips for MCP access.
+- **Joplin clipper:** save the current page to Joplin Desktop in four modes
+  (simplified article, full HTML, selection, URL+title) via the sidebar or
+  a right-click context menu. Requires Joplin's Web Clipper *service*
+  (Tools → Options → Web Clipper → Enable) but not Joplin's own browser
+  extension. Token configured in Settings → Joplin.
 - **Bookmarks and history:** pull a local bookmark snapshot into the extension,
   browse bookmarks alphabetically, by favorites, or by category, and show recent
   history on the new tab page.
@@ -190,3 +195,17 @@ never has to spawn real CLI binaries:
   `~/.ai-dev-sidebar/session-state.json` path so tests don't leak state.
 
 Run the full suite (unit + integration) with `npm test`.
+
+## Joplin clipper — done-criteria checklist
+
+- [ ] `pnpm build` produces a clean Plasmo bundle with `readability-bundle.*.js` present under `build/chrome-mv3-prod/`.
+- [ ] `pnpm test` (vitest) is green, including the new Joplin test files.
+- [ ] Load `build/chrome-mv3-prod/` unpacked in Brave → sidebar shows the new "Joplin" section.
+- [ ] Settings → Joplin → paste token → Save → **Test connection** reports ✓ JoplinClipperServer.
+- [ ] Right-click any page → "Clip to Joplin → Simplified page" → toast shows "Clipped: \<title\>" within ~2s.
+- [ ] Open Joplin Desktop → the clipped note exists with the page's simplified Markdown body and `source_url` set.
+- [ ] Select text on a page → right-click → "Clip to Joplin → Selection" → Joplin note body equals the selected text.
+- [ ] Sidebar "Recent clips" list shows all four entries; clicking one opens the note in Joplin via the `joplin://` deep link.
+- [ ] Stop Joplin Desktop → click Clip → toast says "Couldn't reach Joplin." Status dot turns red within 30s.
+- [ ] Clear the token in Settings → Clip button still works mechanically but the result toast says "No Joplin API token configured."
+- [ ] Click Clip on a `chrome://` page → toast says "Couldn't extract page content" (or similar).
