@@ -273,10 +273,16 @@ function mount() {
     summary.textContent = `▸ ${icon} ${entry.step.kind}${labelPart} · ${statusPart}${durationPart}`
     const detail = document.createElement("pre")
     detail.className = "detail"
-    detail.textContent = JSON.stringify(entry.step.raw, null, 2)
+    try {
+      detail.textContent = JSON.stringify(entry.step.raw, null, 2)
+    } catch {
+      detail.textContent = String(entry.step.raw)
+    }
     node.append(summary, detail)
     node.addEventListener("click", () => {
-      entries[idx] = { ...entry, expanded: !entry.expanded }
+      const current = entries[idx]
+      if (!current || current.role !== "step") return
+      entries[idx] = { ...current, expanded: !current.expanded }
       render()
     })
     return node
