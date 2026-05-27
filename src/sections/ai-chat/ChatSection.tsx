@@ -27,6 +27,7 @@ export function ChatSection() {
   const [turnInFlight, setTurnInFlight] = useState<string | null>(null)
   const lastUpdateAtRef = useRef<number>(0)
   const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   // Initial load
   useEffect(() => {
@@ -43,7 +44,11 @@ export function ChatSection() {
       if (!msg || typeof msg !== "object") return
       const ev = msg as ChatTurnUpdateEvent | ChatTurnDoneEvent
       if (ev.type === "ai-chat/turn-update") {
-        setMessages((prev) => [...prev, ev.appendedMessage])
+        setMessages((prev) => {
+          // Dedup against the snapshot or any earlier append by id.
+          if (prev.some((m) => m.id === ev.appendedMessage.id)) return prev
+          return [...prev, ev.appendedMessage]
+        })
         setTurnInFlight(ev.turnId)
         lastUpdateAtRef.current = Date.now()
       } else if (ev.type === "ai-chat/turn-done") {
@@ -84,6 +89,11 @@ export function ChatSection() {
       if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current)
     }
   }, [turnInFlight])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [messages.length])
 
   const onSend = async () => {
     const text = draft.trim()
@@ -140,6 +150,7 @@ export function ChatSection() {
         {messages.map((m) => (
           <MessageRow key={m.id} message={m} />
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}

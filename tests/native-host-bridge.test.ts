@@ -121,6 +121,7 @@ describe("toBridgeHistory", () => {
     const out = toBridgeHistory(toolRes("boom"))
     expect(out.role).toBe("tool")
     expect(out.content).toBe('{"ok":true}')
+    expect(out.toolCallId).toBe("c1")
     expect(out.toolError).toBe("boom")
   })
 })

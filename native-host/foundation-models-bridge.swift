@@ -19,6 +19,7 @@ struct BridgeChatHistoryRow: Codable {
     var content: String
     var toolName: String?
     var toolArguments: String?
+    var toolCallId: String?    // tool-result rows: ulid of the assistant tool-call this answers
     var toolError: String?
 }
 

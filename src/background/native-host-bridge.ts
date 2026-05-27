@@ -29,9 +29,10 @@ export interface BridgeRawResponse {
 export interface BridgeHistoryRow {
   role: "user" | "assistant" | "tool"
   content: string
-  toolName?: string
-  toolArguments?: string
-  toolError?: string
+  toolName?: string         // assistant tool-call rows: tool name (e.g. "joplin.ping")
+  toolArguments?: string    // assistant tool-call rows: JSON-encoded args
+  toolCallId?: string       // tool-result rows: ulid of the assistant tool-call this answers
+  toolError?: string        // tool-result rows: error message if the call failed
 }
 
 interface ChatBridgeInput {
@@ -121,7 +122,7 @@ export function toBridgeHistory(m: ChatMessage): BridgeHistoryRow {
     return {
       role: "tool",
       content: m.content,
-      toolName: m.toolCallId,
+      toolCallId: m.toolCallId,
       toolError: m.toolError
     }
   }
@@ -140,17 +141,18 @@ async function sendNativeMessage(
       reject(new Error("aborted"))
       return
     }
-    chrome.runtime.sendNativeMessage(
-      NATIVE_HOST_NAME,
-      payload,
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message))
-          return
-        }
-        resolve(response as BridgeRawResponse)
+    const onAbort = () => {
+      reject(new Error("aborted"))
+    }
+    if (signal) signal.addEventListener("abort", onAbort)
+
+    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, payload, (response) => {
+      if (signal) signal.removeEventListener("abort", onAbort)
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
       }
-    )
-    signal?.addEventListener("abort", () => reject(new Error("aborted")))
+      resolve(response as BridgeRawResponse)
+    })
   })
 }
