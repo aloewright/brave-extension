@@ -148,4 +148,35 @@ describe("executeProgram", () => {
     expect(result.steps[2].skipped).toBe(true)
     expect(result.steps[2].reason).toBe("halted after error")
   })
+
+  it("skips click when ref is not in observation but continues running", async () => {
+    const program: Op[] = [
+      { kind: "browser.click", ref: "ghost" },
+      { kind: "browser.observe" }
+    ]
+    const deps = makeDeps()
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps[0].ok).toBe(false)
+    expect(result.steps[0].skipped).toBe(true)
+    expect(result.steps[0].reason).toBe("ref not in observation")
+    expect(result.steps[1].ok).toBe(true)
+  })
+
+  it("clamps browser.wait to 2000ms and records reason", async () => {
+    const program: Op[] = [{ kind: "browser.wait", ms: 999_999 }]
+    let waitedMs = -1
+    const deps = makeDeps({ wait: async (ms) => { waitedMs = ms } })
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(waitedMs).toBe(2000)
+    expect(result.steps[0].ok).toBe(true)
+    expect(result.steps[0].reason).toBe("clamped to 2000ms")
+  })
+
+  it("browser.wait under cap is unmodified", async () => {
+    const program: Op[] = [{ kind: "browser.wait", ms: 500 }]
+    const deps = makeDeps()
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps[0].ok).toBe(true)
+    expect(result.steps[0].reason).toBeUndefined()
+  })
 })
