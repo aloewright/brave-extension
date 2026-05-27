@@ -1,4 +1,6 @@
 import { ulid } from "./lib/ulid";
+import { MENU_ID_TO_MODE } from "./lib/joplin-types";
+import type { ClipMode } from "./lib/joplin-types";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { getSettings } from "./storage";
@@ -1535,6 +1537,36 @@ chrome.runtime.onInstalled.addListener(() => {
       title: "Save RSS feed...",
       contexts: ["page"],
     });
+    // Joplin clipper — parent + mode submenus
+    chrome.contextMenus.create({
+      id: "joplin-clip",
+      title: "Clip to Joplin",
+      contexts: ["page", "selection"],
+    });
+    chrome.contextMenus.create({
+      id: "joplin-clip-simplified",
+      parentId: "joplin-clip",
+      title: "Simplified page",
+      contexts: ["page"],
+    });
+    chrome.contextMenus.create({
+      id: "joplin-clip-full",
+      parentId: "joplin-clip",
+      title: "Full HTML",
+      contexts: ["page"],
+    });
+    chrome.contextMenus.create({
+      id: "joplin-clip-selection",
+      parentId: "joplin-clip",
+      title: "Selection",
+      contexts: ["selection"],
+    });
+    chrome.contextMenus.create({
+      id: "joplin-clip-url",
+      parentId: "joplin-clip",
+      title: "URL + title",
+      contexts: ["page"],
+    });
   } catch (err) {
     safeRuntimeWarning("failed to create context menus", err);
   }
@@ -1547,6 +1579,13 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
+
+  // Joplin clipper — Task 10 will wire this up to handleClipRequest.
+  const mode: ClipMode | undefined = MENU_ID_TO_MODE[String(info.menuItemId)];
+  if (mode) {
+    console.info("[joplin-clip] context menu click", { mode, tabId: tab.id });
+    return;
+  }
 
   if (info.menuItemId === "scrape-page") {
     const result = await scrapeTab(tab.id);
