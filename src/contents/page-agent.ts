@@ -10,7 +10,20 @@ const TOKEN = Math.random().toString(36).slice(2, 10)
 const HOST_ID = `surface-${TOKEN}`
 const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
 
-type ChatEntry = { role: "user" | "assistant" | "status" | "error"; text: string }
+type StepEntryLite = {
+  kind: string
+  label?: string
+  ok: boolean
+  skipped?: boolean
+  reason?: string
+  durationMs?: number
+  selector?: string
+  raw: unknown
+}
+
+type TextEntry = { role: "user" | "assistant" | "status" | "error"; text: string }
+type StepChatEntry = { role: "step"; step: StepEntryLite; expanded: boolean }
+type ChatEntry = TextEntry | StepChatEntry
 
 let sessionId: string | undefined
 let visible = true
@@ -159,6 +172,29 @@ function mount() {
         font-weight: 700;
         cursor: pointer;
       }
+      .step {
+        font-size: 11px;
+        color: #c8d2dc;
+        background: rgba(255,255,255,.04);
+        border-radius: 6px;
+        padding: 6px 8px;
+        cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .step.bad { color: #ffd4d4; }
+      .step .detail {
+        display: none;
+        margin-top: 6px;
+        padding: 6px;
+        background: #0c1015;
+        border-radius: 5px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .step[data-expanded="true"] .detail { display: block; }
     </style>
     <div class="root">
       <button class="toggle" type="button" title="Page agent" aria-label="Page agent">
@@ -209,12 +245,50 @@ function mount() {
     }
   }
 
+  const ICON: Record<string, string> = {
+    "browser.observe": "👁",
+    "browser.click": "🖱",
+    "browser.type": "⌨",
+    "browser.scroll": "↕",
+    "browser.wait": "⏱",
+    "browser.navigate": "🧭",
+    "memory.search": "🧠",
+    "memory.remember": "🧠",
+    "session.compact": "🗜"
+  }
+
+  const renderStep = (entry: StepChatEntry, idx: number) => {
+    const node = document.createElement("div")
+    node.className = `step ${entry.step.ok ? "" : "bad"}`.trim()
+    node.dataset.expanded = entry.expanded ? "true" : "false"
+    const icon = ICON[entry.step.kind] || "·"
+    const labelPart = entry.step.label ? ` "${entry.step.label}"` : ""
+    const statusPart = entry.step.ok
+      ? "✓"
+      : entry.step.skipped
+        ? `↷ ${entry.step.reason || "skipped"}`
+        : `✗ ${entry.step.reason || "failed"}`
+    const durationPart = typeof entry.step.durationMs === "number" ? ` ${entry.step.durationMs}ms` : ""
+    const summary = document.createElement("div")
+    summary.textContent = `▸ ${icon} ${entry.step.kind}${labelPart} · ${statusPart}${durationPart}`
+    const detail = document.createElement("pre")
+    detail.className = "detail"
+    detail.textContent = JSON.stringify(entry.step.raw, null, 2)
+    node.append(summary, detail)
+    node.addEventListener("click", () => {
+      entries[idx] = { ...entry, expanded: !entry.expanded }
+      render()
+    })
+    return node
+  }
+
   const render = () => {
     root.style.display = visible ? "block" : "none"
     panel.dataset.open = open ? "true" : "false"
     toggle.style.display = visible && !open ? "inline-grid" : "none"
     log.replaceChildren(
-      ...entries.map((entry) => {
+      ...entries.map((entry, idx) => {
+        if (entry.role === "step") return renderStep(entry, idx)
         const node = document.createElement("div")
         node.className = `msg ${entry.role}`
         node.textContent = entry.text
@@ -259,9 +333,13 @@ function mount() {
         sessionId: string
         reply: string
         provider: string
+        steps: StepEntryLite[]
       }>({ type: "PAGE_AGENT_MESSAGE", sessionId, text })
       sessionId = response.sessionId
       removeLastStatus()
+      for (const step of response.steps || []) {
+        entries.push({ role: "step", step, expanded: false })
+      }
       entries.push({ role: "assistant", text: `${response.reply}\n\nProvider: ${response.provider}` })
     } catch (err) {
       removeLastStatus()
