@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus } from "../types"
+import { ping } from "../lib/joplin-client"
 import { BACKEND_INFO } from "../types"
 import {
   DEFAULT_CAPTURE_SUBFOLDER,
@@ -68,6 +69,13 @@ export function SettingsPanel({
 }) {
   const [newServer, setNewServer] = useState({ name: "", command: "", args: "" })
   const [showAddMCP, setShowAddMCP] = useState(false)
+  const [localJoplinToken, setLocalJoplinToken] = useState(settings.joplinToken ?? "")
+  const [joplinTesting, setJoplinTesting] = useState(false)
+  const [joplinTestResult, setJoplinTestResult] = useState<"ok" | "fail" | null>(null)
+
+  useEffect(() => {
+    setLocalJoplinToken(settings.joplinToken ?? "")
+  }, [settings.joplinToken])
 
   useEffect(() => {
     if (nativeHost.connected) {
@@ -351,6 +359,52 @@ export function SettingsPanel({
                 placeholder="brave_search_…"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Joplin clipper */}
+        <div>
+          <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">Joplin</label>
+          <div className="bg-card/20 rounded p-2 space-y-2">
+            <div className="text-[10px] text-fg/50">
+              Paste the Web Clipper token from Joplin Desktop (Tools → Options → Web Clipper →
+              Advanced options → Copy token).
+            </div>
+            <div className="flex gap-1.5">
+              <input
+                type="password"
+                className="flex-1 text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                placeholder="Joplin API token"
+                value={localJoplinToken}
+                onChange={(e) => setLocalJoplinToken(e.target.value)}
+              />
+              <button
+                className="text-[10px] py-1 px-2 rounded bg-primary/20 text-primary hover:bg-primary/30"
+                onClick={() => {
+                  onUpdate({ joplinToken: localJoplinToken })
+                  setJoplinTestResult(null)
+                }}>
+                Save
+              </button>
+              <button
+                className="text-[10px] py-1 px-2 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 inline-flex items-center gap-1"
+                onClick={async () => {
+                  setJoplinTesting(true)
+                  const ok = await ping()
+                  setJoplinTesting(false)
+                  setJoplinTestResult(ok ? "ok" : "fail")
+                }}>
+                {joplinTesting ? <><LoadingGlyph label="Testing Joplin connection" /> Testing…</> : "Test connection"}
+              </button>
+            </div>
+            {joplinTestResult === "ok" && (
+              <div className="text-[10px] text-success/90">✓ JoplinClipperServer reachable.</div>
+            )}
+            {joplinTestResult === "fail" && (
+              <div className="text-[10px] text-error/90">
+                Couldn't reach Joplin on localhost:41184. Enable the Web Clipper service in Joplin.
+              </div>
+            )}
           </div>
         </div>
 
