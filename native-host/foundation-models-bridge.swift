@@ -9,6 +9,17 @@ struct BridgeRequest: Codable {
     var message: String?
     var compactSummary: String?
     var observation: BrowserObservation?
+    var systemPrompt: String?
+    var history: [BridgeChatHistoryRow]?
+    var toolsJson: String?
+}
+
+struct BridgeChatHistoryRow: Codable {
+    var role: String           // "user" | "assistant" | "tool"
+    var content: String
+    var toolName: String?
+    var toolArguments: String?
+    var toolError: String?
 }
 
 struct BrowserObservation: Codable {
@@ -41,6 +52,7 @@ struct BridgeResponse: Codable {
     var status: String?
     var nextStep: String?
     var reply: String?
+    var chatTurn: ChatTurnResponse?
 }
 
 @Generable
@@ -92,6 +104,24 @@ struct CompactResult: Codable {
 
     @Guide(description: "The next step in one concise sentence.")
     var nextStep: String
+}
+
+@Generable
+struct ChatToolCall: Codable {
+    @Guide(description: "Tool name exactly as listed in the available tools.")
+    var name: String
+
+    @Guide(description: "JSON-encoded arguments matching the tool's schema. Use {} when no args.")
+    var arguments: String
+}
+
+@Generable
+struct ChatTurnResponse: Codable {
+    @Guide(description: "If you have everything you need to reply to the user, put your final assistant message here. Otherwise leave nil and use toolCall.")
+    var final: String?
+
+    @Guide(description: "If you need a tool, set this to call exactly one tool. Otherwise leave nil and use `final`.")
+    var toolCall: ChatToolCall?
 }
 
 func trim(_ text: String?, to limit: Int) -> String {
@@ -211,6 +241,36 @@ func makeCompactPrompt(request: BridgeRequest) -> String {
     """
 }
 
+func makeChatPrompt(request: BridgeRequest) -> String {
+    var lines: [String] = []
+    if let sys = request.systemPrompt, !sys.isEmpty {
+        lines.append(sys)
+    }
+    if let tools = request.toolsJson, !tools.isEmpty {
+        lines.append("TOOL SCHEMAS (JSON):\n\(tools)")
+    }
+    if let history = request.history, !history.isEmpty {
+        lines.append("CONVERSATION HISTORY:")
+        for row in history {
+            let label = row.role.uppercased()
+            if row.role == "assistant", let name = row.toolName {
+                let args = row.toolArguments ?? "{}"
+                lines.append("\(label) (tool call: \(name) args=\(args))")
+            } else if row.role == "tool" {
+                if let err = row.toolError {
+                    lines.append("\(label) (error): \(err)")
+                } else {
+                    lines.append("\(label) result: \(row.content)")
+                }
+            } else {
+                lines.append("\(label): \(row.content)")
+            }
+        }
+    }
+    lines.append("Respond with one JSON matching ChatTurnResponse — either `final` (a user-facing assistant message) or `toolCall` (name + JSON arguments). Use `toolCall` only when you need a tool to answer.")
+    return lines.joined(separator: "\n\n")
+}
+
 func planResponse(for request: BridgeRequest, operation: String) async throws -> BridgeResponse {
     let instructions = """
     You are a local, privacy-preserving browser agent planner running on the user's Mac.
@@ -297,6 +357,21 @@ do {
         emit(try await compactResponse(for: request, operation: operation))
     case "nextAction", "plan":
         emit(try await planResponse(for: request, operation: operation))
+    case "chat":
+        let prompt = makeChatPrompt(request: request)
+        let session = LanguageModelSession()
+        let response = try await session.respond(
+            to: prompt,
+            generating: ChatTurnResponse.self
+        )
+        var out = BridgeResponse(
+            ok: true,
+            available: true,
+            operation: "chat",
+            contextSize: SystemLanguageModel.default.contextSize
+        )
+        out.chatTurn = response.content
+        emit(out)
     default:
         emit(bridgeUnavailable(operation: operation, reason: "unsupported operation"))
     }
