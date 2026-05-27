@@ -149,6 +149,14 @@ export async function postMultipart<T>(
   return (await res.json()) as T
 }
 
+/** When the caller's cap is below Joplin's per-page maximum of 100, ask
+ *  Joplin for exactly that many items instead of overshooting. Returns
+ *  the limit query-param value as a string. */
+export function limitForCap(cap: number | undefined): string {
+  if (cap !== undefined && cap > 0 && cap < 100) return String(cap)
+  return "100"
+}
+
 /** Auto-paginate by calling `pagedFn(page)` repeatedly until has_more=false
  *  or the cap is reached. Default cap = 1000; pass 0 for unbounded. */
 export async function paginate<T>(

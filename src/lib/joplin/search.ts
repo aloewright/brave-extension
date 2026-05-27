@@ -1,6 +1,6 @@
 // src/lib/joplin/search.ts
 
-import { get, paginate } from "./client"
+import { get, paginate, limitForCap } from "./client"
 import type {
   JoplinNote,
   PagedResponse,
@@ -15,10 +15,6 @@ const DEFAULT_NOTE_FIELDS: ReadonlyArray<keyof JoplinNote> = [
   "updated_time"
 ]
 
-function limitForCap(cap: number | undefined): string {
-  if (cap !== undefined && cap > 0 && cap < 100) return String(cap)
-  return "100"
-}
 
 export async function searchNotes(
   query: string,

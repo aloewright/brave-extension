@@ -1,6 +1,6 @@
 // src/lib/joplin/notes.ts
 
-import { get, post, put, del, paginate } from "./client"
+import { get, post, put, del, paginate, limitForCap } from "./client"
 import type {
   CreateNoteInput,
   JoplinNote,
@@ -19,12 +19,6 @@ const DEFAULT_NOTE_FIELDS: ReadonlyArray<keyof JoplinNote> = [
   "updated_time"
 ]
 
-function limitForCap(cap: number | undefined): string {
-  // Per Section 4 refinement: if caller's cap is below Joplin's max of
-  // 100 per page, ask Joplin for exactly that many to avoid wasted bytes.
-  if (cap !== undefined && cap > 0 && cap < 100) return String(cap)
-  return "100"
-}
 
 export async function createNote(
   input: CreateNoteInput,

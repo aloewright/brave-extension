@@ -1,6 +1,6 @@
 // src/lib/joplin/folders.ts
 
-import { get, post, put, del, paginate } from "./client"
+import { get, post, put, del, paginate, limitForCap } from "./client"
 import type {
   CreateFolderInput,
   JoplinFolder,
@@ -19,10 +19,6 @@ const DEFAULT_NOTE_FIELDS: ReadonlyArray<keyof JoplinNote> = [
   "updated_time"
 ]
 
-function limitForCap(cap: number | undefined): string {
-  if (cap !== undefined && cap > 0 && cap < 100) return String(cap)
-  return "100"
-}
 
 export async function listFolders(
   token: string,

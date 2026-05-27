@@ -1,8 +1,11 @@
 // src/lib/ai-chat-tools.ts
 //
-// V1 tool registry for the AI chat. Three tools wrapping existing
-// joplin-client + chrome.tabs + the Joplin recents storage. The
-// orchestrator imports buildTools(getToken) and runTool(tools, name, args).
+// V1 tool registry for the AI chat. Ten tools total: nine joplin.*
+// tools (wrapping src/lib/joplin) plus context.activeTab. Destructive
+// operations (delete*, removeTagFromNote) are intentionally library-
+// only — exported from the joplin barrel but not registered as tools.
+// The orchestrator imports buildTools(getToken) and runTool(tools,
+// name, args).
 
 import { Storage } from "@plasmohq/storage"
 import {
