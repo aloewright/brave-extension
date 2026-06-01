@@ -497,6 +497,8 @@ interface BrowserShortcut {
   meta: string;
   tabId?: number;
   windowId?: number;
+  keepActive?: boolean;
+  discarded?: boolean;
 }
 
 function AppIcon({
@@ -660,6 +662,16 @@ function formatHistoryMeta(item: chrome.history.HistoryItem, url: string) {
   return `${host} · ${new Date(item.lastVisitTime).toLocaleString()}`;
 }
 
+function formatTabMeta(url: string, keepActive: boolean, discarded?: boolean) {
+  return [
+    hostnameFor(url),
+    keepActive ? "kept active" : null,
+    discarded ? "sleeping" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function useBrowserShortcuts() {
   const [tabs, setTabs] = useState<BrowserShortcut[]>([]);
   const [history, setHistory] = useState<BrowserShortcut[]>([]);
@@ -690,13 +702,16 @@ function useBrowserShortcuts() {
             .slice(0, MAX_OPEN_TAB_ITEMS)
             .map((tab) => {
               const url = tab.url || "";
+              const keepActive = tab.autoDiscardable === false;
               return {
                 id: `tab-${tab.id ?? url}`,
                 title: titleFor(tab.title, url),
                 url,
-                meta: hostnameFor(url),
+                meta: formatTabMeta(url, keepActive, tab.discarded),
                 tabId: tab.id,
                 windowId: tab.windowId,
+                keepActive,
+                discarded: tab.discarded,
               };
             }),
         );
@@ -742,7 +757,29 @@ function useBrowserShortcuts() {
     };
   }, []);
 
-  return { tabs, history, clearHistory };
+  const toggleKeepActive = async (item: BrowserShortcut) => {
+    if (
+      item.tabId === undefined ||
+      typeof chrome === "undefined" ||
+      !chrome.tabs?.update
+    ) {
+      return;
+    }
+    const keepActive = !item.keepActive;
+    await chrome.tabs.update(item.tabId, { autoDiscardable: !keepActive });
+    setTabs((current) =>
+      current.map((tab) => {
+        if (tab.id !== item.id) return tab;
+        return {
+          ...tab,
+          keepActive,
+          meta: formatTabMeta(tab.url, keepActive, tab.discarded),
+        };
+      }),
+    );
+  };
+
+  return { tabs, history, clearHistory, toggleKeepActive };
 }
 
 function BraveSearchForm() {
@@ -1591,7 +1628,13 @@ export function EditAppModal({
   );
 }
 
-function BrowserShortcutItem({ item }: { item: BrowserShortcut }) {
+function BrowserShortcutItem({
+  item,
+  onToggleKeepActive,
+}: {
+  item: BrowserShortcut;
+  onToggleKeepActive?: (item: BrowserShortcut) => void | Promise<void>;
+}) {
   const tabId = item.tabId;
   const windowId = item.windowId;
   const content = (
@@ -1600,26 +1643,62 @@ function BrowserShortcutItem({ item }: { item: BrowserShortcut }) {
       <span className="newtab-shortcut__meta">{item.meta}</span>
     </>
   );
+  const keepActiveButton =
+    tabId !== undefined && onToggleKeepActive ? (
+      <button
+        type="button"
+        className="newtab-shortcut__action"
+        aria-label={
+          item.keepActive
+            ? `Allow ${item.title} to sleep`
+            : `Keep ${item.title} active`
+        }
+        aria-pressed={item.keepActive}
+        title={item.keepActive ? "Allow sleeping" : "Keep active"}
+        onClick={() => void onToggleKeepActive(item)}
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          focusable="false"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.9"
+          viewBox="0 0 24 24"
+        >
+          <path d="M12 3v18" />
+          <path d={item.keepActive ? "M7 8h10M8 16h8" : "M8 8h8"} />
+        </svg>
+      </button>
+    ) : null;
 
   if (tabId !== undefined) {
     return (
-      <button
-        className="newtab-shortcut"
-        onClick={async () => {
-          try {
-            await chrome.tabs.update(tabId, { active: true });
-            if (windowId !== undefined) {
-              await chrome.windows.update(windowId, { focused: true });
-            }
-          } catch {
-            window.location.assign(item.url);
-          }
-        }}
-        title={item.url}
-        type="button"
+      <div
+        className={`newtab-shortcut-row${
+          item.keepActive ? " newtab-shortcut-row--kept-active" : ""
+        }`}
       >
-        {content}
-      </button>
+        <button
+          className="newtab-shortcut"
+          onClick={async () => {
+            try {
+              await chrome.tabs.update(tabId, { active: true });
+              if (windowId !== undefined) {
+                await chrome.windows.update(windowId, { focused: true });
+              }
+            } catch {
+              window.location.assign(item.url);
+            }
+          }}
+          title={item.url}
+          type="button"
+        >
+          {content}
+        </button>
+        {keepActiveButton}
+      </div>
     );
   }
 
@@ -1638,6 +1717,7 @@ function BrowserPanel({
   onClear,
   clearLabel = "Clear",
   clearConfirm,
+  onToggleKeepActive,
 }: {
   title: string;
   emptyText: string;
@@ -1646,6 +1726,7 @@ function BrowserPanel({
   onClear?: () => void | Promise<void>;
   clearLabel?: string;
   clearConfirm?: string;
+  onToggleKeepActive?: (item: BrowserShortcut) => void | Promise<void>;
 }) {
   return (
     <section className={`newtab-panel ${scroll ? "newtab-panel--scroll" : ""}`}>
@@ -1670,7 +1751,11 @@ function BrowserPanel({
       {items.length > 0 ? (
         <div className="newtab-shortcut-list">
           {items.map((item) => (
-            <BrowserShortcutItem key={item.id} item={item} />
+            <BrowserShortcutItem
+              key={item.id}
+              item={item}
+              onToggleKeepActive={onToggleKeepActive}
+            />
           ))}
         </div>
       ) : (
@@ -1764,7 +1849,7 @@ function applyIconOverrides(
 }
 
 function NewTabWorkspace() {
-  const { tabs, history, clearHistory } = useBrowserShortcuts();
+  const { tabs, history, clearHistory, toggleKeepActive } = useBrowserShortcuts();
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
   const [quickLinks, setQuickLinks] = useState<QuickLink[]>(() =>
     DEFAULT_QUICK_LINKS.slice(),
@@ -2107,6 +2192,7 @@ function NewTabWorkspace() {
             title="Open Tabs"
             emptyText="No open web tabs."
             items={tabs}
+            onToggleKeepActive={toggleKeepActive}
           />
           <BrowserPanel
             title="History"
