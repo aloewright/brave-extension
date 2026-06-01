@@ -174,6 +174,21 @@ describe("passwords and Nodewarden", () => {
     expect(source).toContain("try {")
     expect(source).toContain("catch {")
   })
+
+  it("fills two-factor text inputs from recent mail.fly.pm verification emails", () => {
+    const content = readFileSync(
+      join(process.cwd(), "src/contents/mail-2fa-autofill.ts"),
+      "utf8"
+    )
+    const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
+    expect(content).toContain('type: "MAIL_2FA_CODE_REQUEST"')
+    expect(content).toContain('input.autocomplete?.toLowerCase() === "one-time-code"')
+    expect(content).toContain("fillTarget(target, code)")
+    expect(content).not.toContain(".click()")
+    expect(background).toContain("getMailFlyPmCookieHeader")
+    expect(background).toContain("buildMailTwoFactorListUrl")
+    expect(background).toContain("findBestMailTwoFactorCode")
+  })
 })
 
 describe("AI media rename safety", () => {

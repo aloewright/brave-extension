@@ -16,6 +16,14 @@ import {
   PASSWORD_SELECTED_LOGIN_KEY,
   type PasswordLogin,
 } from "./lib/passwords";
+import {
+  buildMailTwoFactorListUrl,
+  buildMailTwoFactorThreadUrl,
+  findBestMailTwoFactorCode,
+  MAIL_TWO_FACTOR_API_BASE,
+  type MailThreadDetail,
+  type MailThreadSummary,
+} from "./lib/mail-2fa";
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools";
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools";
 import { runChatTurn, stopTurn } from "./background/chat-orchestrator";
@@ -122,6 +130,16 @@ async function getCalFlyPmCookieHeader(): Promise<string | null> {
     return null;
   }
 }
+async function getMailFlyPmCookieHeader(): Promise<string | null> {
+  try {
+    const cookies = await chrome.cookies.getAll({ url: `${MAIL_TWO_FACTOR_API_BASE}/` });
+    if (cookies.length === 0) return null;
+    return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+  } catch (err) {
+    safeRuntimeWarning("failed to read mail.fly.pm session cookies", err);
+    return null;
+  }
+}
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 // Exponential-backoff state for native-host reconnects. Each disconnect that
@@ -136,6 +154,18 @@ const RECONNECT_MAX_FAILURES = 6;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
 const pendingNativeRequests = new Map<string, (msg: any) => void>();
 const rssFeedContextMenuCache = new Map<number, FeedInfo[]>();
+type MailTwoFactorResponse = {
+  code: string | null;
+  receivedAt?: number;
+  source?: "mail.fly.pm";
+  threadId?: string;
+  error?: string;
+};
+const mailTwoFactorCache = new Map<
+  string,
+  { at: number; response: MailTwoFactorResponse }
+>();
+const MAIL_TWO_FACTOR_CACHE_TTL_MS = 7_500;
 
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(
@@ -928,6 +958,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "MAIL_2FA_CODE_REQUEST") {
+    const pageUrl =
+      typeof message.url === "string" ? message.url : sender.tab?.url || "";
+    getMailTwoFactorCode(pageUrl).then((result) => sendResponse(result));
+    return true;
+  }
+
   if (message.type === "TECH_DETECTED") {
     cachedTech.set(message.hostname, { techs: message.techs, ts: Date.now() });
     sendResponse({ ok: true });
@@ -1375,6 +1412,108 @@ async function getAutofillMatches(pageUrl: string): Promise<PasswordLogin[]> {
 
 function withoutPassword(login: PasswordLogin): PasswordLogin {
   return { ...login, password: "" };
+}
+
+async function getMailTwoFactorCode(pageUrl: string): Promise<MailTwoFactorResponse> {
+  if (!/^https?:\/\//i.test(pageUrl)) return { code: null };
+  if (/^https:\/\/mail\.fly\.pm\//i.test(pageUrl)) return { code: null };
+
+  const cacheKey = mailTwoFactorCacheKey(pageUrl);
+  const cached = mailTwoFactorCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.at < MAIL_TWO_FACTOR_CACHE_TTL_MS) {
+    return cached.response;
+  }
+
+  const response = await fetchLatestMailTwoFactorCode(pageUrl, now).catch((err) => {
+    safeRuntimeWarning("failed to fetch mail.fly.pm two-factor code", err);
+    return { code: null, error: err instanceof Error ? err.message : "mail fetch failed" };
+  });
+  mailTwoFactorCache.set(cacheKey, { at: now, response });
+  return response;
+}
+
+function mailTwoFactorCacheKey(pageUrl: string) {
+  try {
+    return new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return pageUrl;
+  }
+}
+
+async function fetchLatestMailTwoFactorCode(
+  pageUrl: string,
+  now: number,
+): Promise<MailTwoFactorResponse> {
+  const cookieHeader = await getMailFlyPmCookieHeader();
+  if (!cookieHeader) return { code: null, error: "not signed in to mail.fly.pm" };
+
+  const headers = {
+    accept: "application/json",
+    cookie: cookieHeader,
+  };
+  const list = await fetchMailJson<{ items?: MailThreadSummary[] }>(
+    buildMailTwoFactorListUrl(),
+    headers,
+  );
+  const summaries = Array.isArray(list.items) ? list.items.filter(isMailThreadSummary) : [];
+  const recentSummaries = summaries
+    .filter((summary) => {
+      const timestamp = timestampMs(summary.lastMessageAt);
+      return timestamp === 0 || now - timestamp <= MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS;
+    })
+    .slice(0, 8);
+
+  if (!recentSummaries.length) return { code: null };
+
+  const details = await Promise.all(
+    recentSummaries.map((summary) =>
+      fetchMailJson<MailThreadDetail>(buildMailTwoFactorThreadUrl(summary.id), headers)
+        .catch(() => null),
+    ),
+  );
+  const best = findBestMailTwoFactorCode({
+    details: details.filter((detail): detail is MailThreadDetail => Boolean(detail)),
+    summaries: recentSummaries,
+    pageUrl,
+    now,
+  });
+  if (!best) return { code: null };
+
+  return {
+    code: best.code,
+    receivedAt: best.receivedAt,
+    source: "mail.fly.pm",
+    threadId: best.threadId,
+  };
+}
+
+const MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS = 30 * 60 * 1000;
+
+async function fetchMailJson<T>(
+  url: string,
+  headers: { accept: string; cookie: string },
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    headers,
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error(`mail.fly.pm returned ${response.status}`);
+  return response.json() as Promise<T>;
+}
+
+function isMailThreadSummary(value: unknown): value is MailThreadSummary {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as MailThreadSummary;
+  return typeof summary.id === "string" && summary.id.length > 0;
+}
+
+function timestampMs(value: string | number | null | undefined) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 async function rebuildRssFeedContextMenu(tabId: number) {
