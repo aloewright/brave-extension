@@ -5,7 +5,7 @@
  * routes; the SPA copy can be regenerated.
  */
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf"
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
 
 export interface SearchHit {
   type: ResourceType
@@ -34,6 +34,20 @@ export interface LinkUpsertPayload {
   tags?: string[]
   favicon?: string | null
   source?: string
+}
+
+export interface HighlightUpsertPayload {
+  id?: string
+  text: string
+  note?: string | null
+  tags?: string[]
+  sourceUrl?: string | null
+  sourceTitle?: string | null
+  sourceFavicon?: string | null
+  contextBefore?: string | null
+  contextAfter?: string | null
+  source?: string
+  createdAt?: number
 }
 
 export interface BookmarkPayload {
@@ -102,6 +116,9 @@ export interface SidebarApiClient {
   links: {
     upsert: (payload: LinkUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
   }
+  highlights: {
+    upsert: (payload: HighlightUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
+  }
   bookmarks: {
     snapshot: (
       bookmarks: BookmarkPayload[],
@@ -166,6 +183,10 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
     links: {
       upsert: (payload) =>
         jsonRequest("/api/links", { method: "POST", body: JSON.stringify(payload) })
+    },
+    highlights: {
+      upsert: (payload) =>
+        jsonRequest("/api/highlights", { method: "POST", body: JSON.stringify(payload) })
     },
     bookmarks: {
       snapshot: (bookmarks, pulledAt = new Date().toISOString()) =>

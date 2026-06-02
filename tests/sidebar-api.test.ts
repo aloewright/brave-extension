@@ -63,6 +63,25 @@ describe("sidebar-api client", () => {
     expect(body.pulledAt.length).toBeGreaterThan(0)
   })
 
+  it("highlights.upsert posts selected text metadata", async () => {
+    const { calls } = mockFetch([{ status: 201, body: { id: "h1", created: true, chunkCount: 1 } }])
+    const client = createSidebarApiClient("tok", BASE)
+    const out = await client.highlights.upsert({
+      id: "h1",
+      text: "selected text",
+      sourceUrl: "https://example.com/post",
+      sourceTitle: "Example"
+    })
+    expect(out).toMatchObject({ id: "h1", created: true })
+    expect(calls[0]!.url).toBe(`${BASE}/api/highlights`)
+    expect(calls[0]!.init.method).toBe("POST")
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      text: "selected text",
+      sourceUrl: "https://example.com/post",
+      sourceTitle: "Example"
+    })
+  })
+
   it("recordings.upload sends multipart/form-data with metadata + file", async () => {
     const { calls } = mockFetch([{ body: { id: "r1", status: "pending", r2_key: "recordings/r1.mp4", workflow_id: null } }])
     const client = createSidebarApiClient("tok", BASE)

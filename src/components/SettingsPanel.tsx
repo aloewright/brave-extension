@@ -517,7 +517,7 @@ export function SettingsPanel({
                   value={settings.sidebarApiUrl}
                   onChange={(e) => onUpdate({ sidebarApiUrl: e.target.value })}
                   className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
-                  placeholder="https://sidebar.pdx.software"
+                  placeholder="https://txt.fly.pm"
                 />
                 <input
                   type="password"

@@ -91,7 +91,7 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm flex flex-col gap-4">
-        <h1 className="text-xl font-medium">Sidebar</h1>
+        <h1 className="text-xl font-semibold">txt.fly.pm</h1>
         <p className="text-sm text-muted">
           Enter your <code className="font-mono text-fg">X-Sidebar-Token</code> to continue.
         </p>

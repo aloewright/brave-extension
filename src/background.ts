@@ -4,6 +4,7 @@ import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types"
 import { handleClipRequest } from "./lib/joplin-clip-handler";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
+import { syncHighlight, syncStoredHighlights } from "./background/highlight-sync";
 import { getSettings } from "./storage";
 import { createSidebarApiClient } from "./lib/sidebar-api";
 import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
@@ -1673,12 +1674,18 @@ clearActionPopup();
 chrome.runtime.onStartup.addListener(() => {
   clearActionPopup();
   void syncNormalBrowserWindows();
+  void syncStoredHighlights().catch((err) => {
+    safeRuntimeWarning("failed to sync stored highlights", err);
+  });
 });
 
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
   clearActionPopup();
   void syncNormalBrowserWindows();
+  void syncStoredHighlights().catch((err) => {
+    safeRuntimeWarning("failed to sync stored highlights", err);
+  });
   void ensureThirdPartyCookieRules().catch((err) => {
     safeRuntimeWarning("failed to refresh third-party cookie rules", err);
   });
@@ -1758,6 +1765,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "save-highlight" && info.selectionText) {
     try {
       const selection = info.selectionText;
+      const highlight = {
+        id: crypto.randomUUID(),
+        text: selection,
+        sourceUrl: tab.url,
+        sourceTitle: tab.title,
+        createdAt: Date.now(),
+      };
       // ALO-470: drop the highlight into Session snippets, copy it to the
       // user's clipboard, and keep the legacy Review panel highlight write
       // for back-compat (the Inspector → Review panel still consumes
@@ -1768,14 +1782,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           sourceUrl: tab.url || "",
           sourceTitle: tab.title ?? null,
         }),
-        addHighlight({
-          id: crypto.randomUUID(),
-          text: selection,
-          sourceUrl: tab.url,
-          sourceTitle: tab.title,
-          createdAt: Date.now(),
-        }),
+        addHighlight(highlight),
       ]);
+      void syncHighlight(highlight).catch((err) => {
+        safeRuntimeWarning("failed to sync highlight", err);
+      });
       // Best-effort clipboard write — privileged URLs will refuse the
       // script injection and the snippet still lands in Session.
       void copyToClipboardViaTab(tab.id, selection);

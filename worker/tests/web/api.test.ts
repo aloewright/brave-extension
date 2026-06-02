@@ -12,7 +12,8 @@ function mockFetchOnce(responses: MockResponseInit[]): { calls: { url: string; i
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     calls.push({ url: String(input), init })
     const r = responses[i++] ?? { status: 200, body: {} }
-    return new Response(JSON.stringify(r.body ?? null), {
+    const body = r.status === 204 ? null : JSON.stringify(r.body ?? null)
+    return new Response(body, {
       status: r.status ?? 200,
       headers: { "content-type": "application/json" }
     })
@@ -74,6 +75,23 @@ describe("createApiClient", () => {
     const client = createApiClient("tok")
     expect(client.recordings.blobUrl("abc")).toBe("/api/recordings/abc/blob")
     expect(client.pdfs.blobUrl("xyz")).toBe("/api/pdfs/xyz/blob")
+  })
+
+  it("supports highlight list, update, and delete requests", async () => {
+    const { calls } = mockFetchOnce([
+      { status: 200, body: { highlights: [] } },
+      { status: 200, body: { id: "h1", text: "updated" } },
+      { status: 204, body: null }
+    ])
+    const client = createApiClient("tok")
+    await client.highlights.list({ limit: 10 })
+    await client.highlights.update("h1", { text: "updated", tags: ["note"] })
+    await client.highlights.delete("h1")
+
+    expect(calls[0]!.url).toBe("/api/highlights?limit=10")
+    expect(calls[1]!.url).toBe("/api/highlights/h1")
+    expect(calls[1]!.init.method).toBe("PATCH")
+    expect(calls[2]!.init.method).toBe("DELETE")
   })
 
   it("converts ApiError back to a plain Error subclass instance", () => {

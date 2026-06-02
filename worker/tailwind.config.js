@@ -4,10 +4,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#0b0d11",
-        fg: "#e8eaed",
-        muted: "#9aa0a6",
-        accent: "#d97706"
+        bg: "#4a4a4e",
+        surface: "#5c5d60",
+        fg: "#fbfaf4",
+        muted: "#d8d5cc",
+        accent: "#fbfaf4"
       }
     }
   },

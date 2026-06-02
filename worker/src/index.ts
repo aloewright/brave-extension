@@ -8,6 +8,7 @@ import agent from "./routes/agent"
 import categorize from "./routes/categorize"
 import recordings from "./routes/recordings"
 import pdfs from "./routes/pdfs"
+import highlights from "./routes/highlights"
 import search from "./routes/search"
 import type { Env } from "./env"
 
@@ -30,6 +31,7 @@ app.route("/api/captures", captures)
 app.route("/api/agent", agent)
 app.route("/api/recordings", recordings)
 app.route("/api/pdfs", pdfs)
+app.route("/api/highlights", highlights)
 app.route("/api/search", search)
 
 app.notFound((c) => {
