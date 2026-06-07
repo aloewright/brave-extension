@@ -6,6 +6,8 @@
 interface AccessIdentity {
   sub: string
   email?: string
+  /** Service-token name (Access sets `common_name` for non-identity tokens). */
+  commonName?: string
 }
 
 interface Jwk {
@@ -63,6 +65,7 @@ export async function verifyAccessJwt(
     iss?: string
     sub?: string
     email?: string
+    common_name?: string
   }
   try {
     header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0]!)))
@@ -96,5 +99,10 @@ export async function verifyAccessJwt(
     return null
   }
 
-  return { sub: payload.sub ?? payload.email ?? "unknown", email: payload.email }
+  // Prefer a stable, non-empty identity. SSO users carry email/sub; service
+  // tokens carry common_name with empty sub — fall back to it so the caller
+  // gets a real id (e.g. "agent-app extension") instead of "".
+  const sub =
+    [payload.sub, payload.email, payload.common_name].find((v) => v && v.trim()) ?? "unknown"
+  return { sub, email: payload.email, commonName: payload.common_name }
 }
