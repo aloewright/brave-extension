@@ -61,17 +61,19 @@ struct BridgeResponse: Codable {
 struct AgentOp: Codable {
     @Guide(description: "Operation kind.", .anyOf([
         "browser.observe","browser.click","browser.type","browser.scroll",
-        "browser.wait","browser.navigate","memory.search","memory.remember","session.compact"
+        "browser.wait","browser.waitFor","browser.navigate","browser.new_tab",
+        "browser.switch_tab","browser.close_tab","memory.search","memory.remember",
+        "session.compact"
     ]))
     var op: String
 
     @Guide(description: "Observation ref like el3 when the op targets an element.")
     var ref: String?
 
-    @Guide(description: "Text, URL, or query value for the op.")
+    @Guide(description: "Text, URL, or query value for the op (use for waitFor selector).")
     var value: String?
 
-    @Guide(description: "Wait duration in milliseconds (cap 2000).")
+    @Guide(description: "Wait duration in milliseconds (cap 2000 for wait, up to 10000 for waitFor).")
     var ms: Int?
 
     @Guide(description: "Scroll target y-coordinate in CSS pixels.")
@@ -79,6 +81,9 @@ struct AgentOp: Codable {
 
     @Guide(description: "Navigate target URL (http or https).")
     var url: String?
+    
+    @Guide(description: "Target Tab ID for tab operations.")
+    var targetTabId: Int?
 }
 
 @Generable
@@ -116,8 +121,8 @@ struct AgentPlan: Codable {
     @Guide(description: "At most three constraints, risks, or missing facts.", .maximumCount(3))
     var risks: [String]
 
-    @Guide(description: "The single next browser action.")
-    var action: AgentAction
+    @Guide(description: "The single next browser action (legacy, use program instead).")
+    var action: AgentAction?
 
     @Guide(description: "Sequence of up to 8 ops; halt on first failure. Prefer this over action.", .maximumCount(8))
     var program: [AgentOp]?
@@ -333,11 +338,19 @@ func planResponse(for request: BridgeRequest, operation: String) async throws ->
                     "Program: \(program.count) ops"
                 ].joined(separator: "\n")
             }
+            if let action = plan.action {
+                return [
+                    "Objective: \(plan.objective)",
+                    "Status: \(plan.status)",
+                    "Next step: \(plan.nextStep)",
+                    "Action: \(action.kind) - \(action.reason)"
+                ].joined(separator: "\n")
+            }
             return [
                 "Objective: \(plan.objective)",
                 "Status: \(plan.status)",
                 "Next step: \(plan.nextStep)",
-                "Action: \(plan.action.kind) - \(plan.action.reason)"
+                "Plan generated."
             ].joined(separator: "\n")
         }()
     )
