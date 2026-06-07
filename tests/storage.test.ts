@@ -83,6 +83,16 @@ describe("getSettings / setSettings", () => {
     expect(s.sidebarApiUrl).toBe("https://txt.fly.pm")
   })
 
+  it("migrates the dead lazee.workers.dev sidebar API URL to txt.fly.pm", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        sidebarApiUrl: "https://sidebar-api.lazee.workers.dev"
+      }
+    })
+    const s = await getSettings()
+    expect(s.sidebarApiUrl).toBe("https://txt.fly.pm")
+  })
+
   it("preserves custom sidebar API URLs during txt.fly.pm migration", async () => {
     await chrome.storage.local.set({
       [SETTINGS_KEY]: {

@@ -24,7 +24,10 @@ const KEYS = {
   // into the matching sidebar* slot so users don't have to re-enter the URL
   // and token after upgrading.
   cloudosToSidebarMigration: "migration:cloudos-to-sidebar",
-  sidebarApiUrlTxtMigration: "migration:sidebar-api-url-txt-fly"
+  // Bumped to -v2 so the broadened legacy-host list (now also rewrites the
+  // dead sidebar-api.lazee.workers.dev subdomain) re-runs for users whose v1
+  // marker was already set.
+  sidebarApiUrlTxtMigration: "migration:sidebar-api-url-txt-fly-v2"
 }
 
 const GATE_KEYS = {
@@ -36,7 +39,13 @@ const GATE_KEYS = {
 const SCAN_CACHE_LIMIT = 50
 
 const BACKENDS: CLIBackend[] = ["claude", "gemini", "copilot", "codex"]
-const LEGACY_SIDEBAR_API_URL = "https://sidebar.pdx.software"
+// Stale sidebar-api hosts that no longer serve the Worker (they 404 on every
+// /api/* route, surfacing in the UI as e.g. "Failed to load captures (404)").
+// Any of these gets rewritten to the current custom domain on load.
+const LEGACY_SIDEBAR_API_URLS = [
+  "https://sidebar.pdx.software",
+  "https://sidebar-api.lazee.workers.dev"
+]
 const TXT_SIDEBAR_API_URL = "https://txt.fly.pm"
 
 function messageKey(backend: CLIBackend): string {
@@ -131,7 +140,8 @@ export function migrateCloudosToSidebar(settings: Settings): Settings {
 }
 
 export function migrateLegacySidebarApiUrl(settings: Settings): Settings {
-  if (settings.sidebarApiUrl !== LEGACY_SIDEBAR_API_URL) return settings
+  const normalized = settings.sidebarApiUrl.replace(/\/+$/, "")
+  if (!LEGACY_SIDEBAR_API_URLS.includes(normalized)) return settings
   return { ...settings, sidebarApiUrl: TXT_SIDEBAR_API_URL }
 }
 
