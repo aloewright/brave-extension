@@ -24,6 +24,7 @@ const SECTION_IDS: SectionId[] = [
   "recorder",
   "eyedropper",
   "joplin",
+  "agentChat",
   "github",
   "settings",
 ];
@@ -43,6 +44,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   recorder: "Recorder",
   eyedropper: "Eyedropper",
   joplin: "Joplin",
+  agentChat: "Agent",
   github: "GitHub",
   settings: "Settings",
 };

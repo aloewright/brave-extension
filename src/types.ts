@@ -129,6 +129,10 @@ export interface Settings {
   dopplerScope: string
   // Phase 1 — Joplin clipper feature
   joplinToken: string
+  // Agent App Worker (Cloudflare Access service token auth)
+  agentApiUrl: string
+  agentAccessClientId: string
+  agentAccessClientSecret: string
   github: GitHubFeatureSettings
 }
 
@@ -198,6 +202,9 @@ export const DEFAULT_SETTINGS: Settings = {
   dopplerConfig: "",
   dopplerScope: "/",
   joplinToken: "",
+  agentApiUrl: "",
+  agentAccessClientId: "",
+  agentAccessClientSecret: "",
   github: { enabled: true, features: {} }
 }
 

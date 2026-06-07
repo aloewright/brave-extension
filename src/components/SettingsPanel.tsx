@@ -597,6 +597,36 @@ export function SettingsPanel({
           </div>
         </div>
 
+        {/* Agent API (Cloudflare Access) — streaming agent chat tab */}
+        <div className="space-y-2">
+          <label className="text-[11px] text-fg/50 uppercase tracking-wider block">
+            Agent API (Cloudflare Access)
+          </label>
+          <div className="bg-card/20 rounded p-2 space-y-2">
+            <input
+              type="text"
+              value={settings.agentApiUrl}
+              onChange={(e) => onUpdate({ agentApiUrl: e.target.value })}
+              className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+              placeholder="https://agent.fly.pm"
+            />
+            <input
+              type="password"
+              value={settings.agentAccessClientId}
+              onChange={(e) => onUpdate({ agentAccessClientId: e.target.value })}
+              className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+              placeholder="CF-Access-Client-Id"
+            />
+            <input
+              type="password"
+              value={settings.agentAccessClientSecret}
+              onChange={(e) => onUpdate({ agentAccessClientSecret: e.target.value })}
+              className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+              placeholder="CF-Access-Client-Secret"
+            />
+          </div>
+        </div>
+
         {/* Captures (ALO-467) — destination for screenshot/full-page PDF saves */}
         <CapturesSection settings={settings} onUpdate={onUpdate} />
 
