@@ -202,7 +202,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dopplerConfig: "",
   dopplerScope: "/",
   joplinToken: "",
-  agentApiUrl: "",
+  agentApiUrl: "https://agent.fly.pm",
   agentAccessClientId: "",
   agentAccessClientSecret: "",
   github: { enabled: true, features: {} }
