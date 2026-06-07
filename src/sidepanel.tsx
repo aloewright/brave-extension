@@ -18,6 +18,7 @@ import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
 import { JoplinSection } from "./sections/joplin/JoplinSection";
+import { AgentChatSection } from "./sections/agent-chat/AgentChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
 const ACTIVE_KEY = "ui.activeSection";
@@ -92,6 +93,7 @@ function SidePanel() {
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
           {active === "joplin" && <JoplinSection />}
+          {active === "agentChat" && <AgentChatSection />}
           {active === "github" && <GitHubSection />}
           {active === "settings" && <SettingsSection />}
         </main>
