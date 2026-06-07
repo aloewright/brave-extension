@@ -76,6 +76,13 @@ export interface NativeHostResponse {
 
 import type { CaptureSaveLocation } from "./lib/capture-destination"
 
+export interface GitHubFeatureSettings {
+  /** Master switch. When false, the content script runs nothing. */
+  enabled: boolean
+  /** Per-feature on/off overrides keyed by feature id. Absent ⇒ registry default. */
+  features: Record<string, boolean>
+}
+
 export interface Settings {
   backend: CLIBackend
   workingDirectory: string
@@ -122,6 +129,7 @@ export interface Settings {
   dopplerScope: string
   // Phase 1 — Joplin clipper feature
   joplinToken: string
+  github: GitHubFeatureSettings
 }
 
 /** Status reported by the native host's mcp.status RPC. */
@@ -189,7 +197,8 @@ export const DEFAULT_SETTINGS: Settings = {
   dopplerProject: "",
   dopplerConfig: "",
   dopplerScope: "/",
-  joplinToken: ""
+  joplinToken: "",
+  github: { enabled: true, features: {} }
 }
 
 // ─── Design inspector types (folded in from Alexometer) ───────────────
