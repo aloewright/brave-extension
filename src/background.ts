@@ -166,6 +166,36 @@ const mailTwoFactorCache = new Map<
   { at: number; response: MailTwoFactorResponse }
 >();
 const MAIL_TWO_FACTOR_CACHE_TTL_MS = 7_500;
+// Opt-in boundary diagnostics for the mail.fly.pm 2FA pipeline. Enable from the
+// service-worker console with:
+//   chrome.storage.local.set({ "mail2fa.debug": true })
+// Logs whether the session cookie was found, the real top-level shape of the
+// /api/v1/threads response, the message field names, and whether a code was
+// selected — so a silent field-name/auth mismatch is visible at its boundary.
+let mail2faDebugEnabled = false;
+try {
+  chrome.storage?.local
+    ?.get?.("mail2fa.debug")
+    .then((r) => {
+      mail2faDebugEnabled = Boolean(r?.["mail2fa.debug"]);
+    })
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener?.((changes, area) => {
+    if (area === "local" && changes["mail2fa.debug"]) {
+      mail2faDebugEnabled = Boolean(changes["mail2fa.debug"].newValue);
+    }
+  });
+} catch {
+  /* storage unavailable in some contexts */
+}
+function mail2faDebug(label: string, data: Record<string, unknown>): void {
+  if (!mail2faDebugEnabled) return;
+  try {
+    console.debug(`[mail-2fa] ${label}`, data);
+  } catch {
+    /* console may be unavailable */
+  }
+}
 
 function safeRuntimeWarning(message: string, err?: unknown) {
   console.warn(
@@ -1446,6 +1476,7 @@ async function fetchLatestMailTwoFactorCode(
   now: number,
 ): Promise<MailTwoFactorResponse> {
   const cookieHeader = await getMailFlyPmCookieHeader();
+  mail2faDebug("cookieHeader", { present: Boolean(cookieHeader) });
   if (!cookieHeader) return { code: null, error: "not signed in to mail.fly.pm" };
 
   const headers = {
@@ -1456,6 +1487,13 @@ async function fetchLatestMailTwoFactorCode(
     buildMailTwoFactorListUrl(),
     headers,
   );
+  // Diagnostic: surface the real top-level shape so a field-name mismatch
+  // (e.g. `threads` instead of `items`) is visible rather than silently empty.
+  mail2faDebug("list response", {
+    topLevelKeys: list && typeof list === "object" ? Object.keys(list) : typeof list,
+    itemsIsArray: Array.isArray(list.items),
+    itemCount: Array.isArray(list.items) ? list.items.length : 0,
+  });
   const summaries = Array.isArray(list.items) ? list.items.filter(isMailThreadSummary) : [];
   const recentSummaries = summaries
     .filter((summary) => {
@@ -1472,12 +1510,24 @@ async function fetchLatestMailTwoFactorCode(
         .catch(() => null),
     ),
   );
+  const usableDetails = details.filter((detail): detail is MailThreadDetail => Boolean(detail));
+  // Diagnostic: a non-zero detail count with a null `best` points at message
+  // body field-name mismatch (parser expects messages[].textBody/subject).
+  mail2faDebug("thread details", {
+    fetched: details.length,
+    usable: usableDetails.length,
+    sampleMessageKeys:
+      usableDetails[0]?.messages?.[0] && typeof usableDetails[0].messages[0] === "object"
+        ? Object.keys(usableDetails[0].messages[0] as object)
+        : null,
+  });
   const best = findBestMailTwoFactorCode({
-    details: details.filter((detail): detail is MailThreadDetail => Boolean(detail)),
+    details: usableDetails,
     summaries: recentSummaries,
     pageUrl,
     now,
   });
+  mail2faDebug("best candidate", { found: Boolean(best), code: best ? "<redacted>" : null });
   if (!best) return { code: null };
 
   return {

@@ -33,6 +33,36 @@ let pollUntil = 0
 let lastFilledSignature = ""
 let twoFactorObserver: MutationObserver | null = null
 
+// Opt-in diagnostics. Enable with:
+//   chrome.storage.local.set({ "mail2fa.debug": true })
+// Makes the otherwise-silent boundaries visible: whether an OTP field was
+// detected on the page, and the background response (incl. its error string,
+// which the normal flow discards).
+let mail2faDebugEnabled = false
+try {
+  chrome.storage?.local
+    ?.get?.("mail2fa.debug")
+    .then((r) => {
+      mail2faDebugEnabled = Boolean((r as Record<string, unknown>)?.["mail2fa.debug"])
+    })
+    .catch(() => {})
+  chrome.storage?.onChanged?.addListener?.((changes, area) => {
+    if (area === "local" && changes["mail2fa.debug"]) {
+      mail2faDebugEnabled = Boolean(changes["mail2fa.debug"].newValue)
+    }
+  })
+} catch {
+  /* storage unavailable */
+}
+function mail2faDebug(label: string, data: Record<string, unknown>) {
+  if (!mail2faDebugEnabled) return
+  try {
+    console.debug(`[mail-2fa] ${label}`, data)
+  } catch {
+    /* console unavailable */
+  }
+}
+
 function requestMailTwoFactorCode(): Promise<MailTwoFactorResponse> {
   return new Promise((resolve) => {
     try {
@@ -168,6 +198,11 @@ async function attemptTwoFactorAutofill(force = false) {
   try {
     if (!/^https?:$/i.test(location.protocol)) return
     const target = findTwoFactorTarget()
+    mail2faDebug("target detection", {
+      found: Boolean(target),
+      mode: target?.mode,
+      inputs: target?.inputs.length,
+    })
     if (!target) {
       stopPolling()
       return
@@ -176,6 +211,11 @@ async function attemptTwoFactorAutofill(force = false) {
 
     const response = await requestMailTwoFactorCode()
     const code = typeof response.code === "string" ? response.code.replace(/\D/g, "") : ""
+    mail2faDebug("background response", {
+      codeLength: code.length,
+      source: response.source,
+      error: response.error,
+    })
     if (code.length < 4 || code.length > 8) {
       ensurePolling()
       return
