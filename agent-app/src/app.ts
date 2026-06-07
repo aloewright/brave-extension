@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { requireAccess } from "./auth"
 import sessions from "./routes/sessions"
+import models from "./routes/models"
 import type { Env } from "./env"
 
 type Vars = { userId: string }
@@ -21,6 +22,7 @@ export function buildApp() {
   )
 
   app.route("/api/sessions", sessions)
+  app.route("/api", models)
 
   return app
 }
