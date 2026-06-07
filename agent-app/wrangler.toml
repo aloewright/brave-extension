@@ -1,0 +1,44 @@
+name = "agent-app"
+main = "src/index.ts"
+compatibility_date = "2025-01-28"
+compatibility_flags = ["nodejs_compat"]
+
+[[routes]]
+pattern = "agent.fly.pm"
+custom_domain = true
+
+# Shared with worker/ (sidebar-api). Same database_id so data is shared.
+[[d1_databases]]
+binding = "DB"
+database_name = "sidebar"
+database_id = "5de7b694-0bc8-4073-9c3b-497076216901"
+migrations_dir = "./migrations"
+
+# Shared R2 bucket.
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "sidebar-blobs"
+
+# Shared Vectorize index.
+[[vectorize]]
+binding = "VECTORS"
+index_name = "sidebar-search"
+
+# Workers AI through gateway "x" (used in Plan 2).
+[ai]
+binding = "AI"
+
+# New KV namespace for model catalog cache + per-user prefs.
+# Create with: wrangler kv namespace create agent-kv  (paste the id below)
+[[kv_namespaces]]
+binding = "AGENT_KV"
+id = "6a620f2c4f7e4888b4650e769dec4c89"
+
+# Agents SDK Durable Object.
+[[durable_objects.bindings]]
+name = "CHAT_AGENT"
+class_name = "ChatAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatAgent"]
