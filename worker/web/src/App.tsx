@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom"
 import { TokenGate } from "./auth"
 import { Nav } from "./components/Nav"
 import { Search } from "./pages/Search"
+import { Highlights } from "./pages/Highlights"
 import { Conversations, ConversationDetail } from "./pages/Conversations"
 import { Links } from "./pages/Links"
 import { Bookmarks } from "./pages/Bookmarks"
@@ -15,8 +16,9 @@ export default function App() {
         <Nav />
         <main className="flex-1">
           <Routes>
-            <Route path="/" element={<Navigate to="/search" replace />} />
+            <Route path="/" element={<Navigate to="/highlights" replace />} />
             <Route path="/search" element={<Search />} />
+            <Route path="/highlights" element={<Highlights />} />
             <Route path="/conversations" element={<Conversations />} />
             <Route path="/conversations/:id" element={<ConversationDetail />} />
             <Route path="/links" element={<Links />} />

@@ -7,6 +7,11 @@ export interface Env {
   INGEST?: Workflow              // optional — code must work without it
   ASSETS?: Fetcher               // static SPA bundle; absent in plain-API tests
   SIDEBAR_TOKEN: string
+  /** Cobalt download API (same-origin /api/ on cobalt-web). */
+  COBALT_API_URL?: string
+  /** Cloudflare Access service token for sidebar-api → cobalt. */
+  COBALT_ACCESS_CLIENT_ID?: string
+  COBALT_ACCESS_CLIENT_SECRET?: string
 }
 
 // Workers AI model ids used by the Worker.

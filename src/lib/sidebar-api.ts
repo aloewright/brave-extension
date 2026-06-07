@@ -5,7 +5,7 @@
  * routes; the SPA copy can be regenerated.
  */
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf"
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
 
 export interface SearchHit {
   type: ResourceType
@@ -34,6 +34,20 @@ export interface LinkUpsertPayload {
   tags?: string[]
   favicon?: string | null
   source?: string
+}
+
+export interface HighlightUpsertPayload {
+  id?: string
+  text: string
+  note?: string | null
+  tags?: string[]
+  sourceUrl?: string | null
+  sourceTitle?: string | null
+  sourceFavicon?: string | null
+  contextBefore?: string | null
+  contextAfter?: string | null
+  source?: string
+  createdAt?: number
 }
 
 export interface BookmarkPayload {
@@ -102,6 +116,9 @@ export interface SidebarApiClient {
   links: {
     upsert: (payload: LinkUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
   }
+  highlights: {
+    upsert: (payload: HighlightUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
+  }
   bookmarks: {
     snapshot: (
       bookmarks: BookmarkPayload[],
@@ -113,6 +130,23 @@ export interface SidebarApiClient {
       blob: Blob,
       metadata: RecordingUploadMetadata
     ) => Promise<{ id: string; status: string; r2_key: string; workflow_id: string | null }>
+  }
+  videos: {
+    import: (payload: {
+      url: string
+      id?: string
+      filename?: string
+      video_quality?: string
+      download_mode?: string
+    }) => Promise<{
+      id: string
+      status: string
+      r2_key: string
+      workflow_id: string | null
+      source: string
+      origin_url: string
+      size_bytes: number
+    }>
   }
   agent: {
     chat: (payload: BrowserAgentChatPayload) => Promise<{
@@ -167,12 +201,20 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
       upsert: (payload) =>
         jsonRequest("/api/links", { method: "POST", body: JSON.stringify(payload) })
     },
+    highlights: {
+      upsert: (payload) =>
+        jsonRequest("/api/highlights", { method: "POST", body: JSON.stringify(payload) })
+    },
     bookmarks: {
       snapshot: (bookmarks, pulledAt = new Date().toISOString()) =>
         jsonRequest("/api/bookmarks/snapshot", {
           method: "POST",
           body: JSON.stringify({ bookmarks, pulledAt })
         })
+    },
+    videos: {
+      import: (payload) =>
+        jsonRequest("/api/videos/import", { method: "POST", body: JSON.stringify(payload) })
     },
     recordings: {
       upload: async (blob, metadata) => {

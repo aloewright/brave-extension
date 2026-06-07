@@ -510,3 +510,129 @@ export async function updateCapture(
 export async function deleteCapture(env: Env, id: string): Promise<void> {
   await env.DB.prepare("DELETE FROM captures WHERE id = ?").bind(id).run()
 }
+
+// ── Highlight queries ──────────────────────────────────────────────────────
+export interface HighlightRow {
+  id: string
+  text: string
+  note: string | null
+  tags: string
+  source_url: string | null
+  source_title: string | null
+  source_host: string | null
+  source_favicon: string | null
+  context_before: string | null
+  context_after: string | null
+  source: string
+  chunk_count: number
+  created_at: number
+  updated_at: number
+}
+
+export async function upsertHighlight(
+  env: Env,
+  row: HighlightRow
+): Promise<{ id: string; created: boolean; previousChunkCount: number }> {
+  const existing = await env.DB.prepare("SELECT id, chunk_count, created_at FROM highlights WHERE id = ?")
+    .bind(row.id)
+    .first<{ id: string; chunk_count: number; created_at: number }>()
+
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE highlights SET
+         text = ?, note = ?, tags = ?, source_url = ?, source_title = ?,
+         source_host = ?, source_favicon = ?, context_before = ?,
+         context_after = ?, source = ?, chunk_count = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(
+        row.text, row.note, row.tags, row.source_url, row.source_title,
+        row.source_host, row.source_favicon, row.context_before,
+        row.context_after, row.source, row.chunk_count, row.updated_at, row.id
+      )
+      .run()
+    return { id: existing.id, created: false, previousChunkCount: existing.chunk_count }
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO highlights
+       (id, text, note, tags, source_url, source_title, source_host,
+        source_favicon, context_before, context_after, source, chunk_count,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      row.id, row.text, row.note, row.tags, row.source_url, row.source_title,
+      row.source_host, row.source_favicon, row.context_before,
+      row.context_after, row.source, row.chunk_count, row.created_at, row.updated_at
+    )
+    .run()
+  return { id: row.id, created: true, previousChunkCount: 0 }
+}
+
+export async function getHighlight(env: Env, id: string): Promise<HighlightRow | null> {
+  return (await env.DB.prepare("SELECT * FROM highlights WHERE id = ?").bind(id).first<HighlightRow>()) ?? null
+}
+
+export async function listHighlights(
+  env: Env,
+  opts: { host?: string; limit?: number; before?: number } = {}
+): Promise<HighlightRow[]> {
+  const limit = Math.min(opts.limit ?? 50, 200)
+  const where: string[] = []
+  const binds: (string | number)[] = []
+  if (opts.host) {
+    where.push("source_host = ?")
+    binds.push(opts.host)
+  }
+  if (opts.before) {
+    where.push("created_at < ?")
+    binds.push(opts.before)
+  }
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : ""
+  const stmt = env.DB.prepare(
+    `SELECT * FROM highlights ${whereSql} ORDER BY created_at DESC LIMIT ?`
+  ).bind(...binds, limit)
+  const { results } = await stmt.all<HighlightRow>()
+  return results ?? []
+}
+
+export async function updateHighlight(
+  env: Env,
+  id: string,
+  patch: {
+    text?: string
+    note?: string | null
+    tags?: string
+    source_url?: string | null
+    source_title?: string | null
+    source_host?: string | null
+    source_favicon?: string | null
+    context_before?: string | null
+    context_after?: string | null
+    source?: string
+    chunk_count?: number
+    updated_at: number
+  }
+): Promise<void> {
+  const sets: string[] = []
+  const binds: (string | number | null)[] = []
+  if (patch.text !== undefined) { sets.push("text = ?"); binds.push(patch.text) }
+  if (patch.note !== undefined) { sets.push("note = ?"); binds.push(patch.note) }
+  if (patch.tags !== undefined) { sets.push("tags = ?"); binds.push(patch.tags) }
+  if (patch.source_url !== undefined) { sets.push("source_url = ?"); binds.push(patch.source_url) }
+  if (patch.source_title !== undefined) { sets.push("source_title = ?"); binds.push(patch.source_title) }
+  if (patch.source_host !== undefined) { sets.push("source_host = ?"); binds.push(patch.source_host) }
+  if (patch.source_favicon !== undefined) { sets.push("source_favicon = ?"); binds.push(patch.source_favicon) }
+  if (patch.context_before !== undefined) { sets.push("context_before = ?"); binds.push(patch.context_before) }
+  if (patch.context_after !== undefined) { sets.push("context_after = ?"); binds.push(patch.context_after) }
+  if (patch.source !== undefined) { sets.push("source = ?"); binds.push(patch.source) }
+  if (patch.chunk_count !== undefined) { sets.push("chunk_count = ?"); binds.push(patch.chunk_count) }
+  sets.push("updated_at = ?"); binds.push(patch.updated_at)
+  binds.push(id)
+  await env.DB.prepare(`UPDATE highlights SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run()
+}
+
+export async function deleteHighlight(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM highlights WHERE id = ?").bind(id).run()
+}

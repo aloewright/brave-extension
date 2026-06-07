@@ -72,7 +72,37 @@ export interface PdfRow {
   updated_at: number
 }
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf"
+export interface HighlightRow {
+  id: string
+  text: string
+  note: string | null
+  tags: string
+  source_url: string | null
+  source_title: string | null
+  source_host: string | null
+  source_favicon: string | null
+  context_before: string | null
+  context_after: string | null
+  source: string
+  chunk_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface HighlightWrite {
+  text?: string
+  note?: string | null
+  tags?: string[]
+  sourceUrl?: string | null
+  sourceTitle?: string | null
+  sourceFavicon?: string | null
+  contextBefore?: string | null
+  contextAfter?: string | null
+  source?: string
+  createdAt?: number
+}
+
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
 
 export interface SearchHit {
   type: ResourceType
@@ -118,6 +148,13 @@ export interface ApiClient {
     get: (id: string) => Promise<PdfRow>
     blobUrl: (id: string) => string
   }
+  highlights: {
+    list: (opts?: { host?: string; limit?: number; before?: number }) => Promise<{ highlights: HighlightRow[] }>
+    get: (id: string) => Promise<HighlightRow>
+    create: (payload: HighlightWrite & { text: string }) => Promise<{ id: string; created: boolean; chunkCount: number }>
+    update: (id: string, payload: HighlightWrite) => Promise<HighlightRow>
+    delete: (id: string) => Promise<void>
+  }
 }
 
 export function createApiClient(token: string, baseUrl = ""): ApiClient {
@@ -132,6 +169,7 @@ export function createApiClient(token: string, baseUrl = ""): ApiClient {
       const message = body?.error?.message ?? `request failed: ${res.status}`
       throw new ApiError(res.status, code, message)
     }
+    if (res.status === 204) return undefined as T
     return (await res.json()) as T
   }
 
@@ -171,6 +209,14 @@ export function createApiClient(token: string, baseUrl = ""): ApiClient {
       list: (opts = {}) => request(`/api/pdfs${qs({ status: opts.status, limit: opts.limit })}`),
       get: (id) => request(`/api/pdfs/${encodeURIComponent(id)}`),
       blobUrl: (id) => `${baseUrl}/api/pdfs/${encodeURIComponent(id)}/blob`
+    },
+    highlights: {
+      list: (opts = {}) => request(`/api/highlights${qs({ host: opts.host, limit: opts.limit, before: opts.before })}`),
+      get: (id) => request(`/api/highlights/${encodeURIComponent(id)}`),
+      create: (payload) => request("/api/highlights", { method: "POST", body: JSON.stringify(payload) }),
+      update: (id, payload) =>
+        request(`/api/highlights/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+      delete: (id) => request(`/api/highlights/${encodeURIComponent(id)}`, { method: "DELETE" })
     }
   }
 }
