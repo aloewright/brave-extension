@@ -121,8 +121,8 @@ struct AgentPlan: Codable {
     @Guide(description: "At most three constraints, risks, or missing facts.", .maximumCount(3))
     var risks: [String]
 
-    @Guide(description: "The single next browser action.")
-    var action: AgentAction
+    @Guide(description: "The single next browser action (legacy, use program instead).")
+    var action: AgentAction?
 
     @Guide(description: "Sequence of up to 8 ops; halt on first failure. Prefer this over action.", .maximumCount(8))
     var program: [AgentOp]?
@@ -338,11 +338,19 @@ func planResponse(for request: BridgeRequest, operation: String) async throws ->
                     "Program: \(program.count) ops"
                 ].joined(separator: "\n")
             }
+            if let action = plan.action {
+                return [
+                    "Objective: \(plan.objective)",
+                    "Status: \(plan.status)",
+                    "Next step: \(plan.nextStep)",
+                    "Action: \(action.kind) - \(action.reason)"
+                ].joined(separator: "\n")
+            }
             return [
                 "Objective: \(plan.objective)",
                 "Status: \(plan.status)",
                 "Next step: \(plan.nextStep)",
-                "Action: \(plan.action.kind) - \(plan.action.reason)"
+                "Plan generated."
             ].joined(separator: "\n")
         }()
     )
