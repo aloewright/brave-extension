@@ -140,6 +140,58 @@ async function getMailFlyPmCookieHeader(): Promise<string | null> {
     return null;
   }
 }
+
+// mail.fly.pm uses better-auth with a SameSite-restricted `__Host-` session
+// cookie. A background service-worker fetch is cross-site relative to
+// mail.fly.pm, so the cookie is NOT attached by `credentials: "include"`, and
+// the forbidden `cookie` request header is stripped by fetch(). The only way to
+// attach it is at the network layer via declarativeNetRequest, which (unlike
+// fetch) is permitted to set the Cookie header. We add a temporary session rule
+// scoped to mail.fly.pm/api for the duration of the fetch, then remove it.
+const MAIL_TWO_FACTOR_DNR_RULE_ID = 920_417;
+async function withMailFlyPmCookieHeader<T>(
+  cookieHeader: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) return run();
+  const rule: chrome.declarativeNetRequest.Rule = {
+    id: MAIL_TWO_FACTOR_DNR_RULE_ID,
+    priority: 1,
+    action: {
+      type: "modifyHeaders" as chrome.declarativeNetRequest.RuleActionType,
+      requestHeaders: [
+        {
+          header: "cookie",
+          operation: "set" as chrome.declarativeNetRequest.HeaderOperation,
+          value: cookieHeader,
+        },
+      ],
+    },
+    condition: {
+      urlFilter: "||mail.fly.pm/api/",
+      resourceTypes: [
+        "xmlhttprequest" as chrome.declarativeNetRequest.ResourceType,
+      ],
+    },
+  };
+  try {
+    await dnr.updateSessionRules({
+      removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
+      addRules: [rule],
+    });
+  } catch (err) {
+    safeRuntimeWarning("failed to register mail.fly.pm cookie rule", err);
+    return run();
+  }
+  try {
+    return await run();
+  } finally {
+    await dnr
+      .updateSessionRules({ removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID] })
+      .catch(() => {});
+  }
+}
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 // Exponential-backoff state for native-host reconnects. Each disconnect that
@@ -1479,10 +1531,21 @@ async function fetchLatestMailTwoFactorCode(
   mail2faDebug("cookieHeader", { present: Boolean(cookieHeader) });
   if (!cookieHeader) return { code: null, error: "not signed in to mail.fly.pm" };
 
+  // The Cookie header is injected at the network layer by the DNR rule below,
+  // so it is intentionally omitted here (fetch would strip it anyway).
   const headers = {
     accept: "application/json",
-    cookie: cookieHeader,
   };
+  return withMailFlyPmCookieHeader(cookieHeader, () =>
+    fetchLatestMailTwoFactorCodeAuthed(pageUrl, now, headers),
+  );
+}
+
+async function fetchLatestMailTwoFactorCodeAuthed(
+  pageUrl: string,
+  now: number,
+  headers: { accept: string },
+): Promise<MailTwoFactorResponse> {
   const list = await fetchMailJson<{ items?: MailThreadSummary[] }>(
     buildMailTwoFactorListUrl(),
     headers,
@@ -1542,7 +1605,7 @@ const MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS = 30 * 60 * 1000;
 
 async function fetchMailJson<T>(
   url: string,
-  headers: { accept: string; cookie: string },
+  headers: { accept: string },
 ): Promise<T> {
   const response = await fetch(url, {
     method: "GET",

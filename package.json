@@ -89,6 +89,7 @@
       "browsingData",
       "webNavigation",
       "declarativeNetRequest",
+      "declarativeNetRequestWithHostAccess",
       "privacy",
       "contentSettings"
     ],
