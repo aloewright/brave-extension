@@ -9,6 +9,7 @@ import {
 } from "react";
 import "./style.css";
 import {
+  backfillBuiltinQuickLinks,
   WORKSPACE_APPS,
   type WorkspaceApp,
   type WorkspaceAppIcon,
@@ -1788,10 +1789,10 @@ function NewTabWorkspace() {
                 )
               : [],
           );
-          const combined = [
+          const combined = backfillBuiltinQuickLinks([
             ...WORKSPACE_APPS.filter((app) => !hidden.has(app.url)),
             ...customs,
-          ];
+          ]);
           const withIconOverrides = applyIconOverrides(
             combined,
             sanitizeIconOverrides(result?.[APP_ICON_STORAGE_KEY]),

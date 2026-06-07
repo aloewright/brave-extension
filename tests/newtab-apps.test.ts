@@ -7,8 +7,38 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AppCard, EditAppModal, QuickLinks } from "../src/newtab";
-import { WORKSPACE_APPS } from "../src/newtab-apps";
+import { backfillBuiltinQuickLinks, WORKSPACE_APPS } from "../src/newtab-apps";
 import { DEFAULT_QUICK_LINKS } from "../src/newtab-quick-links";
+
+describe("backfillBuiltinQuickLinks", () => {
+  const cloudflare = WORKSPACE_APPS.find((a) => a.name === "Cloudflare")!;
+
+  it("restores built-in quick links onto a shadowing custom entry that lacks them", () => {
+    const custom = {
+      name: "Cloudflare",
+      domain: cloudflare.domain,
+      url: cloudflare.url, // same URL as the built-in → shadows it
+      icon: cloudflare.icon,
+      accent: cloudflare.accent,
+      // no quickLinks — the legacy persisted state
+    };
+    const [restored] = backfillBuiltinQuickLinks([custom]);
+    expect(restored.quickLinks).toEqual(cloudflare.quickLinks);
+    expect(restored.quickLinks!.length).toBeGreaterThan(0);
+  });
+
+  it("leaves an app that already has its own quick links untouched", () => {
+    const own = { ...cloudflare, quickLinks: [{ label: "Mine", url: "https://x.test" }] };
+    const [result] = backfillBuiltinQuickLinks([own]);
+    expect(result.quickLinks).toEqual([{ label: "Mine", url: "https://x.test" }]);
+  });
+
+  it("leaves apps with no matching built-in unchanged", () => {
+    const other = { name: "X", domain: "x.test", url: "https://x.test", icon: "link" as const, accent: "#000" };
+    const [result] = backfillBuiltinQuickLinks([other]);
+    expect(result.quickLinks).toBeUndefined();
+  });
+});
 
 describe("new tab workspace apps", () => {
   it("keeps the requested apps in order with https links", () => {
