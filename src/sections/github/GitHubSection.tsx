@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useSettings } from "../../hooks/useSettings"
 import { useNativeHost } from "../../hooks/useNativeHost"
 import { setToken } from "../../lib/github/token"
@@ -19,11 +19,17 @@ const CATEGORY_ORDER: FeatureCategory[] = [
 
 export function GitHubSection() {
   const { settings, update } = useSettings()
+  const [tokenStatus, setTokenStatus] = useState<string | null>(null)
   const nativeHost = useNativeHost({
     onDopplerRpcResult: (msg) => {
-      if (msg.type === "doppler.secrets.download") {
-        void setToken(pickGitHubToken(msg.secrets || {}))
+      if (msg.type !== "doppler.secrets.download") return
+      if (!msg.ok) {
+        setTokenStatus(`Doppler: ${msg.error || "failed to load secrets"}`)
+        return
       }
+      const token = pickGitHubToken(msg.secrets || {})
+      void setToken(token)
+      setTokenStatus(token ? "GitHub token loaded." : "No GitHub token found in Doppler.")
     }
   })
   const grouped = useMemo(() => {
@@ -74,6 +80,9 @@ export function GitHubSection() {
           write features. Write actions need <code>repo</code> (and{" "}
           <code>delete_repo</code> for repository deletion) scopes.
         </p>
+        {tokenStatus && (
+          <p className="mt-1 text-xs text-fg" role="status">{tokenStatus}</p>
+        )}
       </section>
 
       <div className={gh.enabled ? "" : "pointer-events-none opacity-50"}>
@@ -109,6 +118,7 @@ export function GitHubSection() {
                   </div>
                   <input
                     type="checkbox"
+                    aria-label={f.name}
                     checked={isOn(f)}
                     onChange={(e) => toggleFeature(f.id, e.target.checked)}
                   />
