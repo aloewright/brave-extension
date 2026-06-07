@@ -53,7 +53,8 @@ describe("page agent UI", () => {
     })
     expect(chromeMock.storage.local.__dump()["pageAgent.visible"]).toBe(true)
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(123, {
-      type: "PAGE_AGENT_TOGGLE_PANEL"
+      type: "PAGE_AGENT_TOGGLE",
+      visible: false
     })
   })
 
@@ -64,7 +65,7 @@ describe("page agent UI", () => {
     )
 
     expect(pageAgent).toContain('toggle.addEventListener("click"')
-    expect(pageAgent).toContain("open = true")
+    expect(pageAgent).toContain("open = !open")
     expect(pageAgent).toContain('toggle.style.display = visible && !open ? "inline-grid" : "none"')
   })
 
