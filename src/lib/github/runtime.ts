@@ -25,13 +25,19 @@ export function createRuntime(
     return out
   }
 
+  // Monotonic generation: if a newer reconcile starts while an older one is
+  // awaiting a feature's async init, the older one bails so the two can't
+  // interleave their abort/init bookkeeping on `active`.
+  let generation = 0
   const reconcile = async (settings: GitHubFeatureSettings) => {
+    const gen = ++generation
     current = settings
     const want = desired(settings)
     for (const [id, ctrl] of active) {
       if (!want.has(id)) { ctrl.abort(); active.delete(id) }
     }
     for (const id of want) {
+      if (gen !== generation) return
       if (active.has(id)) continue
       const ctrl = new AbortController()
       active.set(id, ctrl)

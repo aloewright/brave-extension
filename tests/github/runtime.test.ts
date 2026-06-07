@@ -41,4 +41,22 @@ describe("runtime", () => {
     expect(aborted).toEqual(["a"])
     rt.stop()
   })
+
+  it("a newer reconcile supersedes an in-flight slower one", async () => {
+    let release: () => void = () => {}
+    const slow = meta("slow", {
+      defaultEnabled: false,
+      init: () => new Promise<void>((r) => { release = r })
+    })
+    const fast = meta("fast", { defaultEnabled: false })
+    const rt = createRuntime([slow, fast], () => new URL("https://github.com/o/r"))
+    // First reconcile: wants only `slow`, which hangs on its init promise.
+    const first = rt.apply({ enabled: true, features: { slow: true } })
+    // Second reconcile starts before `slow` resolves: now wants only `fast`.
+    const second = rt.apply({ enabled: true, features: { fast: true } })
+    release()
+    await Promise.all([first, second])
+    expect(fast.init).toHaveBeenCalledTimes(1)
+    rt.stop()
+  })
 })

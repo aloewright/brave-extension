@@ -26,6 +26,8 @@ export async function v3<T = unknown>(
   const { responseFormat = "json", headers, ...rest } = init
   const res = await fetch(`${REST}${path}`, {
     ...rest,
+    // Caller headers are spread last, so a caller may intentionally override
+    // Authorization (e.g. to make an unauthenticated request).
     headers: { ...(await authHeaders()), ...(headers as Record<string, string>) }
   })
   const text = await res.text()

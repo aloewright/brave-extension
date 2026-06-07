@@ -16,3 +16,8 @@ export async function setToken(value: string): Promise<void> {
   memo = value
   await chrome.storage.session.set({ [GH_TOKEN_KEY]: value })
 }
+
+/** Test-only: clear the in-memory cache so the next getToken hits storage. */
+export function _resetTokenCache(): void {
+  memo = null
+}

@@ -1,9 +1,10 @@
 // tests/github/token.test.ts
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { getToken, setToken, GH_TOKEN_KEY } from "../../src/lib/github/token"
+import { getToken, setToken, GH_TOKEN_KEY, _resetTokenCache } from "../../src/lib/github/token"
 
 const store: Record<string, unknown> = {}
 beforeEach(() => {
+  _resetTokenCache()
   for (const k of Object.keys(store)) delete store[k]
   ;(globalThis as any).chrome = {
     storage: {
