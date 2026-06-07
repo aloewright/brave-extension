@@ -123,6 +123,8 @@ export type ProgramDeps = {
   observe(tabId: number): Promise<ObservationLite>
   wait(ms: number): Promise<void>
   now(): number
+  retain?(content: string): Promise<void>
+  recall?(query: string): Promise<string>
 }
 
 const STRUCTURAL_OPS = new Set<string>(["browser.click", "browser.type", "browser.navigate"])
@@ -181,8 +183,18 @@ async function runOp(
     const r = await deps.runTool("scroll_to", { tabId, selector })
     return { ...r, selector, durationMs: elapsed() }
   }
-  if (op.kind === "memory.search" || op.kind === "memory.remember" || op.kind === "session.compact") {
-    return { ok: false, skipped: true, reason: "memory not wired", durationMs: elapsed() }
+  if (op.kind === "memory.search") {
+    if (!deps.recall) return { ok: false, skipped: true, reason: "memory recall not wired", durationMs: elapsed() }
+    const r = await deps.recall(op.value ?? "")
+    return { ok: true, durationMs: elapsed(), data: r }
+  }
+  if (op.kind === "memory.remember") {
+    if (!deps.retain) return { ok: false, skipped: true, reason: "memory retain not wired", durationMs: elapsed() }
+    await deps.retain(op.value ?? "")
+    return { ok: true, durationMs: elapsed() }
+  }
+  if (op.kind === "session.compact") {
+    return { ok: false, skipped: true, reason: "session.compact not wired", durationMs: elapsed() }
   }
   return { ok: false, skipped: true, reason: `unknown op ${op.kind}`, durationMs: elapsed() }
 }

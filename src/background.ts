@@ -1,4 +1,5 @@
 import { ulid } from "./lib/ulid";
+import { HindsightClient } from "@vectorize-io/hindsight-client";
 import { MENU_ID_TO_MODE } from "./lib/joplin-types";
 import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
 import { handleClipRequest } from "./lib/joplin-clip-handler";
@@ -967,10 +968,32 @@ async function handlePageAgentMessage(input: {
 }> {
   const text = input.text.trim();
   if (!text) throw new Error("message required");
+  
+  const hindsightClient = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+  const hindsightBankId = 'page-agent-bank';
+
+  let memoryContext = "";
+  try {
+    const tab = await new Promise<chrome.tabs.Tab>((resolve) => chrome.tabs.get(input.tabId, resolve));
+    if (tab.url) {
+      const url = new URL(tab.url);
+      const domain = url.hostname;
+      const query = `Domain: ${domain}\nObjective: ${text}`;
+      const results = await hindsightClient.recall(hindsightBankId, query);
+      if (results && results.results && results.results.length > 0) {
+        memoryContext = `\n\nPast experiences for ${domain}:\n${JSON.stringify(results.results)}`;
+      }
+    }
+  } catch (err) {
+    safeRuntimeWarning("hindsight pre-planning recall failed", err);
+  }
+
+  const enhancedObjective = text + memoryContext;
+
   const initialObservation = await pageAgentObserve(input.tabId);
   const sessionId = input.sessionId || `page_${crypto.randomUUID()}`;
   const localPlan = (await requestNative(
-    { type: "foundationModels.plan", objective: text, observation: initialObservation },
+    { type: "foundationModels.plan", objective: enhancedObjective, observation: initialObservation },
     15000,
   ).catch(() => null)) as LocalPlanResponse;
 
@@ -993,11 +1016,42 @@ async function handlePageAgentMessage(input: {
       return (obs ?? { nodes: [] }) as Awaited<ReturnType<ProgramDeps["observe"]>>;
     },
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    now: () => Date.now()
+    now: () => Date.now(),
+    retain: async (content) => {
+      try {
+        await hindsightClient.retain(hindsightBankId, content);
+      } catch (err) {
+        safeRuntimeWarning("hindsight retain failed", err);
+      }
+    },
+    recall: async (query) => {
+      try {
+        const results = await hindsightClient.recall(hindsightBankId, query);
+        return typeof results === 'string' ? results : JSON.stringify(results);
+      } catch (err) {
+        safeRuntimeWarning("hindsight recall failed", err);
+        return "";
+      }
+    }
   };
 
   const program = parseProgram(localPlan?.plan ?? localPlan);
   const trace = await executeProgram(input.tabId, program, initialObservation as any, programDeps);
+
+  // Trace ingestion into Hindsight
+  try {
+    const tab = await new Promise<chrome.tabs.Tab>((resolve) => chrome.tabs.get(input.tabId, resolve));
+    if (tab.url) {
+      const url = new URL(tab.url);
+      const domain = url.hostname;
+      
+      const traceContent = `Action Trace for Domain: ${domain}\nObjective: ${text}\nSteps:\n${trace.steps.map((s, i) => `[Step ${i+1}] ${s.kind} on ${s.selector || s.label || 'N/A'}: ${s.ok ? 'SUCCESS' : 'FAILED (' + (s.reason || '') + ')'}`).join('\n')}`;
+      
+      await hindsightClient.retain(hindsightBankId, traceContent);
+    }
+  } catch (err) {
+    safeRuntimeWarning("hindsight trace ingestion failed", err);
+  }
 
   const settings = await getSettings();
   if (settings.sidebarSyncEnabled && settings.sidebarApiUrl) {
@@ -1007,7 +1061,7 @@ async function handlePageAgentMessage(input: {
         settings,
         sessionId,
         message: text,
-        objective: text,
+        objective: enhancedObjective,
         observation: trace.finalObservation
       }));
       return {
