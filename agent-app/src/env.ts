@@ -5,8 +5,7 @@ export interface Env {
   VECTORS: VectorizeIndex
   AI: Ai
   AGENT_KV: KVNamespace
-  // Refined to DurableObjectNamespace<ChatAgent> in Task 9 once the class exists.
-  CHAT_AGENT: DurableObjectNamespace
+  CHAT_AGENT: DurableObjectNamespace<import("./agents/chat-agent").ChatAgent>
 
   // --- Cloudflare Access secrets (Doppler → wrangler secret put) ---
   /** Access service-token client id the extension must present. */
