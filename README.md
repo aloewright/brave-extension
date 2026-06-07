@@ -17,7 +17,15 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
 ## Extension Functionality
 
 - **Sidebar rail:** persistent sections for Terminal, Inspector, Extensions,
-  Library, Bookmarks, Data, Recorder, Eyedropper, and Settings.
+  Library, Bookmarks, Data, Recorder, Eyedropper, GitHub, and Settings.
+- **GitHub refinements:** an opt-in **GitHub** section with a master switch and
+  per-feature toggles grouped by category (Global, Repository, Pull Requests,
+  Issues, Write actions) that inject Refined-GitHub-style enhancements on
+  `github.com`. Read/CSS tweaks plus confirm-gated write actions (e.g. quick
+  repo deletion, restore file, update PR from base) that are off by default.
+  Runs entirely against GitHub with no remote code; API/write features use a
+  GitHub PAT resolved from Doppler (write actions need `repo`/`delete_repo`
+  scopes). Token is held in session memory only, never persisted to disk.
 - **Local AI terminal:** native-host backed PTY sessions for CLI tools such as
   Claude Code, Gemini, Copilot, and Codex. Terminal tabs stay alive while moving
   around the sidebar.
