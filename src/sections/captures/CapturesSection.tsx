@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { LeoButton } from "../../components/leo"
+import { LeoButton, LeoIcon } from "../../components/leo"
 import { openExternalLink } from "../../lib/open-url"
 import { openPopupWindow } from "../../lib/popup-window"
 import { getSettings } from "../../storage"
@@ -92,6 +92,30 @@ export function CapturesSection() {
             ? err.message
             : String(err)
       )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDownload = async (item: CaptureSummary | CaptureSearchHit) => {
+    if (!config) return
+    setBusy(true)
+    try {
+      // Fetch the bytes and save via an object URL so the file downloads
+      // regardless of the blob route's inline content-disposition.
+      const res = await fetch(absoluteBlobUrl(config, item.blobUrl))
+      if (!res.ok) throw new Error(`Download failed (${res.status})`)
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = objectUrl
+      a.download = item.filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -223,12 +247,23 @@ export function CapturesSection() {
               <div className="ml-auto flex flex-shrink-0 items-center gap-1">
                 <button
                   type="button"
+                  onClick={() => void onDownload(item)}
+                  disabled={busy}
+                  className="rounded p-1 text-fg/40 hover:bg-accent/40 hover:text-primary disabled:opacity-40"
+                  aria-label="Download capture"
+                  title="Download"
+                >
+                  <LeoIcon name="download" size={14} />
+                </button>
+                <button
+                  type="button"
                   onClick={() => onDelete(item.id)}
                   disabled={busy}
-                  className="text-[10px] text-fg/40 hover:text-error disabled:opacity-40"
+                  className="rounded p-1 text-fg/40 hover:bg-error/10 hover:text-error disabled:opacity-40"
                   aria-label="Delete capture"
+                  title="Delete"
                 >
-                  Delete
+                  <LeoIcon name="trash" size={14} />
                 </button>
               </div>
             </div>
