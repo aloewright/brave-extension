@@ -35,7 +35,7 @@ export function requireAccess(): MiddlewareHandler<{ Bindings: Env; Variables: V
     if (jwt && c.env.ACCESS_AUD && c.env.ACCESS_TEAM_DOMAIN) {
       const id = await verifyAccessJwt(jwt, c.env.ACCESS_AUD, c.env.ACCESS_TEAM_DOMAIN)
       if (id) {
-        c.set("userId", id.email ?? id.sub)
+        c.set("userId", id.email || id.sub)
         return next()
       }
     }

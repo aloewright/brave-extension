@@ -18,9 +18,11 @@ const SIDEBAR_API_SECRET_NAMES = [
   "AGENT_API_URL",
   "AGENT_URL",
   "AGENT_ACCESS_CLIENT_ID",
+  "AGENT_CLIENT_ID",
   "ACCESS_CLIENT_ID",
   "CF_ACCESS_CLIENT_ID",
   "AGENT_ACCESS_CLIENT_SECRET",
+  "AGENT_CLIENT_SECRET",
   "ACCESS_CLIENT_SECRET",
   "CF_ACCESS_CLIENT_SECRET"
 ]
@@ -39,16 +41,18 @@ const TASKS_TOKEN_SECRET_NAMES = [
   "CAL_TASKS_TOKEN"
 ]
 
-const AGENT_API_URL_SECRET_NAMES = ["AGENT_API_URL", "AGENT_URL"]
+const AGENT_API_URL_SECRET_NAMES = ["AGENT_API_URL", "AGENT_APIURL", "AGENT_URL"]
 
 const AGENT_CLIENT_ID_SECRET_NAMES = [
   "AGENT_ACCESS_CLIENT_ID",
+  "AGENT_CLIENT_ID",
   "ACCESS_CLIENT_ID",
   "CF_ACCESS_CLIENT_ID"
 ]
 
 const AGENT_CLIENT_SECRET_SECRET_NAMES = [
   "AGENT_ACCESS_CLIENT_SECRET",
+  "AGENT_CLIENT_SECRET",
   "ACCESS_CLIENT_SECRET",
   "CF_ACCESS_CLIENT_SECRET"
 ]
@@ -318,15 +322,10 @@ export function SettingsSection() {
 
   useEffect(() => {
     if (!settings || !nativeHost.connected || !dopplerStatus?.tokenSet) return
-    if (
-      settings.sidebarApiUrl &&
-      settings.sidebarApiToken &&
-      settings.tasksApiToken &&
-      settings.agentApiUrl &&
-      settings.agentAccessClientId &&
-      settings.agentAccessClientSecret
-    )
-      return
+    const sidebarReady =
+      settings.sidebarApiUrl && settings.sidebarApiToken && settings.tasksApiToken
+    const agentReady = settings.agentAccessClientId && settings.agentAccessClientSecret
+    if (sidebarReady && agentReady) return
     nativeHost.dopplerSecretsDownload({
       project:
         settings.dopplerProject.trim() ||
@@ -347,6 +346,8 @@ export function SettingsSection() {
     settings?.sidebarApiUrl,
     settings?.sidebarApiToken,
     settings?.tasksApiToken,
+    settings?.agentAccessClientId,
+    settings?.agentAccessClientSecret,
     settings?.dopplerProject,
     settings?.dopplerConfig,
     settings?.dopplerScope,
