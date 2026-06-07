@@ -38,6 +38,31 @@ pnpm d1:migrate:remote
 pnpm deploy
 ```
 
+## Web UI
+
+The Worker also serves a single-page web app (TanStack) from its `[assets]`
+binding (`dist/web`). `/api/*` hits Hono; everything else falls through to the
+asset bundle, with SPA-style fallback to `index.html` so client-side routes
+resolve (`not_found_handling = "single-page-application"`).
+
+- **Build before deploy.** Run `pnpm build:web` to emit `dist/web` before
+  `pnpm deploy` (the assets dir must exist or the deploy uploads nothing). The
+  top-level `pnpm build` runs `build:web` and then `wrangler deploy`, so it is
+  the safe one-shot build-and-deploy.
+- **SSO, no client token.** The SPA is served at the root behind the same
+  Cloudflare Access application as the API. Browser users authenticate via
+  Access SSO — the Cloudflare edge injects the Access JWT that `requireAccess`
+  validates, so the web client ships **no** service token / client secret
+  (those are only for the headless extension).
+- **Local dev.** Run the Worker with `pnpm dev` and the web app with
+  `pnpm dev:web` in a second terminal; Vite proxies `/api` to the local Worker
+  so the SPA talks to your dev API.
+
+> Deviation from the original plan: we ship a Vite SPA with TanStack Router +
+> TanStack Query instead of TanStack Start SSR (simpler to serve from the
+> Worker assets binding, no SSR runtime needed). TanStack AI can be swapped in
+> later behind the same query/route layer.
+
 ## Verify
 
 ```bash
