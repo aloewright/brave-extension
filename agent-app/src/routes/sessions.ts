@@ -52,7 +52,8 @@ sessions.post("/:id/messages", async (c) => {
           sessionId: sess.id,
           content: body.content,
           modelId,
-          advanced: body.advanced === true
+          advanced: body.advanced === true,
+          userId: c.get("userId")
         })
       })
     )
@@ -91,7 +92,8 @@ sessions.post("/:id/messages/stream", async (c) => {
           sessionId: sess.id,
           content: body.content,
           modelId,
-          advanced: body.advanced === true
+          advanced: body.advanced === true,
+          userId: c.get("userId")
         })
       })
     )

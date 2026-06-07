@@ -65,11 +65,39 @@ export function makeEnv(overrides?: Partial<Env>): Env {
   applyMigrations(sqlite)
   const db = wrapAsD1(sqlite)
 
+  const vectorsStore = new Map<
+    string,
+    { values: number[]; metadata: Record<string, unknown> }
+  >()
+  const vectors = {
+    upsert: vi.fn(async (vs: Array<{ id: string; values: number[]; metadata?: Record<string, unknown> }>) => {
+      for (const v of vs) vectorsStore.set(v.id, { values: v.values, metadata: v.metadata ?? {} })
+      return { mutationId: "test" }
+    }),
+    query: vi.fn(async (_vec: number[], opts?: { topK?: number; filter?: Record<string, unknown> }) => {
+      const filter = opts?.filter ?? {}
+      const matches = Array.from(vectorsStore.entries())
+        .filter(([, v]) =>
+          Object.entries(filter).every(([k, val]) => v.metadata[k] === val)
+        )
+        .slice(0, opts?.topK ?? 5)
+        .map(([id, v]) => ({ id, score: 1, metadata: v.metadata }))
+      return { matches, count: matches.length }
+    })
+  } as unknown as VectorizeIndex
+
+  const ai = {
+    run: vi.fn(async (model: string) => {
+      if (String(model).includes("bge")) return { data: [new Array(768).fill(0.01)] }
+      throw new Error(`unstubbed AI model: ${model}`)
+    })
+  } as unknown as Ai
+
   return {
     DB: db,
     BLOBS: {} as R2Bucket,
-    VECTORS: {} as VectorizeIndex,
-    AI: { run: vi.fn() } as unknown as Ai,
+    VECTORS: vectors,
+    AI: ai,
     AGENT_KV: makeFakeKV(),
     CHAT_AGENT: {} as DurableObjectNamespace,
     ACCESS_CLIENT_ID: "svc-client-id",

@@ -3,6 +3,7 @@ import type { Env } from "../env"
 import { insertMessage, listMessages } from "../db"
 import { resolveModel } from "../models"
 import { streamCompletion, collectCompletion, type ChatMsg } from "../chat"
+import { recallMemories, reflect } from "../memory"
 
 export interface ChatAgentState {
   sessionId: string | null
@@ -35,6 +36,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
       content?: string
       modelId?: string
       advanced?: boolean
+      userId?: string
     }
     try {
       body = (await request.json()) as {
@@ -42,6 +44,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         content?: string
         modelId?: string
         advanced?: boolean
+        userId?: string
       }
     } catch {
       return Response.json({ error: "Invalid JSON body" }, { status: 400 })
@@ -65,8 +68,24 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
 
     const history = await this.buildHistory(sessionId)
 
+    const userId = body.userId?.trim() || "unknown"
+    const memories =
+      userId !== "unknown" ? await recallMemories(this.env, userId, content, 5) : []
+    const contextMsgs: ChatMsg[] =
+      memories.length > 0
+        ? [
+            {
+              role: "system",
+              content:
+                "Relevant memories about this user:\n" +
+                memories.map((m) => `- ${m.content}`).join("\n")
+            }
+          ]
+        : []
+    const fullHistory = [...contextMsgs, ...history]
+
     if (path === "/internal/turn") {
-      const reply = await collectCompletion(this.env, model.id, history, advanced)
+      const reply = await collectCompletion(this.env, model.id, fullHistory, advanced)
       const assistant = await insertMessage(this.env, {
         sessionId,
         role: "assistant",
@@ -74,13 +93,21 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         model: model.id
       })
       this.setState({ sessionId, lastTurn: { user: content, assistant: reply } })
+      if (userId !== "unknown" && reply.trim()) {
+        await reflect(this.env, userId, sessionId, [
+          { role: "user", content },
+          { role: "assistant", content: reply }
+        ])
+      }
       return Response.json({ message: assistant })
     }
 
     // Streaming path: forward deltas as SSE while accumulating for persistence.
-    const source = await streamCompletion(this.env, model.id, history, advanced)
+    const source = await streamCompletion(this.env, model.id, fullHistory, advanced)
     const env = this.env
     const modelId = model.id
+    const reflectUserId = userId
+    const reflectContent = content
     let acc = ""
     const sse = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -112,6 +139,12 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
           })
         } catch (e) {
           console.error("agent: failed to persist streamed assistant message", e)
+        }
+        if (reflectUserId !== "unknown" && acc.trim()) {
+          await reflect(env, reflectUserId, sessionId, [
+            { role: "user", content: reflectContent },
+            { role: "assistant", content: acc }
+          ])
         }
       }
     })
