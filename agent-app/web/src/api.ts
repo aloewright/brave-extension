@@ -122,7 +122,10 @@ export function createWebAgentClient(): WebAgentClient {
       try {
         for (;;) {
           const { done, value } = await reader.read()
-          if (done) break
+          if (done) {
+            buf += decoder.decode() // flush any trailing multi-byte char
+            break
+          }
           buf += decoder.decode(value, { stream: true })
           const lines = buf.split("\n")
           buf = lines.pop() ?? ""

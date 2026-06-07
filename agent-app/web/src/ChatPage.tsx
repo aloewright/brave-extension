@@ -22,6 +22,7 @@ export function ChatPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const busyRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   // Abort any in-flight stream on unmount.
@@ -73,7 +74,10 @@ export function ChatPage() {
 
   async function send() {
     const content = input.trim()
-    if (!content || busy || !sessionId) return
+    // Ref guard closes the double-send race: state `busy` lags a render, so two
+    // rapid Enter presses could both pass a state-only check before setBusy lands.
+    if (!content || busyRef.current || busy || !sessionId) return
+    busyRef.current = true
     setError(null)
     setInput("")
     setBubbles((b) => [...b, { role: "user", content }])
@@ -103,6 +107,7 @@ export function ChatPage() {
     } finally {
       setStreaming("")
       setBusy(false)
+      busyRef.current = false
       abortRef.current = null
       void qc.invalidateQueries({ queryKey: ["active-session"] })
     }
