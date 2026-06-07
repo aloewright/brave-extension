@@ -1,10 +1,7 @@
 // src/lib/github/registry.ts
 import type { GitHubFeatureSettings } from "../../types"
-import cleanSidebar from "./features/clean-sidebar"
 import copyFilePath from "./features/copy-file-path"
-import hideNewsfeedNoise from "./features/hide-newsfeed-noise"
 import quickRepoDeletion from "./features/quick-repo-deletion"
-import selectableCommentQuotes from "./features/selectable-comment-quotes"
 import stickyFileHeaders from "./features/sticky-file-headers"
 import usefulNotFoundPage from "./features/useful-not-found-page"
 
@@ -27,11 +24,8 @@ export interface FeatureMeta {
 
 // Populated in Phase 5 as features are ported. Keep alphabetised by id.
 export const FEATURES: FeatureMeta[] = [
-  cleanSidebar,
   copyFilePath,
-  hideNewsfeedNoise,
   quickRepoDeletion,
-  selectableCommentQuotes,
   stickyFileHeaders,
   usefulNotFoundPage,
 ]
