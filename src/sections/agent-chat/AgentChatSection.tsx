@@ -151,7 +151,9 @@ export function AgentChatSection() {
       }
       const assistant = buildPlaceholderAssistant(ulid(), modelId)
       assistant.session_id = sessionId
-      assistant.content = acc
+      assistant.content = acc.trim()
+        ? acc
+        : "⚠️ The model returned an empty response. Try again or pick a different model."
       setMessages((prev) => [...prev, assistant])
     } catch (err) {
       const assistant = buildPlaceholderAssistant(ulid(), modelId)

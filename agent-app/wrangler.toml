@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2025-01-28"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Logs — captures console output (our structured JSON log lines) so the
+# app request flow + AI calls are observable in the dashboard and `wrangler tail`.
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
 [[routes]]
 pattern = "agent.fly.pm"
 custom_domain = true

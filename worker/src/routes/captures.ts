@@ -13,6 +13,7 @@ import { deleteFor, search, upsertFor } from "../vectors"
 import { deleteBlob, getBlob, keyFor, putBlob } from "../r2"
 import { ocrImage } from "../ai"
 import { extractPdfText } from "../pdf"
+import { suggestFilenameFromText } from "../rename"
 
 /**
  * Page Captures route (ALO-468).
@@ -108,9 +109,22 @@ captures.post("/", async (c) => {
     statusMessage = err instanceof Error ? err.message : String(err)
   }
 
+  // Auto-rename from the extracted text (best-effort; falls back to the
+  // client-provided filename). Done before embedding/insert so the stored row
+  // and the embedded text use the improved name.
+  let finalFilename = filename
+  if (extractedText.length > 0) {
+    finalFilename = await suggestFilenameFromText(c.env, {
+      text: extractedText,
+      kind: kindRaw,
+      fallback: filename,
+      sourceTitle
+    })
+  }
+
   // Embed metadata + extracted text so the user can find the capture by
   // visible content OR by URL/title.
-  const embedText = [filename, sourceTitle, sourceUrl, extractedText]
+  const embedText = [finalFilename, sourceTitle, sourceUrl, extractedText]
     .filter((s) => typeof s === "string" && s.length > 0)
     .join("\n")
 
@@ -118,7 +132,7 @@ captures.post("/", async (c) => {
   if (embedText.trim().length > 0) {
     try {
       const r = await upsertFor(c.env, "capture", id, embedText, {
-        title: sourceTitle || filename,
+        title: sourceTitle || finalFilename,
         createdAt: Date.now()
       })
       chunkCount = r.chunkCount
@@ -132,7 +146,7 @@ captures.post("/", async (c) => {
   const row: CaptureRow = {
     id,
     kind: kindRaw,
-    filename,
+    filename: finalFilename,
     source_url: sourceUrl,
     source_title: sourceTitle,
     mime_type: contentType,
@@ -151,7 +165,7 @@ captures.post("/", async (c) => {
     {
       id,
       kind: kindRaw,
-      filename,
+      filename: finalFilename,
       url: `/api/captures/${id}/blob`,
       sizeBytes: bytes.byteLength,
       createdAt: new Date(now).toISOString(),

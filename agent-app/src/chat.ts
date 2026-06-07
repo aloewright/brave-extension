@@ -1,5 +1,6 @@
 import type { Env } from "./env"
 import { AI_GATEWAY_ID } from "./env"
+import { log, since } from "./log"
 
 export interface ChatMsg {
   role: "system" | "user" | "assistant"
@@ -31,12 +32,30 @@ async function streamWorkersAi(
 ): Promise<ReadableStream<Uint8Array>> {
   // CLAUDE.md sanctioned Worker-side gateway call. Swap to dynamic/text_gen
   // when the binding/dynamic-route path is fixed upstream.
-  const raw = (await env.AI.run(
+  const startedAt = Date.now()
+  log.info("ai.call.start", {
+    path: "workers-ai",
     modelId,
-    { messages, stream: true },
-    { gateway: { id: AI_GATEWAY_ID } }
-  )) as unknown as ReadableStream
-  return toTextDeltaStream(raw)
+    gateway: AI_GATEWAY_ID,
+    messageCount: messages.length
+  })
+  try {
+    const raw = (await env.AI.run(
+      modelId,
+      { messages, stream: true },
+      { gateway: { id: AI_GATEWAY_ID } }
+    )) as unknown as ReadableStream
+    log.info("ai.call.opened", { path: "workers-ai", modelId, ms: since(startedAt) })
+    return toTextDeltaStream(raw)
+  } catch (err) {
+    log.error("ai.call.error", {
+      path: "workers-ai",
+      modelId,
+      ms: since(startedAt),
+      error: err instanceof Error ? err.message : String(err)
+    })
+    throw err
+  }
 }
 
 async function streamAdvanced(
@@ -47,17 +66,35 @@ async function streamAdvanced(
   // EXPERIMENTAL: explicit non-CF model via gateway compat. Observed to skip
   // fallback nodes for dynamic routes, but a single explicit model has no
   // chain to skip. See ~/.claude/CLAUDE.md "Inside a Worker".
-  const gw = (env.AI as unknown as {
-    gateway: (id: string) => {
-      run: (opts: unknown) => Promise<ReadableStream>
-    }
-  }).gateway(AI_GATEWAY_ID)
-  const raw = await gw.run({
-    provider: "compat",
-    endpoint: "chat/completions",
-    query: { model: modelId, messages, stream: true }
+  const startedAt = Date.now()
+  log.info("ai.call.start", {
+    path: "advanced",
+    modelId,
+    gateway: AI_GATEWAY_ID,
+    messageCount: messages.length
   })
-  return toTextDeltaStream(raw)
+  try {
+    const gw = (env.AI as unknown as {
+      gateway: (id: string) => {
+        run: (opts: unknown) => Promise<ReadableStream>
+      }
+    }).gateway(AI_GATEWAY_ID)
+    const raw = await gw.run({
+      provider: "compat",
+      endpoint: "chat/completions",
+      query: { model: modelId, messages, stream: true }
+    })
+    log.info("ai.call.opened", { path: "advanced", modelId, ms: since(startedAt) })
+    return toTextDeltaStream(raw)
+  } catch (err) {
+    log.error("ai.call.error", {
+      path: "advanced",
+      modelId,
+      ms: since(startedAt),
+      error: err instanceof Error ? err.message : String(err)
+    })
+    throw err
+  }
 }
 
 // Parse an SSE byte stream of {response|choices[].delta.content} chunks into a

@@ -7,7 +7,8 @@ import {
   runPipQuickAction,
   type QuickActionResult,
   runSaveLinkQuickAction,
-  runScreenshotQuickAction
+  runScreenshotQuickAction,
+  runFullPagePdfQuickAction
 } from "../lib/quick-actions"
 import { openResizableSidebarWindow } from "../lib/sidebar-window"
 
@@ -20,7 +21,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   terminal: "terminal",
   inspector: "search",
   extensions: "puzzle-piece",
-  tech: "robot",
+  tech: "cpu-chip",
   session: "inbox",
   quickInfo: "avatar",
   tasks: "list-checks",
@@ -31,7 +32,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   recorder: "radio-checked",
   eyedropper: "paint-brush",
   joplin: "file-export",
-  agentChat: "cloud",
+  agentChat: "robot",
   github: "github",
   settings: "settings"
 }
@@ -51,6 +52,7 @@ type QuickActionFeedback = QuickActionResult & { label: string }
 
 const QUICK_ACTIONS: QuickActionDef[] = [
   { label: "Screenshot visible area", icon: "screenshot", run: runScreenshotQuickAction },
+  { label: "Save full-page PDF", icon: "file-export", run: runFullPagePdfQuickAction },
   { label: "Picture-in-picture", icon: "picture-in-picture", run: runPipQuickAction },
   { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction },
   { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction },

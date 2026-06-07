@@ -28,7 +28,7 @@ describe("models catalog", () => {
   it("caches the catalog in KV", async () => {
     const env = makeEnv()
     await getCatalog(env)
-    const cached = await env.AGENT_KV.get("models:catalog:v1")
+    const cached = await env.AGENT_KV.get("models:catalog:v2")
     expect(cached).toBeTruthy()
   })
 })

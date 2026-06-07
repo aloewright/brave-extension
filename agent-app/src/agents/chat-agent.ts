@@ -4,6 +4,7 @@ import { insertMessage, listMessages } from "../db"
 import { resolveModel } from "../models"
 import { streamCompletion, collectCompletion, type ChatMsg } from "../chat"
 import { recallMemories, reflect } from "../memory"
+import { log, since } from "../log"
 
 export interface ChatAgentState {
   sessionId: string | null
@@ -57,7 +58,24 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
     const content = body.content
 
     const model = await resolveModel(this.env, body.modelId)
+    // Image-generation models can't drive the text chat path. Reject early with
+    // a clear error instead of streaming an empty/garbage reply.
+    if (model.kind === "image") {
+      log.warn("turn.rejected.image_model", { sessionId, modelId: model.id })
+      return Response.json(
+        { error: `Model ${model.id} generates images and isn't supported in chat.` },
+        { status: 400 }
+      )
+    }
     const advanced = body.advanced === true && model.kind === "advanced"
+    const turnStartedAt = Date.now()
+    log.info("turn.start", {
+      sessionId,
+      modelId: model.id,
+      advanced,
+      stream: path === "/internal/turn/stream",
+      contentChars: content.length
+    })
 
     await insertMessage(this.env, {
       sessionId,
@@ -93,11 +111,25 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         model: model.id
       })
       this.setState({ sessionId, lastTurn: { user: content, assistant: reply } })
+      log.info("turn.done", {
+        sessionId,
+        modelId: model.id,
+        replyChars: reply.length,
+        ms: since(turnStartedAt),
+        stream: false
+      })
       if (userId !== "unknown" && reply.trim()) {
-        await reflect(this.env, userId, sessionId, [
-          { role: "user", content },
-          { role: "assistant", content: reply }
-        ])
+        this.ctx.waitUntil(
+          reflect(this.env, userId, sessionId, [
+            { role: "user", content },
+            { role: "assistant", content: reply }
+          ]).catch((e) =>
+            log.error("reflect.error", {
+              sessionId,
+              error: e instanceof Error ? e.message : String(e)
+            })
+          )
+        )
       }
       return Response.json({ message: assistant })
     }
@@ -105,6 +137,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
     // Streaming path: forward deltas as SSE while accumulating for persistence.
     const source = await streamCompletion(this.env, model.id, fullHistory, advanced)
     const env = this.env
+    const ctx = this.ctx
     const modelId = model.id
     const reflectUserId = userId
     const reflectContent = content
@@ -124,12 +157,22 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
           }
         } catch (err) {
           reader.releaseLock()
+          log.error("turn.stream.error", {
+            sessionId,
+            modelId,
+            ms: since(turnStartedAt),
+            error: err instanceof Error ? err.message : String(err)
+          })
           controller.error(err)
           return
         }
         reader.releaseLock()
-        controller.enqueue(enc.encode("data: [DONE]\n\n"))
-        controller.close()
+
+        // CRITICAL: persist the assistant reply BEFORE signalling [DONE]/close.
+        // Doing it after close raced the Durable Object's eviction and could
+        // silently drop the reply — which is why conversations didn't hold.
+        // The response stream stays open until close(), keeping the DO alive
+        // for this await.
         try {
           await insertMessage(env, {
             sessionId,
@@ -138,13 +181,39 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
             model: modelId
           })
         } catch (e) {
-          console.error("agent: failed to persist streamed assistant message", e)
+          log.error("turn.stream.persist_failed", {
+            sessionId,
+            modelId,
+            error: e instanceof Error ? e.message : String(e)
+          })
         }
+
+        controller.enqueue(enc.encode("data: [DONE]\n\n"))
+        controller.close()
+
+        log.info("turn.done", {
+          sessionId,
+          modelId,
+          replyChars: acc.length,
+          ms: since(turnStartedAt),
+          stream: true,
+          empty: acc.trim().length === 0
+        })
+
+        // Memory reflection is best-effort background work; waitUntil keeps the
+        // DO alive without blocking the client's stream completion.
         if (reflectUserId !== "unknown" && acc.trim()) {
-          await reflect(env, reflectUserId, sessionId, [
-            { role: "user", content: reflectContent },
-            { role: "assistant", content: acc }
-          ])
+          ctx.waitUntil(
+            reflect(env, reflectUserId, sessionId, [
+              { role: "user", content: reflectContent },
+              { role: "assistant", content: acc }
+            ]).catch((e) =>
+              log.error("reflect.error", {
+                sessionId,
+                error: e instanceof Error ? e.message : String(e)
+              })
+            )
+          )
         }
       }
     })

@@ -18,6 +18,7 @@ export type LeoIconName =
   | "close"
   | "cloud"
   | "cookie"
+  | "cpu-chip"
   | "copy"
   | "download"
   | "eye-on"
@@ -70,6 +71,13 @@ const ICONS: Record<LeoIconName, ReactNode> = {
   ),
   cloud: (
     <path fill="currentColor" fillRule="evenodd" clipRule="evenodd" d="M7.5 18.5c-2.08 0-3.72-1.9-3.05-4.04.08-2.7 2.1-4.48 4.44-4.5A5.33 5.33 0 0 1 15.04 6.3a5.03 5.03 0 0 1 5.1 5.6 3.4 3.4 0 0 1-.76 6.6zm-.03-1.6h11.91c1.01 0 1.76-.56 1.76-1.82 0-1.13-.85-2.02-2.22-2.02h-.9l.25-.86a3.44 3.44 0 0 0-3.77-4.31l-.31.05-.27-.15A3.74 3.74 0 0 0 8.4 10.9l-.14.7h-.72c-1.58 0-2.78 1.14-2.78 2.91l-.04.25c-.4 1.18.5 2.14 2.75 2.14" />
+  ),
+  "cpu-chip": (
+    <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+      <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
+    </g>
   ),
   cookie: (
     <>
