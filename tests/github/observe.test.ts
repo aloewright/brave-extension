@@ -38,4 +38,16 @@ describe("observe", () => {
     const found = await elementReady("#late", { timeout: 200 })
     expect(found?.id).toBe("late")
   })
+
+  it("elementReady resolves null and stops observing when the signal aborts", async () => {
+    const ctrl = new AbortController()
+    const promise = elementReady("#never", { timeout: 5000, signal: ctrl.signal })
+    ctrl.abort()
+    const result = await promise
+    expect(result).toBeNull()
+    // A later matching element must not re-resolve / re-trigger observation.
+    document.body.append(Object.assign(document.createElement("div"), { id: "never" }))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(await promise).toBeNull()
+  })
 })
