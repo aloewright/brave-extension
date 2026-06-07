@@ -71,6 +71,23 @@ describe("/api/search", () => {
     for (const r of body.results) expect(r.type).toBe("link")
   })
 
+  it("accepts highlight type filters", async () => {
+    await authed(env, "/api/highlights", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "h1", text: "memorable highlighted text" })
+    })
+
+    const res = await authed(env, "/api/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "highlighted", types: ["highlight"] })
+    })
+    const body = (await res.json()) as { results: { type: string }[] }
+    expect(body.results.length).toBeGreaterThan(0)
+    for (const r of body.results) expect(r.type).toBe("highlight")
+  })
+
   it("rejects malformed body with 400", async () => {
     const res = await authed(env, "/api/search", {
       method: "POST",

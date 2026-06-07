@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { el, injectStyle } from "../../src/lib/github/dom"
+import { el, injectStyle, removeStyle } from "../../src/lib/github/dom"
 
 beforeEach(() => { document.head.innerHTML = ""; document.body.innerHTML = "" })
 
@@ -29,5 +29,12 @@ describe("dom factory", () => {
     injectStyle("k1", ".a{color:red}")
     injectStyle("k1", ".a{color:red}")
     expect(document.querySelectorAll('style[data-rgh="k1"]').length).toBe(1)
+  })
+  it("round-trips a key containing a double quote (escaped selector)", () => {
+    const key = 'weird"key'
+    injectStyle(key, ".b{color:blue}")
+    expect(document.querySelectorAll("style").length).toBe(1)
+    removeStyle(key)
+    expect(document.querySelectorAll("style").length).toBe(0)
   })
 })

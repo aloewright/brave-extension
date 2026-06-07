@@ -214,8 +214,8 @@ describe("content script step rendering", () => {
     expect(cs).toContain(".step")
   })
 
-  it("pushes step entries from the response before the assistant reply", () => {
-    expect(cs).toContain("response.steps")
+  it("listens for PAGE_AGENT_STEP_EVENT to push step entries", () => {
+    expect(cs).toContain("PAGE_AGENT_STEP_EVENT")
   })
 })
 

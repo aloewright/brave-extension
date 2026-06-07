@@ -34,7 +34,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 
 /** Idempotently inject a keyed <style>. Returns the element. */
 export function injectStyle(key: string, css: string): HTMLStyleElement {
-  const existing = document.querySelector<HTMLStyleElement>(`style[data-rgh="${key}"]`)
+  const existing = document.querySelector<HTMLStyleElement>(`style[data-rgh='${CSS.escape(key)}']`)
   if (existing) return existing
   const style = document.createElement("style")
   style.dataset.rgh = key
@@ -44,5 +44,5 @@ export function injectStyle(key: string, css: string): HTMLStyleElement {
 }
 
 export function removeStyle(key: string): void {
-  document.querySelector(`style[data-rgh="${key}"]`)?.remove()
+  document.querySelector(`style[data-rgh='${CSS.escape(key)}']`)?.remove()
 }

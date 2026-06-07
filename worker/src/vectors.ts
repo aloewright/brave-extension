@@ -2,7 +2,7 @@ import type { Env } from "./env"
 import { embed } from "./ai"
 import { chunkText } from "./chunk"
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture"
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
 
 export interface ResourceMeta {
   title: string

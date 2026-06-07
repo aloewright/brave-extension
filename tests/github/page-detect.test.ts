@@ -24,4 +24,9 @@ describe("page-detect", () => {
     expect(pd.isDashboard(u("https://github.com/"))).toBe(true)
     expect(pd.isNewRepo(u("https://github.com/new"))).toBe(true)
   })
+  it("reserved top-level paths are not repos or profiles", () => {
+    expect(pd.isRepo(u("https://github.com/apps/github-actions"))).toBe(false)
+    expect(pd.isProfile(u("https://github.com/apps"))).toBe(false)
+    expect(pd.isRepoRoot(u("https://github.com/apps/github-actions"))).toBe(false)
+  })
 })

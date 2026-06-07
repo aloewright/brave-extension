@@ -1,5 +1,3 @@
-const PROCESSED = new WeakSet<Element>()
-
 interface ObserveOptions { signal: AbortSignal }
 
 /**
@@ -37,20 +35,28 @@ export function observe(
   signal.addEventListener("abort", () => mo.disconnect(), { once: true })
 }
 
-export { PROCESSED }
-
 export function elementReady(
   selector: string,
-  { timeout = 10_000 }: { timeout?: number } = {}
+  { timeout = 10_000, signal }: { timeout?: number; signal?: AbortSignal } = {}
 ): Promise<Element | null> {
   const existing = document.querySelector(selector)
   if (existing) return Promise.resolve(existing)
+  if (signal?.aborted) return Promise.resolve(null)
   return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout>
+    const finish = (value: Element | null) => {
+      mo.disconnect()
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      resolve(value)
+    }
+    const onAbort = () => finish(null)
     const mo = new MutationObserver(() => {
       const found = document.querySelector(selector)
-      if (found) { mo.disconnect(); resolve(found) }
+      if (found) finish(found)
     })
+    signal?.addEventListener("abort", onAbort, { once: true })
     mo.observe(document.documentElement, { childList: true, subtree: true })
-    setTimeout(() => { mo.disconnect(); resolve(document.querySelector(selector)) }, timeout)
+    timer = setTimeout(() => finish(document.querySelector(selector)), timeout)
   })
 }

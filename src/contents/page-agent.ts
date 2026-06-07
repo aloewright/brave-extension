@@ -9,6 +9,7 @@ export const config: PlasmoCSConfig = {
 const TOKEN = Math.random().toString(36).slice(2, 10)
 const HOST_ID = `surface-${TOKEN}`
 const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
+const PAGE_AGENT_STATE_KEY = "pageAgent.state"
 
 type StepEntryLite = {
   kind: string
@@ -28,7 +29,14 @@ type ChatEntry = TextEntry | StepChatEntry
 let sessionId: string | undefined
 let visible = true
 let open = false
-const entries: ChatEntry[] = []
+let entries: ChatEntry[] = []
+
+function persistState() {
+  void chrome.storage?.session?.set?.({
+    [PAGE_AGENT_STATE_KEY]: { sessionId, entries, open }
+  })
+}
+
 const CHAT_KEYBOARD_EVENTS = ["keydown", "keypress", "keyup"] as const
 
 function shouldSubmitChat(event: KeyboardEvent) {
@@ -302,6 +310,7 @@ function mount() {
       })
     )
     log.scrollTop = log.scrollHeight
+    persistState()
   }
 
   const setVisible = (nextVisible: boolean, persist = false) => {
@@ -314,10 +323,12 @@ function mount() {
   }
 
   toggle.addEventListener("click", () => {
-    open = true
-    if (entries.length === 0) entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+    open = !open
+    if (open && entries.length === 0) {
+      entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+    }
     render()
-    input.focus()
+    if (open) input.focus()
   })
   close.addEventListener("click", () => {
     open = false
@@ -326,35 +337,14 @@ function mount() {
   for (const type of CHAT_KEYBOARD_EVENTS) {
     window.addEventListener(type, shieldPageAgentKeyboardEvent, true)
   }
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault()
-    const text = input.value.trim()
-    if (!text) return
-    input.value = ""
-    entries.push({ role: "user", text }, { role: "status", text: "Planning with current page observation..." })
-    render()
-    try {
-      const response = await sendRuntime<{
-        ok: true
-        sessionId: string
-        reply: string
-        provider: string
-        steps: StepEntryLite[]
-      }>({ type: "PAGE_AGENT_MESSAGE", sessionId, text })
-      sessionId = response.sessionId
-      removeLastStatus()
-      for (const step of response.steps || []) {
-        entries.push({ role: "step", step, expanded: false })
-      }
-      entries.push({ role: "assistant", text: `${response.reply}\n\nProvider: ${response.provider}` })
-    } catch (err) {
-      removeLastStatus()
-      entries.push({ role: "error", text: err instanceof Error ? err.message : String(err) })
-    }
-    render()
-  })
-
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "PAGE_AGENT_STEP_EVENT") {
+      removeLastStatus()
+      entries.push({ role: "step", step: message.step, expanded: false })
+      render()
+      sendResponse({ ok: true })
+      return false
+    }
     if (message?.type !== "PAGE_AGENT_TOGGLE") return false
     const nextVisible =
       typeof message.visible === "boolean" ? message.visible : !visible
@@ -367,11 +357,47 @@ function mount() {
     return false
   })
 
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    const text = input.value.trim()
+    if (!text) return
+    input.value = ""
+    entries.push({ role: "user", text }, { role: "status", text: "Planning and Executing..." })
+    render()
+    try {
+      const response = await sendRuntime<{
+        ok: true
+        sessionId: string
+        reply: string
+        provider: string
+        steps: StepEntryLite[]
+      }>({ type: "PAGE_AGENT_MESSAGE", sessionId, text })
+      sessionId = response.sessionId
+      removeLastStatus()
+      entries.push({ role: "assistant", text: `${response.reply}\n\nProvider: ${response.provider}` })
+    } catch (err) {
+      removeLastStatus()
+      entries.push({ role: "error", text: err instanceof Error ? err.message : String(err) })
+    }
+    render()
+  })
+
   render()
   void chrome.storage?.local?.get?.(PAGE_AGENT_VISIBLE_KEY)?.then((result) => {
     const stored = result?.[PAGE_AGENT_VISIBLE_KEY]
     if (typeof stored === "boolean") setVisible(stored)
   })
+  
+  void chrome.storage?.session?.get?.(PAGE_AGENT_STATE_KEY)?.then((result) => {
+    const state = result?.[PAGE_AGENT_STATE_KEY] as { sessionId?: string, entries?: ChatEntry[], open?: boolean } | undefined
+    if (state) {
+      if (typeof state.sessionId === "string") sessionId = state.sessionId
+      if (Array.isArray(state.entries)) entries = state.entries
+      if (typeof state.open === "boolean") open = state.open
+      render()
+    }
+  })
+
   chrome.storage?.onChanged?.addListener?.((changes, area) => {
     if (area !== "local" || !(PAGE_AGENT_VISIBLE_KEY in changes)) return
     const nextVisible = changes[PAGE_AGENT_VISIBLE_KEY].newValue

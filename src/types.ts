@@ -179,7 +179,7 @@ export const DEFAULT_SETTINGS: Settings = {
   captureSubfolder: "ai-dev-sidebar",
   cloudCapturesEnabled: false,
   sidebarSyncEnabled: false,
-  sidebarApiUrl: "https://sidebar.pdx.software",
+  sidebarApiUrl: "https://txt.fly.pm",
   sidebarApiToken: "",
   tasksApiToken: "",
   sidebarPruneAfterSync: false,

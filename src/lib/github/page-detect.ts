@@ -3,7 +3,8 @@
 const RESERVED = new Set([
   "new", "settings", "notifications", "marketplace", "explore", "issues",
   "pulls", "search", "sponsors", "orgs", "login", "join", "about", "topics",
-  "trending", "codespaces", "dashboard"
+  "trending", "codespaces", "dashboard", "apps", "enterprises", "features",
+  "collections", "events", "stars", "users"
 ])
 
 const parts = (url: URL) => url.pathname.split("/").filter(Boolean)

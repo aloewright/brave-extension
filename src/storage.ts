@@ -23,7 +23,8 @@ const KEYS = {
   // Phase 5 — one-shot migration that copies any non-empty cloudos* settings
   // into the matching sidebar* slot so users don't have to re-enter the URL
   // and token after upgrading.
-  cloudosToSidebarMigration: "migration:cloudos-to-sidebar"
+  cloudosToSidebarMigration: "migration:cloudos-to-sidebar",
+  sidebarApiUrlTxtMigration: "migration:sidebar-api-url-txt-fly"
 }
 
 const GATE_KEYS = {
@@ -35,6 +36,8 @@ const GATE_KEYS = {
 const SCAN_CACHE_LIMIT = 50
 
 const BACKENDS: CLIBackend[] = ["claude", "gemini", "copilot", "codex"]
+const LEGACY_SIDEBAR_API_URL = "https://sidebar.pdx.software"
+const TXT_SIDEBAR_API_URL = "https://txt.fly.pm"
 
 function messageKey(backend: CLIBackend): string {
   return `ai-dev-messages-${backend}`
@@ -51,23 +54,37 @@ function objectValue(value: unknown): Record<string, unknown> {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const result = await chrome.storage.local.get([KEYS.settings, KEYS.cloudosToSidebarMigration])
-  const merged: Settings = {
+  const result = await chrome.storage.local.get([
+    KEYS.settings,
+    KEYS.cloudosToSidebarMigration,
+    KEYS.sidebarApiUrlTxtMigration
+  ])
+  let current: Settings = {
     ...defaultSettings(),
     ...(objectValue(result[KEYS.settings]) as Partial<Settings>)
   }
-  if (result[KEYS.cloudosToSidebarMigration]) return merged
+  const writes: Record<string, unknown> = {}
 
-  const migrated = migrateCloudosToSidebar(merged)
-  if (migrated !== merged) {
-    await chrome.storage.local.set({
-      [KEYS.settings]: migrated,
-      [KEYS.cloudosToSidebarMigration]: true
-    })
-  } else {
-    await chrome.storage.local.set({ [KEYS.cloudosToSidebarMigration]: true })
+  if (!result[KEYS.sidebarApiUrlTxtMigration]) {
+    const migrated = migrateLegacySidebarApiUrl(current)
+    if (migrated !== current) {
+      current = migrated
+      writes[KEYS.settings] = current
+    }
+    writes[KEYS.sidebarApiUrlTxtMigration] = true
   }
-  return migrated
+
+  if (!result[KEYS.cloudosToSidebarMigration]) {
+    const migrated = migrateCloudosToSidebar(current)
+    if (migrated !== current) {
+      current = migrated
+      writes[KEYS.settings] = current
+    }
+    writes[KEYS.cloudosToSidebarMigration] = true
+  }
+
+  if (Object.keys(writes).length > 0) await chrome.storage.local.set(writes)
+  return current
 }
 
 export async function setSettings(settings: Partial<Settings>): Promise<void> {
@@ -111,6 +128,11 @@ export function migrateCloudosToSidebar(settings: Settings): Settings {
   }
 
   return changed ? next : settings
+}
+
+export function migrateLegacySidebarApiUrl(settings: Settings): Settings {
+  if (settings.sidebarApiUrl !== LEGACY_SIDEBAR_API_URL) return settings
+  return { ...settings, sidebarApiUrl: TXT_SIDEBAR_API_URL }
 }
 
 /**

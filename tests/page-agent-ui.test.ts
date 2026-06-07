@@ -65,7 +65,7 @@ describe("page agent UI", () => {
     )
 
     expect(pageAgent).toContain('toggle.addEventListener("click"')
-    expect(pageAgent).toContain("open = true")
+    expect(pageAgent).toContain("open = !open")
     expect(pageAgent).toContain('toggle.style.display = visible && !open ? "inline-grid" : "none"')
   })
 

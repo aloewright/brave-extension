@@ -14,6 +14,7 @@ export type SectionId =
   | "eyedropper"
   | "joplin"
   | "aiChat"
+  | "github"
   | "settings";
 
 export interface SectionDef {
@@ -41,5 +42,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "eyedropper", label: "Eyedropper" },
   { id: "joplin", label: "Joplin" },
   { id: "aiChat", label: "AI Chat" },
+  { id: "github", label: "GitHub" },
   { id: "settings", label: "Settings" },
 ];

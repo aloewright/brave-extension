@@ -43,7 +43,7 @@ describe("getSettings / setSettings", () => {
     expect(s.cloudosSyncEnabled).toBe(false)
     // New sidebar defaults from Phase 5.
     expect(s.sidebarSyncEnabled).toBe(false)
-    expect(s.sidebarApiUrl).toBe("https://sidebar.pdx.software")
+    expect(s.sidebarApiUrl).toBe("https://txt.fly.pm")
     expect(s.sidebarApiToken).toBe("")
     expect(s.sidebarPruneAfterSync).toBe(false)
     expect(s.browserAgentCloudPlanningEnabled).toBe(false)
@@ -71,6 +71,26 @@ describe("getSettings / setSettings", () => {
     // Cloudos values preserved for one release.
     expect(s.cloudosSyncEnabled).toBe(true)
     expect(s.cloudosServiceToken).toBe("secret-abc")
+  })
+
+  it("migrates the old default sidebar API URL to txt.fly.pm", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        sidebarApiUrl: "https://sidebar.pdx.software"
+      }
+    })
+    const s = await getSettings()
+    expect(s.sidebarApiUrl).toBe("https://txt.fly.pm")
+  })
+
+  it("preserves custom sidebar API URLs during txt.fly.pm migration", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        sidebarApiUrl: "https://custom.example"
+      }
+    })
+    const s = await getSettings()
+    expect(s.sidebarApiUrl).toBe("https://custom.example")
   })
 
   it("migration is idempotent — second read returns same shape without re-copying", async () => {
