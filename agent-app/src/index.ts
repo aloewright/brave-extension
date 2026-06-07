@@ -16,8 +16,15 @@ export { buildApp } from "./app"
 // behind auth + per-session ownership.
 const app = buildApp()
 
-app.notFound((c) =>
-  c.json({ error: { code: "not_found", message: "no such route" } }, 404)
-)
+app.notFound((c) => {
+  // For /api/* paths, return the JSON 404. For everything else, hand off to the
+  // static-assets binding so the SPA can claim the path (with
+  // not_found_handling="single-page-application" falling back to index.html).
+  if (c.req.path.startsWith("/api/")) {
+    return c.json({ error: { code: "not_found", message: "no such route" } }, 404)
+  }
+  if (c.env.ASSETS) return c.env.ASSETS.fetch(c.req.raw)
+  return c.json({ error: { code: "not_found", message: "no such route" } }, 404)
+})
 
 export default app
