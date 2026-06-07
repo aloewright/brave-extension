@@ -30,21 +30,28 @@ sessions.get("/:id/messages", async (c) => {
 sessions.post("/:id/messages", async (c) => {
   const sess = await getSession(c.env, c.get("userId"), c.req.param("id"))
   if (!sess) return c.json({ error: { code: "not_found", message: "no such session" } }, 404)
-  const body = (await c.req.json().catch(() => ({}))) as { content?: string }
-  if (!body.content?.trim()) {
+  const body = (await c.req.json().catch(() => ({}))) as { content?: unknown }
+  if (typeof body.content !== "string" || !body.content.trim()) {
     return c.json({ error: { code: "bad_request", message: "content required" } }, 400)
   }
 
   const id = c.env.CHAT_AGENT.idFromName(sess.id)
   const stub = c.env.CHAT_AGENT.get(id)
-  const res = await stub.fetch(
-    new Request("https://agent/internal/turn", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: sess.id, content: body.content })
-    })
-  )
-  return new Response(res.body, { status: res.status, headers: res.headers })
+  try {
+    const res = await stub.fetch(
+      new Request("https://agent/internal/turn", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: sess.id, content: body.content })
+      })
+    )
+    return new Response(res.body, { status: res.status, headers: res.headers })
+  } catch {
+    return c.json(
+      { error: { code: "service_unavailable", message: "Agent is currently unavailable" } },
+      503
+    )
+  }
 })
 
 export default sessions

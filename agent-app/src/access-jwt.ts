@@ -36,11 +36,15 @@ async function getJwks(teamDomain: string): Promise<Jwk[]> {
   ) {
     return jwksCache.keys
   }
-  const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`)
-  if (!res.ok) return []
-  const body = (await res.json()) as { keys: Jwk[] }
-  jwksCache = { domain: teamDomain, keys: body.keys ?? [], fetchedAt: Date.now() }
-  return jwksCache.keys
+  try {
+    const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`)
+    if (!res.ok) return []
+    const body = (await res.json()) as { keys: Jwk[] }
+    jwksCache = { domain: teamDomain, keys: body.keys ?? [], fetchedAt: Date.now() }
+    return jwksCache.keys
+  } catch {
+    return []
+  }
 }
 
 export async function verifyAccessJwt(

@@ -25,29 +25,36 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 })
     }
-    const body = (await request.json()) as { sessionId: string; content: string }
+    let body: { sessionId?: string; content?: string }
+    try {
+      body = (await request.json()) as { sessionId?: string; content?: string }
+    } catch {
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 })
+    }
     if (!body?.sessionId || !body?.content) {
       return Response.json({ error: "sessionId and content required" }, { status: 400 })
     }
+    const sessionId = body.sessionId!
+    const content = body.content!
 
     await insertMessage(this.env, {
-      sessionId: body.sessionId,
+      sessionId,
       role: "user",
-      content: body.content,
+      content,
       model: null
     })
 
-    const reply = this.generateReply(body.content)
+    const reply = this.generateReply(content)
     const assistant = await insertMessage(this.env, {
-      sessionId: body.sessionId,
+      sessionId,
       role: "assistant",
       content: reply,
       model: "echo"
     })
 
     this.setState({
-      sessionId: body.sessionId,
-      lastTurn: { user: body.content, assistant: reply }
+      sessionId,
+      lastTurn: { user: content, assistant: reply }
     })
 
     return Response.json({ message: assistant })

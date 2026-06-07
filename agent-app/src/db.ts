@@ -74,21 +74,21 @@ export async function insertMessage(
     model: m.model,
     created_at: Date.now()
   }
-  await env.DB.prepare(
+  const stmt1 = env.DB.prepare(
     `INSERT INTO agent_messages (id, session_id, role, content, model, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(row.id, row.session_id, row.role, row.content, row.model, row.created_at)
+  const stmt2 = env.DB.prepare(`UPDATE agent_sessions SET updated_at = ? WHERE id = ?`).bind(
+    row.created_at,
+    m.sessionId
   )
-    .bind(row.id, row.session_id, row.role, row.content, row.model, row.created_at)
-    .run()
-  await env.DB.prepare(`UPDATE agent_sessions SET updated_at = ? WHERE id = ?`)
-    .bind(row.created_at, m.sessionId)
-    .run()
+  await env.DB.batch([stmt1, stmt2])
   return row
 }
 
 export async function listMessages(env: Env, sessionId: string): Promise<MessageRow[]> {
   const res = await env.DB.prepare(
-    `SELECT * FROM agent_messages WHERE session_id = ? ORDER BY created_at ASC`
+    `SELECT * FROM agent_messages WHERE session_id = ? ORDER BY created_at ASC, id ASC`
   )
     .bind(sessionId)
     .all()

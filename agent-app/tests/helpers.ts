@@ -49,7 +49,14 @@ function wrapAsD1(sqlite: DatabaseSync): D1Database {
       return { results: rows, success: true, meta: {} }
     }
   })
-  return { prepare: (sql: string) => makePrepared(sql) } as unknown as D1Database
+  return {
+    prepare: (sql: string) => makePrepared(sql),
+    batch: async (stmts: Array<{ run: () => Promise<unknown> }>) => {
+      const out = []
+      for (const s of stmts) out.push(await s.run())
+      return out
+    }
+  } as unknown as D1Database
 }
 
 export function makeEnv(overrides?: Partial<Env>): Env {
