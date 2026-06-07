@@ -65,6 +65,7 @@ import {
   fetchCalTasksViaPageContext,
   type CalTasksTabFetchResult,
 } from "./background/cal-tasks-proxy";
+import { importVideoUrl } from "./background/video-import";
 import {
   parseProgram,
   executeProgram,
@@ -882,6 +883,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "RESOLVE_IP") {
     resolveHostname(message.hostname).then((ip) => sendResponse({ ip }));
+    return true;
+  }
+
+  if (message.type === "IMPORT_VIDEO_URL") {
+    const pageUrl = typeof message.url === "string" ? message.url : "";
+    if (!pageUrl) {
+      sendResponse({ ok: false, error: "url required" });
+      return;
+    }
+    importVideoUrl(pageUrl)
+      .then((result) => sendResponse({ ok: result.ok, ...result }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     return true;
   }
 

@@ -131,6 +131,23 @@ export interface SidebarApiClient {
       metadata: RecordingUploadMetadata
     ) => Promise<{ id: string; status: string; r2_key: string; workflow_id: string | null }>
   }
+  videos: {
+    import: (payload: {
+      url: string
+      id?: string
+      filename?: string
+      video_quality?: string
+      download_mode?: string
+    }) => Promise<{
+      id: string
+      status: string
+      r2_key: string
+      workflow_id: string | null
+      source: string
+      origin_url: string
+      size_bytes: number
+    }>
+  }
   agent: {
     chat: (payload: BrowserAgentChatPayload) => Promise<{
       session: BrowserAgentSession
@@ -194,6 +211,10 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
           method: "POST",
           body: JSON.stringify({ bookmarks, pulledAt })
         })
+    },
+    videos: {
+      import: (payload) =>
+        jsonRequest("/api/videos/import", { method: "POST", body: JSON.stringify(payload) })
     },
     recordings: {
       upload: async (blob, metadata) => {

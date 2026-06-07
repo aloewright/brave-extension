@@ -7,6 +7,7 @@ import captures from "./routes/captures"
 import agent from "./routes/agent"
 import categorize from "./routes/categorize"
 import recordings from "./routes/recordings"
+import videos from "./routes/videos"
 import pdfs from "./routes/pdfs"
 import highlights from "./routes/highlights"
 import search from "./routes/search"
@@ -30,6 +31,7 @@ app.route("/api/bookmarks/categorize", categorize)
 app.route("/api/captures", captures)
 app.route("/api/agent", agent)
 app.route("/api/recordings", recordings)
+app.route("/api/videos", videos)
 app.route("/api/pdfs", pdfs)
 app.route("/api/highlights", highlights)
 app.route("/api/search", search)
