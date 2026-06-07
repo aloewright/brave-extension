@@ -975,6 +975,10 @@ async function pageAgentObserve(tabId: number): Promise<unknown> {
 
 type LocalPlanResponse = { ok?: boolean; reply?: string; plan?: unknown } | null;
 
+// Instantiated once, not per message, so a single client/connection is reused.
+const hindsightClient = new HindsightClient({ baseUrl: "http://localhost:8888" });
+const hindsightBankId = "page-agent-bank";
+
 async function handlePageAgentMessage(input: {
   tabId: number;
   sessionId?: string;
@@ -987,9 +991,6 @@ async function handlePageAgentMessage(input: {
 }> {
   const text = input.text.trim();
   if (!text) throw new Error("message required");
-  
-  const hindsightClient = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-  const hindsightBankId = 'page-agent-bank';
 
   let memoryContext = "";
   try {
@@ -1035,6 +1036,50 @@ async function handlePageAgentMessage(input: {
       return (obs ?? { nodes: [] }) as Awaited<ReturnType<ProgramDeps["observe"]>>;
     },
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    waitFor: async (tabId, selector, timeoutMs) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        try {
+          const [res] = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: (sel: string) => Boolean(document.querySelector(sel)),
+            args: [selector]
+          });
+          if (res?.result) return true;
+        } catch {
+          /* tab may be mid-navigation; keep polling until the deadline */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return false;
+    },
+    newTab: async (url) => {
+      const tab = await chrome.tabs.create({
+        url: url || undefined,
+        active: true
+      });
+      return tab.id ?? -1;
+    },
+    switchTab: async (tabId) => {
+      await chrome.tabs.update(tabId, { active: true });
+    },
+    closeTab: async (tabId) => {
+      await chrome.tabs.remove(tabId);
+      // Report the now-active tab so executeProgram can re-target observation
+      // instead of observing the tab it just removed.
+      const [active] = await chrome.tabs.query({
+        active: true,
+        lastFocusedWindow: true
+      });
+      return active?.id ?? null;
+    },
+    onStep: (step) => {
+      try {
+        chrome.runtime.sendMessage({ type: "PAGE_AGENT_STEP", step });
+      } catch {
+        /* no listener (e.g. side panel closed) — streaming is best-effort */
+      }
+    },
     now: () => Date.now(),
     retain: async (content) => {
       try {
@@ -1080,7 +1125,10 @@ async function handlePageAgentMessage(input: {
         settings,
         sessionId,
         message: text,
-        objective: enhancedObjective,
+        // Send only the raw user objective to the cloud. `enhancedObjective`
+        // carries recalled Hindsight memory, which must stay local and not be
+        // forwarded to sidebar-api.
+        objective: text,
         observation: trace.finalObservation
       }));
       return {

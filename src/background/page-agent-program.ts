@@ -131,7 +131,8 @@ export type ProgramDeps = {
   waitFor?(tabId: number, selector: string, timeoutMs: number): Promise<boolean>
   newTab?(url?: string): Promise<number>
   switchTab?(tabId: number): Promise<void>
-  closeTab?(tabId: number): Promise<void>
+  /** Closes the tab and returns the now-active tab id (or null if none). */
+  closeTab?(tabId: number): Promise<number | null>
   now(): number
   retain?(content: string): Promise<void>
   recall?(query: string): Promise<string>
@@ -191,8 +192,11 @@ async function runOp(
   if (op.kind === "browser.close_tab") {
     if (op.targetTabId == null) return { ok: false, skipped: true, reason: "close_tab requires targetTabId", durationMs: elapsed() }
     if (!deps.closeTab) return { ok: false, skipped: true, reason: "closeTab not wired", durationMs: elapsed() }
-    await deps.closeTab(op.targetTabId)
-    return { ok: true, durationMs: elapsed() } 
+    const replacement = await deps.closeTab(op.targetTabId)
+    // If we closed the active tab, hand the replacement back so the engine
+    // re-observes the surviving tab instead of the removed one.
+    const newTabId = op.targetTabId === tabId && replacement != null ? replacement : undefined
+    return { ok: true, durationMs: elapsed(), newTabId }
   }
   if (op.kind === "browser.navigate") {
     if (!op.url || !/^https?:\/\//i.test(op.url)) {
@@ -268,7 +272,12 @@ export async function executeProgram(
     if (op.kind === "browser.observe" && result.data) {
       observation = result.data as ObservationLite
     } else if (STRUCTURAL_OPS.has(op.kind) && result.ok && !result.skipped) {
-      observation = await deps.observe(currentTabId)
+      try {
+        observation = await deps.observe(currentTabId)
+      } catch {
+        // The tab may have been closed or navigated out from under us
+        // (e.g. close_tab with no surviving tab); keep the prior observation.
+      }
     }
   }
   return { steps, finalObservation: observation, finalTabId: currentTabId }
