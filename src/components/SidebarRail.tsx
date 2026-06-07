@@ -21,7 +21,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   terminal: "terminal",
   inspector: "search",
   extensions: "puzzle-piece",
-  tech: "robot",
+  tech: "cpu-chip",
   session: "inbox",
   quickInfo: "avatar",
   tasks: "list-checks",
@@ -32,7 +32,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   recorder: "radio-checked",
   eyedropper: "paint-brush",
   joplin: "file-export",
-  agentChat: "cloud",
+  agentChat: "robot",
   github: "github",
   settings: "settings"
 }
