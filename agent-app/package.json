@@ -16,13 +16,17 @@
     "d1:migrate:remote": "wrangler d1 migrations apply sidebar --remote"
   },
   "dependencies": {
+    "@tanstack/ai": "^0.28.0",
+    "@tanstack/ai-code-mode": "^0.2.5",
+    "@tanstack/ai-isolate-cloudflare": "^0.2.21",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "^1.170.15",
     "agents": "^0.14.5",
     "hono": "^4.6.0",
     "hono-agents": "^3.0.11",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260520.0",
