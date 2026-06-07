@@ -57,9 +57,12 @@ interface FeatureMeta {
   id: string
   name: string
   description: string
-  category: "global" | "repository" | "pull-requests" | "issues" | "profiles"
+  category: "global" | "repository" | "pull-requests" | "issues" | "profiles" | "write-actions"
   defaultEnabled: boolean
-  needsToken?: boolean
+  needsToken?: boolean                 // true for [API] and [API-write] features
+  isWrite?: boolean                    // mutates GitHub state ⇒ stronger UI/guards
+  writeScopes?: string[]               // e.g. ["repo"], ["repo","delete_repo"]
+  confirm?: string                     // if set, confirm() with this text before acting
   pageTest: (url: URL) => boolean      // built from page-detect predicates
   init: (signal: AbortSignal) => void | Promise<void>
 }
@@ -94,11 +97,42 @@ silently does nothing rather than breaking the page.
 
 **Profiles:** `profile-repo-search`, `clean-profile`.
 
+**Write actions** (mutate GitHub state — see Write-action safety below):
+`quick-repo-deletion`, `restore-file` [API-write], `quick-label-removal`
+[API-write], `quick-review`, `new-repo-disable-projects-and-wikis` [API-write],
+`sync-pr-commit-title`, `update-pr-from-base-branch` [API-write].
+
 Explicitly **excluded** as fluff: easter eggs, decorative-only features,
-attribution/welcome/sponsor UI.
+attribution/welcome/sponsor UI. Write features dropped from this round:
+`convert-release-to-draft`, `status-subscription`.
 
 CSS-only and URL-param features are the most stable; [API] features the most
 valuable but token-dependent.
+
+### Write-action safety
+
+Write features mutate GitHub state, so they get stronger guards than read
+features:
+
+- **Two mechanisms, by feature.** Some drive GitHub's *own* forms/buttons
+  (session cookie + CSRF, **no PAT**): `quick-repo-deletion` (auto-fills the
+  Danger Zone confirmation form), `sync-pr-commit-title`, `quick-review`
+  (POSTs to the github.com review endpoint). The rest call the API and need a
+  **write-scoped PAT** (`[API-write]`): `restore-file`, `quick-label-removal`,
+  `new-repo-disable-projects-and-wikis`, `update-pr-from-base-branch`.
+- **`defaultEnabled: false` for every write feature.** The user must opt in
+  per feature; nothing destructive is on by default even with the master
+  switch on.
+- **Explicit confirmation before irreversible/high-impact actions.** Native
+  `confirm()` in the content script, matching RGH (e.g. repo deletion). The
+  `quick-repo-deletion` flow never deletes silently — it routes to the Danger
+  Zone and pre-fills the confirmation, leaving the final click to the user.
+- **`needsToken` + `writeScopes` on FeatureMeta.** `[API-write]` features
+  no-op (and the UI badges them) when no token is resolved. The GitHub section
+  notes that these require a PAT with `repo` (and `delete_repo` for repo
+  deletion) scopes.
+- **No new destructive primitives.** We port only the actions above; nothing
+  batches or automates them beyond a single user-initiated click.
 
 ## Storage shape
 
@@ -142,7 +176,11 @@ the sidebar rail (`SectionId` + `SidebarRail`). Layout:
   candidates (`GITHUB_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, …), value never shown.
   Mirrors the Sidebar/Tasks token rows in `SettingsSection.tsx`.
 - Per-category collapsible groups, each listing its features with a toggle,
-  name, description, and an [API] badge where `needsToken`.
+  name, description, and an [API] badge where `needsToken`. The
+  **Write actions** group is visually distinct (warning accent), badges
+  `isWrite` features, shows required `writeScopes`, and notes the token must
+  carry write scopes (`delete_repo` for repo deletion). All write features
+  render as off by default.
 - Toggling writes `settings.github.features[id]` through `useSettings().update`.
 
 Follows existing section conventions (Tailwind classes, `useSettings`, the
@@ -160,6 +198,7 @@ section component pattern in `src/sections/*`).
 ## Out of scope (v1)
 
 - Vendoring or porting the full RGH feature set.
-- Features requiring GitHub write scopes or destructive actions.
+- Write features beyond the seven listed (e.g. `convert-release-to-draft`,
+  `status-subscription`) — deferred, not rejected.
 - Non-GitHub network calls of any kind.
 ```
