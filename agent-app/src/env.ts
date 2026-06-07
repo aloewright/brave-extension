@@ -6,6 +6,8 @@ export interface Env {
   AI: Ai
   AGENT_KV: KVNamespace
   CHAT_AGENT: DurableObjectNamespace<import("./agents/chat-agent").ChatAgent>
+  /** Static SPA assets binding (wrangler [assets]); SPA fallback to index.html. */
+  ASSETS?: Fetcher
 
   // --- Cloudflare Access secrets (Doppler → wrangler secret put) ---
   /** Access service-token client id the extension must present. */
