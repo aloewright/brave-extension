@@ -15,4 +15,19 @@ describe("agent API settings", () => {
     expect(src).toContain("agentAccessClientId")
     expect(src).toContain("agentAccessClientSecret")
   })
+  it("defaults the agent API URL to the deployed Worker", () => {
+    expect(DEFAULT_SETTINGS.agentApiUrl).toBe("https://agent.fly.pm")
+  })
+  it("auto-fills the agent service token from Doppler in SettingsSection", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/sections/settings/SettingsSection.tsx"),
+      "utf8"
+    )
+    // Requested in the Doppler batch download...
+    expect(src).toContain("AGENT_ACCESS_CLIENT_ID")
+    expect(src).toContain("AGENT_ACCESS_CLIENT_SECRET")
+    // ...and written into settings from the result.
+    expect(src).toContain("agentAccessClientId")
+    expect(src).toContain("agentAccessClientSecret")
+  })
 })
