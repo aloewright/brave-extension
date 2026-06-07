@@ -1,0 +1,44 @@
+name: deploy-agent-app
+
+# Auto-deploy the agent-app Worker (agent.fly.pm) on merge to main whenever
+# agent-app changes. Builds the web SPA then `wrangler deploy`. Note: D1 schema
+# migrations (wrangler d1 migrations apply) are NOT run here — those stay manual
+# to avoid auto-mutating the shared production DB. Durable Object class
+# migrations declared in wrangler.toml are applied by `wrangler deploy` itself.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent-app/**"
+      - ".github/workflows/deploy-agent-app.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-agent-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: agent-app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:web
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
