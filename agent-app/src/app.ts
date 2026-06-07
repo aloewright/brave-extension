@@ -3,6 +3,7 @@ import { requireAccess } from "./auth"
 import sessions from "./routes/sessions"
 import models from "./routes/models"
 import type { Env } from "./env"
+import { log, since } from "./log"
 
 type Vars = { userId: string }
 
@@ -13,6 +14,19 @@ type Vars = { userId: string }
 // on top of this.
 export function buildApp() {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>()
+
+  // Request logging for the whole API surface (Workers Logs / wrangler tail).
+  app.use("/api/*", async (c, next) => {
+    const startedAt = Date.now()
+    await next()
+    log.info("http.request", {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      ms: since(startedAt),
+      userId: c.get("userId") ?? null
+    })
+  })
 
   // Auth guard for our REST API.
   app.use("/api/*", requireAccess())
