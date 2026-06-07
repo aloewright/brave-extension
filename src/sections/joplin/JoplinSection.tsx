@@ -18,6 +18,7 @@ import {
   getRecentClips,
   clearRecentClips
 } from "../../lib/joplin-recents"
+import { ChatSection } from "../ai-chat/ChatSection"
 
 const LAST_MODE_KEY = "ai-dev-joplin-last-mode"
 const lastModeStorage = new Storage()
@@ -105,7 +106,9 @@ export function JoplinSection() {
   )
 
   return (
-    <div className="p-3 space-y-3 text-sm">
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Joplin clipper — pinned on top */}
+      <div className="shrink-0 p-3 space-y-3 text-sm">
       {/* Header */}
       <div className="flex items-center gap-2">
         <span className={`inline-block w-2 h-2 rounded-full ${statusDotColor}`} />
@@ -187,6 +190,12 @@ export function JoplinSection() {
             ))}
           </ul>
         )}
+      </div>
+      </div>
+
+      {/* AI Chat — stacked below the clipper, fills remaining height */}
+      <div className="flex-1 min-h-0 border-t border-default">
+        <ChatSection />
       </div>
     </div>
   )
