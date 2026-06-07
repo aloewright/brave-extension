@@ -1,5 +1,6 @@
 // src/lib/github/registry.ts
 import type { GitHubFeatureSettings } from "../../types"
+import copyFilePath from "./features/copy-file-path"
 import stickyFileHeaders from "./features/sticky-file-headers"
 
 export type FeatureCategory =
@@ -20,7 +21,7 @@ export interface FeatureMeta {
 }
 
 // Populated in Phase 5 as features are ported. Keep alphabetised by id.
-export const FEATURES: FeatureMeta[] = [stickyFileHeaders]
+export const FEATURES: FeatureMeta[] = [copyFilePath, stickyFileHeaders]
 
 export function featureMap(list: FeatureMeta[] = FEATURES): Record<string, FeatureMeta> {
   return Object.fromEntries(list.map((f) => [f.id, f]))
