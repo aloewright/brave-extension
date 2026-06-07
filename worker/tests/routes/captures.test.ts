@@ -129,6 +129,28 @@ describe("POST /api/captures (ALO-468)", () => {
     expect(listBody.captures[0]!.sourceTitle).toBe("Example Page")
   })
 
+  it("renames the capture from OCR text at ingest", async () => {
+    const env = makeEnv()
+    // Stub AI: OCR (llava) returns visible text; embed (bge) returns a vector;
+    // the rename model (gpt-oss) returns a title.
+    const aiRun = vi.fn(async (model: string, payload: unknown) => {
+      if (model.includes("llava")) return { description: "Invoice ACME 2026" }
+      if (model.endsWith("bge-base-en-v1.5")) {
+        const texts = ((payload as { text?: string[] }).text) ?? []
+        return { data: texts.map(() => Array.from({ length: EMBED_DIMS }, () => 0.01)) }
+      }
+      return { response: "ACME Invoice 2026" }
+    })
+    env.AI = { run: aiRun } as unknown as Ai
+    const res = await app.fetch(
+      uploadRequest({ kind: "screenshot", filename: "screenshot-123.png", body: new Uint8Array([1, 2, 3, 4]) }),
+      env
+    )
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { id: string; filename: string }
+    expect(body.filename).toBe("acme-invoice-2026.png")
+  })
+
   it("keeps the row even when OCR throws — status='failed' but R2/D1 are written", async () => {
     const env = makeEnv()
     const aiRun = vi.fn(async (model: string, payload: unknown) => {
