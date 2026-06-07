@@ -44,6 +44,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   eyedropper: "Eyedropper",
   joplin: "Joplin",
   aiChat: "AI Chat",
+  github: "GitHub",
   settings: "Settings",
 };
 

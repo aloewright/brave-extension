@@ -32,6 +32,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   eyedropper: "paint-brush",
   joplin: "file-export",
   aiChat: "robot",
+  github: "globe",
   settings: "settings"
 }
 
