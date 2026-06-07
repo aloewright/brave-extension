@@ -9,7 +9,6 @@ import newRepoDisableProjectsAndWikis from "./features/new-repo-disable-projects
 import quickLabelRemoval from "./features/quick-label-removal"
 import quickRepoDeletion from "./features/quick-repo-deletion"
 import quickReview from "./features/quick-review"
-import resizeRepositoryButtons from "./features/resize-repository-buttons"
 import restoreFile from "./features/restore-file"
 import showWhitespaceToggle from "./features/show-whitespace-toggle"
 import stickyFileHeaders from "./features/sticky-file-headers"
@@ -46,7 +45,6 @@ export const FEATURES: FeatureMeta[] = [
   quickLabelRemoval,
   quickRepoDeletion,
   quickReview,
-  resizeRepositoryButtons,
   restoreFile,
   showWhitespaceToggle,
   stickyFileHeaders,
