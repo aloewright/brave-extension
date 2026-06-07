@@ -123,6 +123,36 @@ describe("executeProgram", () => {
     expect(result.steps[1].label).toBe("Email")
   })
 
+  it("re-targets observation to the replacement tab after closing the active tab", async () => {
+    const program: Op[] = [{ kind: "browser.close_tab", targetTabId: 1 }]
+    const observed: number[] = []
+    const deps = makeDeps({
+      closeTab: async () => 42,
+      observe: async (tabId) => {
+        observed.push(tabId)
+        return initialObs
+      }
+    })
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps[0].ok).toBe(true)
+    expect(result.finalTabId).toBe(42)
+    // Re-observed the surviving tab (42), never the closed tab (1).
+    expect(observed).toEqual([42])
+  })
+
+  it("does not throw when the closed active tab has no replacement and observe fails", async () => {
+    const program: Op[] = [{ kind: "browser.close_tab", targetTabId: 1 }]
+    const deps = makeDeps({
+      closeTab: async () => null,
+      observe: async () => {
+        throw new Error("tab removed")
+      }
+    })
+    const result = await executeProgram(1, program, initialObs, deps)
+    expect(result.steps[0].ok).toBe(true)
+    expect(result.finalObservation).toBe(initialObs)
+  })
+
   it("halts on first non-skipped failure and marks remaining ops 'halted after error'", async () => {
     const program: Op[] = [
       { kind: "browser.click", ref: "el12" },

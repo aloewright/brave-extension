@@ -13,6 +13,7 @@ export type Op = {
   ms?: number
   y?: number
   url?: string
+  targetTabId?: number
 }
 
 function coerceOp(raw: unknown): Op | null {
@@ -26,6 +27,7 @@ function coerceOp(raw: unknown): Op | null {
   if (typeof r.url === "string") op.url = r.url
   if (typeof r.ms === "number" && Number.isFinite(r.ms)) op.ms = r.ms
   if (typeof r.y === "number" && Number.isFinite(r.y)) op.y = r.y
+  if (typeof r.targetTabId === "number" && Number.isFinite(r.targetTabId)) op.targetTabId = r.targetTabId
   return op
 }
 
@@ -92,6 +94,10 @@ type ObservationLite = { nodes?: Array<{ ref?: string; name?: string; text?: str
 function labelFor(op: Op, observation: ObservationLite | null | undefined): string | undefined {
   if (op.kind === "browser.navigate") return op.url
   if (op.kind === "browser.wait") return op.ms != null ? `${op.ms}ms` : undefined
+  if (op.kind === "browser.waitFor") return op.value
+  if (op.kind === "browser.new_tab") return op.url || "new tab"
+  if (op.kind === "browser.switch_tab") return op.targetTabId?.toString()
+  if (op.kind === "browser.close_tab") return op.targetTabId?.toString()
   if (op.kind === "memory.search" || op.kind === "memory.remember") return op.value
   if (op.kind === "browser.observe" || op.kind === "session.compact") return undefined
   if (!op.ref) return undefined
@@ -122,11 +128,20 @@ export type ProgramDeps = {
   runTool(name: ToolName, args: Record<string, unknown>): Promise<OpResult>
   observe(tabId: number): Promise<ObservationLite>
   wait(ms: number): Promise<void>
+  waitFor?(tabId: number, selector: string, timeoutMs: number): Promise<boolean>
+  newTab?(url?: string): Promise<number>
+  switchTab?(tabId: number): Promise<void>
+  /** Closes the tab and returns the now-active tab id (or null if none). */
+  closeTab?(tabId: number): Promise<number | null>
   now(): number
+  retain?(content: string): Promise<void>
+  recall?(query: string): Promise<string>
+  onStep?(step: StepEntry): void
 }
 
-const STRUCTURAL_OPS = new Set<string>(["browser.click", "browser.type", "browser.navigate"])
+const STRUCTURAL_OPS = new Set<string>(["browser.click", "browser.type", "browser.navigate", "browser.new_tab", "browser.switch_tab", "browser.close_tab"])
 const WAIT_MAX_MS = 2000
+const WAIT_FOR_MAX_MS = 10000
 
 function resolveSelector(op: Op, observation: ObservationLite | null | undefined): string | null {
   if (!op.ref) return null
@@ -140,7 +155,7 @@ async function runOp(
   observation: ObservationLite | null | undefined,
   deps: ProgramDeps,
   tabId: number
-): Promise<OpResult> {
+): Promise<OpResult & { newTabId?: number }> {
   const t0 = deps.now()
   const elapsed = (): number => deps.now() - t0
 
@@ -153,6 +168,35 @@ async function runOp(
     const ms = Math.min(Math.max(0, requested), WAIT_MAX_MS)
     await deps.wait(ms)
     return { ok: true, durationMs: elapsed(), reason: ms !== requested ? `clamped to ${ms}ms` : undefined }
+  }
+  if (op.kind === "browser.waitFor") {
+    const requested = op.ms ?? WAIT_FOR_MAX_MS
+    const ms = Math.min(Math.max(0, requested), WAIT_FOR_MAX_MS)
+    if (!op.value) return { ok: false, skipped: true, reason: "waitFor requires value (selector)", durationMs: elapsed() }
+    if (!deps.waitFor) return { ok: false, skipped: true, reason: "waitFor not wired", durationMs: elapsed() }
+    const found = await deps.waitFor(tabId, op.value, ms)
+    if (!found) return { ok: false, reason: "timeout waiting for element", durationMs: elapsed() }
+    return { ok: true, durationMs: elapsed() }
+  }
+  if (op.kind === "browser.new_tab") {
+    if (!deps.newTab) return { ok: false, skipped: true, reason: "newTab not wired", durationMs: elapsed() }
+    const newTabId = await deps.newTab(op.url)
+    return { ok: true, durationMs: elapsed(), newTabId }
+  }
+  if (op.kind === "browser.switch_tab") {
+    if (op.targetTabId == null) return { ok: false, skipped: true, reason: "switch_tab requires targetTabId", durationMs: elapsed() }
+    if (!deps.switchTab) return { ok: false, skipped: true, reason: "switchTab not wired", durationMs: elapsed() }
+    await deps.switchTab(op.targetTabId)
+    return { ok: true, durationMs: elapsed(), newTabId: op.targetTabId }
+  }
+  if (op.kind === "browser.close_tab") {
+    if (op.targetTabId == null) return { ok: false, skipped: true, reason: "close_tab requires targetTabId", durationMs: elapsed() }
+    if (!deps.closeTab) return { ok: false, skipped: true, reason: "closeTab not wired", durationMs: elapsed() }
+    const replacement = await deps.closeTab(op.targetTabId)
+    // If we closed the active tab, hand the replacement back so the engine
+    // re-observes the surviving tab instead of the removed one.
+    const newTabId = op.targetTabId === tabId && replacement != null ? replacement : undefined
+    return { ok: true, durationMs: elapsed(), newTabId }
   }
   if (op.kind === "browser.navigate") {
     if (!op.url || !/^https?:\/\//i.test(op.url)) {
@@ -181,30 +225,46 @@ async function runOp(
     const r = await deps.runTool("scroll_to", { tabId, selector })
     return { ...r, selector, durationMs: elapsed() }
   }
-  if (op.kind === "memory.search" || op.kind === "memory.remember" || op.kind === "session.compact") {
-    return { ok: false, skipped: true, reason: "memory not wired", durationMs: elapsed() }
+  if (op.kind === "memory.search") {
+    if (!deps.recall) return { ok: false, skipped: true, reason: "memory recall not wired", durationMs: elapsed() }
+    const r = await deps.recall(op.value ?? "")
+    return { ok: true, durationMs: elapsed(), data: r }
+  }
+  if (op.kind === "memory.remember") {
+    if (!deps.retain) return { ok: false, skipped: true, reason: "memory retain not wired", durationMs: elapsed() }
+    await deps.retain(op.value ?? "")
+    return { ok: true, durationMs: elapsed() }
+  }
+  if (op.kind === "session.compact") {
+    return { ok: false, skipped: true, reason: "session.compact not wired", durationMs: elapsed() }
   }
   return { ok: false, skipped: true, reason: `unknown op ${op.kind}`, durationMs: elapsed() }
 }
 
 export async function executeProgram(
-  tabId: number,
+  initialTabId: number,
   program: Op[],
   initialObservation: ObservationLite | null | undefined,
   deps: ProgramDeps
-): Promise<{ steps: StepEntry[]; finalObservation: ObservationLite | null | undefined }> {
+): Promise<{ steps: StepEntry[]; finalObservation: ObservationLite | null | undefined; finalTabId: number }> {
   let observation = initialObservation
   const steps: StepEntry[] = []
   let halted = false
+  let currentTabId = initialTabId
+
   for (const op of program) {
     if (halted) {
-      steps.push(
-        summarizeStep(op, { ok: false, skipped: true, reason: "halted after error" }, observation)
-      )
+      const step = summarizeStep(op, { ok: false, skipped: true, reason: "halted after error" }, observation)
+      steps.push(step)
+      if (deps.onStep) deps.onStep(step)
       continue
     }
-    const result = await runOp(op, observation, deps, tabId)
-    steps.push(summarizeStep(op, result, observation))
+    const result = await runOp(op, observation, deps, currentTabId)
+    if (result.newTabId != null) currentTabId = result.newTabId
+    const step = summarizeStep(op, result, observation)
+    steps.push(step)
+    if (deps.onStep) deps.onStep(step)
+    
     if (!result.ok && !result.skipped) {
       halted = true
       continue
@@ -212,8 +272,13 @@ export async function executeProgram(
     if (op.kind === "browser.observe" && result.data) {
       observation = result.data as ObservationLite
     } else if (STRUCTURAL_OPS.has(op.kind) && result.ok && !result.skipped) {
-      observation = await deps.observe(tabId)
+      try {
+        observation = await deps.observe(currentTabId)
+      } catch {
+        // The tab may have been closed or navigated out from under us
+        // (e.g. close_tab with no surviving tab); keep the prior observation.
+      }
     }
   }
-  return { steps, finalObservation: observation }
+  return { steps, finalObservation: observation, finalTabId: currentTabId }
 }
