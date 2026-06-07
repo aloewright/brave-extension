@@ -40,8 +40,10 @@ function SidePanel() {
       area: string,
     ) => {
       if (area !== "local" || !changes[ACTIVE_KEY]) return;
-      const next = changes[ACTIVE_KEY].newValue as SectionId | undefined;
-      if (next) setActive(next);
+      const next = changes[ACTIVE_KEY].newValue as string | undefined;
+      // Mirror the initial-load redirect: aiChat folded into Joplin.
+      const resolved = next === "aiChat" ? "joplin" : (next as SectionId | undefined);
+      if (resolved) setActive(resolved);
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);

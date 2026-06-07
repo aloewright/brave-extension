@@ -24,6 +24,7 @@ const SECTION_IDS: SectionId[] = [
   "recorder",
   "eyedropper",
   "joplin",
+  "github",
   "settings",
 ];
 
