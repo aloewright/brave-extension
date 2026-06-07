@@ -18,7 +18,6 @@ import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
 import { JoplinSection } from "./sections/joplin/JoplinSection";
-import { ChatSection } from "./sections/ai-chat/ChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
 const ACTIVE_KEY = "ui.activeSection";
@@ -29,7 +28,11 @@ function SidePanel() {
   useEffect(() => {
     chrome.storage.local.get(ACTIVE_KEY).then((res) => {
       const stored = res[ACTIVE_KEY] as SectionId | undefined;
-      if (stored) setActive(stored);
+      // "aiChat" was folded into the Joplin section; redirect anyone whose
+      // last-active section was the now-removed AI Chat tab so they don't
+      // land on a blank panel.
+      const resolved = (stored as string) === "aiChat" ? "joplin" : stored;
+      if (resolved) setActive(resolved);
     });
     // React to programmatic navigation (e.g. QuickActionsBar → Library/Recorder).
     const onChanged = (
@@ -37,8 +40,10 @@ function SidePanel() {
       area: string,
     ) => {
       if (area !== "local" || !changes[ACTIVE_KEY]) return;
-      const next = changes[ACTIVE_KEY].newValue as SectionId | undefined;
-      if (next) setActive(next);
+      const next = changes[ACTIVE_KEY].newValue as string | undefined;
+      // Mirror the initial-load redirect: aiChat folded into Joplin.
+      const resolved = next === "aiChat" ? "joplin" : (next as SectionId | undefined);
+      if (resolved) setActive(resolved);
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
@@ -87,7 +92,6 @@ function SidePanel() {
           {active === "recorder" && <RecorderSection />}
           {active === "eyedropper" && <EyedropperSection />}
           {active === "joplin" && <JoplinSection />}
-          {active === "aiChat" && <ChatSection />}
           {active === "github" && <GitHubSection />}
           {active === "settings" && <SettingsSection />}
         </main>

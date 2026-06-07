@@ -18,6 +18,7 @@ import {
   getRecentClips,
   clearRecentClips
 } from "../../lib/joplin-recents"
+import { ChatSection } from "../ai-chat/ChatSection"
 
 const LAST_MODE_KEY = "ai-dev-joplin-last-mode"
 const lastModeStorage = new Storage()
@@ -105,88 +106,96 @@ export function JoplinSection() {
   )
 
   return (
-    <div className="p-3 space-y-3 text-sm">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className={`inline-block w-2 h-2 rounded-full ${statusDotColor}`} />
-        <h2 className="font-semibold">Joplin</h2>
-        <span className="text-xs text-secondary">
-          {status === "green"
-            ? "connected"
-            : status === "red"
-            ? "unreachable"
-            : "checking…"}
-        </span>
-      </div>
-
-      {/* Mode picker */}
-      <div className="grid grid-cols-2 gap-2">
-        {CLIP_MODES.map((m) => (
-          <button
-            key={m}
-            onClick={() => onSelectMode(m)}
-            className={`px-2 py-1 rounded border text-xs ${
-              mode === m ? "border-fg bg-fg/10" : "border-default text-secondary"
-            }`}>
-            {CLIP_MODE_LABELS[m]}
-          </button>
-        ))}
-      </div>
-
-      {/* Clip button */}
-      <button
-        disabled={clipping}
-        onClick={onClip}
-        className="w-full px-3 py-2 rounded bg-fg text-bg font-medium disabled:opacity-50">
-        {clipping ? "Clipping…" : `Clip ${CLIP_MODE_LABELS[mode]}`}
-      </button>
-
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`text-xs rounded px-2 py-1 ${
-            toast.kind === "success"
-              ? "bg-green-500/15 text-green-500"
-              : "bg-red-500/15 text-red-500"
-          }`}>
-          {toast.msg}
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Joplin clipper — pinned on top */}
+      <div className="shrink-0 p-3 space-y-3 text-sm">
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <span className={`inline-block w-2 h-2 rounded-full ${statusDotColor}`} />
+          <h2 className="font-semibold">Joplin</h2>
+          <span className="text-xs text-secondary">
+            {status === "green"
+              ? "connected"
+              : status === "red"
+              ? "unreachable"
+              : "checking…"}
+          </span>
         </div>
-      )}
 
-      {/* Recent clips */}
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-medium text-secondary">Recent clips</h3>
-          {recents.length > 0 && (
+        {/* Mode picker */}
+        <div className="grid grid-cols-2 gap-2">
+          {CLIP_MODES.map((m) => (
             <button
-              onClick={async () => {
-                await clearRecentClips()
-                setRecents([])
-              }}
-              className="text-xs text-secondary hover:text-fg">
-              Clear
+              key={m}
+              onClick={() => onSelectMode(m)}
+              className={`px-2 py-1 rounded border text-xs ${
+                mode === m ? "border-fg bg-fg/10" : "border-default text-secondary"
+              }`}>
+              {CLIP_MODE_LABELS[m]}
             </button>
+          ))}
+        </div>
+
+        {/* Clip button */}
+        <button
+          disabled={clipping}
+          onClick={onClip}
+          className="w-full px-3 py-2 rounded bg-fg text-bg font-medium disabled:opacity-50">
+          {clipping ? "Clipping…" : `Clip ${CLIP_MODE_LABELS[mode]}`}
+        </button>
+
+        {/* Toast */}
+        {toast && (
+          <div
+            className={`text-xs rounded px-2 py-1 ${
+              toast.kind === "success"
+                ? "bg-green-500/15 text-green-500"
+                : "bg-red-500/15 text-red-500"
+            }`}>
+            {toast.msg}
+          </div>
+        )}
+
+        {/* Recent clips */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-medium text-secondary">Recent clips</h3>
+            {recents.length > 0 && (
+              <button
+                onClick={async () => {
+                  await clearRecentClips()
+                  setRecents([])
+                }}
+                className="text-xs text-secondary hover:text-fg">
+                Clear
+              </button>
+            )}
+          </div>
+          {recents.length === 0 ? (
+            <p className="text-xs text-secondary">No clips yet.</p>
+          ) : (
+            <ul className="space-y-1 max-h-80 overflow-y-auto">
+              {recents.map((c) => (
+                <li key={c.id} className="text-xs">
+                  <a
+                    href={c.joplinUrl}
+                    className="block truncate hover:underline"
+                    title={c.title}>
+                    {c.title}
+                  </a>
+                  <span className="text-secondary">
+                    {CLIP_MODE_LABELS[c.mode]} · {relativeTime(c.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-        {recents.length === 0 ? (
-          <p className="text-xs text-secondary">No clips yet.</p>
-        ) : (
-          <ul className="space-y-1 max-h-80 overflow-y-auto">
-            {recents.map((c) => (
-              <li key={c.id} className="text-xs">
-                <a
-                  href={c.joplinUrl}
-                  className="block truncate hover:underline"
-                  title={c.title}>
-                  {c.title}
-                </a>
-                <span className="text-secondary">
-                  {CLIP_MODE_LABELS[c.mode]} · {relativeTime(c.createdAt)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+      </div>
+
+      {/* AI Chat — stacked below the clipper, fills remaining height */}
+      <div className="flex-1 min-h-0 border-t border-default">
+        <ChatSection />
       </div>
     </div>
   )

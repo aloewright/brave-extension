@@ -13,7 +13,6 @@ export type SectionId =
   | "recorder"
   | "eyedropper"
   | "joplin"
-  | "aiChat"
   | "github"
   | "settings";
 
@@ -40,8 +39,9 @@ export const SECTIONS: SectionDef[] = [
   { id: "cookies", label: "Cookies" },
   { id: "recorder", label: "Recorder" },
   { id: "eyedropper", label: "Eyedropper" },
+  // AI Chat is now stacked inside the Joplin section (clipper on top, chat
+  // below) rather than carrying its own rail entry.
   { id: "joplin", label: "Joplin" },
-  { id: "aiChat", label: "AI Chat" },
   { id: "github", label: "GitHub" },
   { id: "settings", label: "Settings" },
 ];
