@@ -1,8 +1,12 @@
 # copythe-hub — Read-it-later / save-anything library (`hub.copythe.link`)
 
 **Date:** 2026-06-07
-**Status:** Design — approved direction, pending spec review
+**Status:** Design — approved (mockups signed off); moving to implementation plan
 **Owner:** aloe
+
+**Locked decisions:** auth = Cloudflare Access (single-user); new standalone repo
+`aloewright/copythe-hub` at `~/Development/copythe-hub`; Mantine as the component/
+theming layer; light mode default with dark available.
 
 ## 1. Overview
 
@@ -32,7 +36,8 @@ Deployed to a Cloudflare Worker at **`hub.copythe.link`**.
 - **Read** articles in a distraction-free reader; **watch** videos with a
   notes/highlights side panel; view images and PDFs.
 - Create **highlights + notes** (text selection in reader; timestamped notes on
-  video) stored via the existing `/api/highlights`.
+  video; **saved transcript snippets** from a video's transcript — §7a) stored
+  via the existing `/api/highlights`.
 - **Semantic + keyword search** across everything (existing Vectorize `/api/search`).
 - Shares one library with the extension — items saved in either place appear in both.
 
@@ -122,8 +127,17 @@ so articles are searchable by body content.
 ### Highlight anchoring
 Add an optional `anchor` JSON column to `highlights`:
 - article → `{ type: "text", quote, prefix, suffix }` (text-fragment style re-find).
-- video → `{ type: "timestamp", seconds }` (drives the timestamped side panel).
+- video note → `{ type: "timestamp", seconds }` (drives the timestamped side panel).
+- video **transcript snippet** → `{ type: "transcript", startSeconds, endSeconds, quote }`
+  — a saved span of the spoken transcript with its time range (see §7a).
 Backward compatible: existing highlights have `anchor = null`.
+
+### Video transcript
+Add a nullable `transcript` JSON column to the video record (cues:
+`[{ startSeconds, endSeconds, text }]`) plus a `transcript_status`
+(`none | ready | failed`). Populated on ingest where a transcript is available
+(see §7a). The transcript text is also pushed to Vectorize so videos are
+searchable by what was *said*, not just title.
 
 ## 6. sidebar-api changes (kept minimal)
 
@@ -159,6 +173,30 @@ server function fetches/extracts and classifies → writes to sidebar-api →
 optimistic card appears in the library; a "processing" state resolves to "ready"
 once Vectorize indexing returns (mirror the captures `status` field).
 
+### 7a. Video transcripts & transcript snippets
+On video ingest the hub tries to obtain a time-aligned **transcript**:
+- **Primary (MVP):** fetch the platform's captions where available (e.g.
+  YouTube `timedtext`/caption track). If present, store cues + set
+  `transcript_status = ready`.
+- **Fallback (flagged, optional):** server-side speech-to-text via the AI
+  Gateway `dynamic/stt_gen` route (per the gateway rule — never call providers
+  directly). Heavier; gated behind a per-video "Generate transcript" action
+  rather than automatic, to control cost. If unavailable, `transcript_status =
+  none` and the transcript tab shows an empty state + that action.
+
+In the **video player**, a **Transcript** tab sits alongside Notes & Highlights.
+It renders the cues as clickable, timestamped lines (click → seek). The user can:
+- **Select transcript text → "Save snippet"** — creates a highlight with a
+  `{ type: "transcript", startSeconds, endSeconds, quote }` anchor. The snippet
+  shows in the Notes & Highlights rail and as a Highlight card in the library,
+  deep-linking back to that span (player seeks to `startSeconds`).
+- **Save the cue under the playhead** in one click via the existing "Add
+  highlight at <timestamp>" affordance (becomes a transcript snippet when a cue
+  is present, else a plain timestamp note).
+
+This is the bookmark/save-snippet feature for video: the unit saved is a span of
+*what was said*, anchored to the moment it was said.
+
 ## 8. Routes / screens
 
 File-based routes (TanStack Start):
@@ -169,8 +207,10 @@ File-based routes (TanStack Start):
   pdf). "Add New" button opens the add modal.
 - `/read/:id` — **Article reader.** Centered measure, reader typography, margin
   highlights panel; select-to-highlight with note.
-- `/watch/:id` — **Video library/player.** Player + right-hand "Notes &
-  Highlights" panel with timestamped entries; add-note-at-timestamp input.
+- `/watch/:id` — **Video library/player.** Player + right-hand tabbed panel:
+  **Notes & Highlights** (timestamped entries; add-note-at-timestamp) and
+  **Transcript** (clickable timestamped cues; select text → "Save snippet" → a
+  transcript-anchored highlight). See §7a.
 - `/item/:id` — **Generic detail** for image / pdf / webpage snapshot (viewer +
   metadata + highlights/notes where applicable).
 - `/search?q=` — results view (reuses card grid).
@@ -273,7 +313,8 @@ sidebar-api migrations/route changes (§6) land in the existing brave-extension
    existing data. (Read-only end-to-end.)
 3. **Reader + viewers** — article reader, image/pdf/webpage detail, video player.
 4. **Highlights & notes** — selection → `/api/highlights` with anchors; margin
-   panel + timestamped video notes.
+   panel + timestamped video notes; **video Transcript tab + transcript-snippet
+   saving** (§7a: caption fetch on ingest, select-to-save, deep-link seek).
 5. **Ingestion** — add-modal: paste-URL extraction + file upload; sidebar-api
    article migration + Vectorize indexing.
 6. **Polish** — dark mode, responsive/mobile nav, empty/error states, a11y pass.
