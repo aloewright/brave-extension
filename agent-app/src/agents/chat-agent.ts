@@ -68,7 +68,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
 
     const history = await this.buildHistory(sessionId)
 
-    const userId = body.userId ?? "unknown"
+    const userId = body.userId?.trim() || "unknown"
     const memories =
       userId !== "unknown" ? await recallMemories(this.env, userId, content, 5) : []
     const contextMsgs: ChatMsg[] =
@@ -93,7 +93,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         model: model.id
       })
       this.setState({ sessionId, lastTurn: { user: content, assistant: reply } })
-      if (userId !== "unknown") {
+      if (userId !== "unknown" && reply.trim()) {
         await reflect(this.env, userId, sessionId, [
           { role: "user", content },
           { role: "assistant", content: reply }
@@ -140,7 +140,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         } catch (e) {
           console.error("agent: failed to persist streamed assistant message", e)
         }
-        if (reflectUserId !== "unknown") {
+        if (reflectUserId !== "unknown" && acc.trim()) {
           await reflect(env, reflectUserId, sessionId, [
             { role: "user", content: reflectContent },
             { role: "assistant", content: acc }
