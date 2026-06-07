@@ -72,36 +72,45 @@ function toTextDeltaStream(raw: ReadableStream): ReadableStream<Uint8Array> {
     // chunk carrying only keepalive / [DONE] lines doesn't leave the consumer's
     // pending read unresolved (some ReadableStream impls call pull once per read).
     async pull(controller) {
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) {
-          controller.close()
-          return
-        }
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split("\n")
-        buf = lines.pop() ?? ""
-        let enqueued = false
-        for (const line of lines) {
-          const t = line.trim()
-          if (!t.startsWith("data:")) continue
-          const data = t.slice(5).trim()
-          if (data === "[DONE]" || data === "") continue
-          try {
-            const obj = JSON.parse(data) as {
-              response?: string
-              choices?: Array<{ delta?: { content?: string } }>
-            }
-            const delta = obj.response ?? obj.choices?.[0]?.delta?.content ?? ""
-            if (delta) {
-              controller.enqueue(encoder.encode(delta))
-              enqueued = true
-            }
-          } catch {
-            /* ignore non-JSON keepalive lines */
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) {
+            controller.close()
+            return
           }
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split("\n")
+          buf = lines.pop() ?? ""
+          let enqueued = false
+          for (const line of lines) {
+            const t = line.trim()
+            if (!t.startsWith("data:")) continue
+            const data = t.slice(5).trim()
+            if (data === "[DONE]" || data === "") continue
+            try {
+              const obj = JSON.parse(data) as {
+                response?: string
+                choices?: Array<{ delta?: { content?: string } }>
+              }
+              const delta = obj.response ?? obj.choices?.[0]?.delta?.content ?? ""
+              if (delta) {
+                controller.enqueue(encoder.encode(delta))
+                enqueued = true
+              }
+            } catch {
+              /* ignore non-JSON keepalive lines */
+            }
+          }
+          if (enqueued) return
         }
-        if (enqueued) return
+      } catch (err) {
+        try {
+          await reader.cancel()
+        } catch {
+          /* ignore */
+        }
+        controller.error(err)
       }
     },
     cancel() {

@@ -87,21 +87,32 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         const reader = source.getReader()
         const dec = new TextDecoder()
         const enc = new TextEncoder()
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          const text = dec.decode(value, { stream: true })
-          acc += text
-          controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta: text })}\n\n`))
+        try {
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const text = dec.decode(value, { stream: true })
+            acc += text
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta: text })}\n\n`))
+          }
+        } catch (err) {
+          reader.releaseLock()
+          controller.error(err)
+          return
         }
+        reader.releaseLock()
         controller.enqueue(enc.encode("data: [DONE]\n\n"))
         controller.close()
-        await insertMessage(env, {
-          sessionId,
-          role: "assistant",
-          content: acc,
-          model: modelId
-        })
+        try {
+          await insertMessage(env, {
+            sessionId,
+            role: "assistant",
+            content: acc,
+            model: modelId
+          })
+        } catch (e) {
+          console.error("agent: failed to persist streamed assistant message", e)
+        }
       }
     })
     return new Response(sse, {

@@ -82,25 +82,32 @@ sessions.post("/:id/messages/stream", async (c) => {
 
   const id = c.env.CHAT_AGENT.idFromName(sess.id)
   const stub = c.env.CHAT_AGENT.get(id)
-  const res = await stub.fetch(
-    new Request("https://agent/internal/turn/stream", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sessionId: sess.id,
-        content: body.content,
-        modelId,
-        advanced: body.advanced === true
+  try {
+    const res = await stub.fetch(
+      new Request("https://agent/internal/turn/stream", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sess.id,
+          content: body.content,
+          modelId,
+          advanced: body.advanced === true
+        })
       })
+    )
+    return new Response(res.body, {
+      status: res.status,
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache"
+      }
     })
-  )
-  return new Response(res.body, {
-    status: res.status,
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache"
-    }
-  })
+  } catch {
+    return c.json(
+      { error: { code: "service_unavailable", message: "Agent is currently unavailable" } },
+      503
+    )
+  }
 })
 
 export default sessions
