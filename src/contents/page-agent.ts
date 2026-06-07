@@ -323,10 +323,12 @@ function mount() {
   }
 
   toggle.addEventListener("click", () => {
-    open = true
-    if (entries.length === 0) entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+    open = !open
+    if (open && entries.length === 0) {
+      entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+    }
     render()
-    input.focus()
+    if (open) input.focus()
   })
   close.addEventListener("click", () => {
     open = false
@@ -343,6 +345,22 @@ function mount() {
       sendResponse({ ok: true })
       return false
     }
+    if (message?.type === "PAGE_AGENT_TOGGLE_PANEL") {
+      if (!visible) {
+        setVisible(true, true)
+        open = true
+      } else {
+        open = !open
+      }
+      if (open && entries.length === 0) {
+        entries.push({ role: "status", text: "Ready. Page context stays local unless cloud planning is enabled." })
+      }
+      render()
+      if (open) input.focus()
+      sendResponse({ ok: true, visible, open })
+      return false
+    }
+
     if (message?.type !== "PAGE_AGENT_TOGGLE") return false
     const nextVisible =
       typeof message.visible === "boolean" ? message.visible : !visible

@@ -139,6 +139,25 @@ export async function runSaveLinkQuickAction(): Promise<QuickActionResult> {
  * extension messages.
  */
 export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+    if (win?.id) {
+      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
+      if (tab?.id) {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: "PAGE_AGENT_TOGGLE_PANEL"
+        }).catch(() => null)
+        
+        if (response) {
+          return { kind: "success", message: response.open ? "Page agent opened" : "Page agent closed" }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Fallback to the old visibility toggle if content script isn't there or didn't respond
   const result = await chrome.storage.local.get(PAGE_AGENT_VISIBLE_KEY)
   const current =
     typeof result?.[PAGE_AGENT_VISIBLE_KEY] === "boolean"
@@ -146,21 +165,5 @@ export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
       : true
   const visible = !current
   await chrome.storage.local.set({ [PAGE_AGENT_VISIBLE_KEY]: visible })
-
-  try {
-    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
-    if (win?.id) {
-      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
-      if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: "PAGE_AGENT_TOGGLE",
-          visible
-        })
-      }
-    }
-  } catch {
-    // The storage flag is the source of truth; messaging is only an immediate
-    // refresh for tabs that already have the content script loaded.
-  }
   return { kind: "success", message: visible ? "Page agent shown" : "Page agent hidden" }
 }

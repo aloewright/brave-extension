@@ -53,8 +53,7 @@ describe("page agent UI", () => {
     })
     expect(chromeMock.storage.local.__dump()["pageAgent.visible"]).toBe(true)
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(123, {
-      type: "PAGE_AGENT_TOGGLE",
-      visible: false
+      type: "PAGE_AGENT_TOGGLE_PANEL"
     })
   })
 
