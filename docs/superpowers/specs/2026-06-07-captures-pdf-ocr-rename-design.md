@@ -124,8 +124,8 @@ capture (screenshot | full-page PDF)
 
 ## Follow-on (separate specs, queued)
 
-1. **Joplin sync** — push notes (sticky notes), snippets (= highlights), and
-   links into Joplin under their own notebooks (uses the existing Joplin tool
-   layer in the extension).
-2. **Sticky notes → hub** — sync local sticky notes to sidebar-api so they
+1. **Sticky notes → hub** — sync local sticky notes to sidebar-api so they
    appear in the copythe-hub dashboard.
+2. **Joplin sync** (user will tackle later) — push notes (sticky notes),
+   snippets (= highlights), and links into Joplin under their own notebooks
+   (uses the existing Joplin tool layer in the extension).
