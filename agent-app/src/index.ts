@@ -17,4 +17,8 @@ export { buildApp } from "./app"
 const app = buildApp()
 app.use("*", agentsMiddleware())
 
+app.notFound((c) =>
+  c.json({ error: { code: "not_found", message: "no such route" } }, 404)
+)
+
 export default app

@@ -19,6 +19,9 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
   initialState: ChatAgentState = { sessionId: null, lastTurn: null }
 
   async onRequest(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname !== "/internal/turn") {
+      return new Response("Not found", { status: 404 })
+    }
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 })
     }

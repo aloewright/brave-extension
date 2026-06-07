@@ -76,17 +76,21 @@ export async function verifyAccessJwt(
   const jwk = jwks.find((k) => k.kid === header.kid)
   if (!jwk) return null
 
-  const key = await crypto.subtle.importKey(
-    "jwk",
-    { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"]
-  )
-  const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`)
-  const sig = b64urlToBytes(parts[2]!)
-  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, signed)
-  if (!ok) return null
+  try {
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"]
+    )
+    const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`)
+    const sig = b64urlToBytes(parts[2]!)
+    const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, signed)
+    if (!ok) return null
+  } catch {
+    return null
+  }
 
   return { sub: payload.sub ?? payload.email ?? "unknown", email: payload.email }
 }

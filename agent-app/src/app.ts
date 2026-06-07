@@ -22,9 +22,5 @@ export function buildApp() {
 
   app.route("/api/sessions", sessions)
 
-  app.notFound((c) =>
-    c.json({ error: { code: "not_found", message: "no such route" } }, 404)
-  )
-
   return app
 }

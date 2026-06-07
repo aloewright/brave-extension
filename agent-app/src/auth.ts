@@ -49,8 +49,10 @@ function unauthorized(c: Context) {
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let mismatch = 0
-  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  const ea = new TextEncoder().encode(a)
+  const eb = new TextEncoder().encode(b)
+  const len = Math.max(ea.length, eb.length)
+  let mismatch = ea.length !== eb.length ? 1 : 0
+  for (let i = 0; i < len; i++) mismatch |= (ea[i] ?? 0) ^ (eb[i] ?? 0)
   return mismatch === 0
 }
