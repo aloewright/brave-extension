@@ -31,7 +31,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   recorder: "radio-checked",
   eyedropper: "paint-brush",
   joplin: "file-export",
-  github: "globe",
+  github: "github",
   settings: "settings"
 }
 
