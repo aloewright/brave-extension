@@ -10,7 +10,11 @@ export type BrowserAgentOperation =
   | "browser.type"
   | "browser.scroll"
   | "browser.wait"
+  | "browser.waitFor"
   | "browser.navigate"
+  | "browser.new_tab"
+  | "browser.switch_tab"
+  | "browser.close_tab"
   | "memory.search"
   | "memory.remember"
   | "session.compact"
@@ -21,7 +25,11 @@ export const BROWSER_AGENT_OPERATIONS: readonly BrowserAgentOperation[] = [
   "browser.type",
   "browser.scroll",
   "browser.wait",
+  "browser.waitFor",
   "browser.navigate",
+  "browser.new_tab",
+  "browser.switch_tab",
+  "browser.close_tab",
   "memory.search",
   "memory.remember",
   "session.compact"
