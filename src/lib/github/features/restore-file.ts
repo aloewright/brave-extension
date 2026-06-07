@@ -65,7 +65,9 @@ async function discardFileChanges(filePath: string, newFilePath: string, commitT
   const isNewFile = contents === undefined
   const isRenamed = filePath !== newFilePath
 
-  const additions = isNewFile ? [] : [{ path: filePath, contents: btoa(contents ?? "") }]
+  // UTF-8-safe base64: btoa() alone throws on codepoints > 0xFF (binary/UTF-8 files).
+  const toBase64 = (s: string) => btoa(unescape(encodeURIComponent(s)))
+  const additions = isNewFile ? [] : [{ path: filePath, contents: toBase64(contents ?? "") }]
   const deletions = isRenamed || isNewFile ? [{ path: newFilePath }] : []
 
   await v4(

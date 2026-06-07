@@ -1,12 +1,10 @@
 // src/lib/github/features/quick-review.ts
 // Ported from RGH quick-review.tsx
 // Adds a "review now" link and "approve now" button to the PR sidebar Reviewers section.
-// "approve now" POSTs to the v3 reviews endpoint using the session cookie (no PAT required for
-// the form-drive path). However, the API call does need a token to authenticate, so we keep
-// needsToken: false and use the v3 helper which adds a token if available (the approve path
-// will only be shown when the user is authenticated per GitHub's own UI gate).
-// This is a form/session-driven feature in intent (no PAT enforced), but we leverage the
-// existing v3 helper opportunistically.
+// "review now" is a pure navigation link. "approve now" POSTs to the v3 reviews endpoint via the
+// shared api helper, which attaches the Doppler PAT if one is loaded. We keep needsToken: false
+// because the link/button are useful without a PAT; if no token is present the approve POST will
+// fail with 401 and we surface that to the user. Approving is confirm-gated (Alt skips the gate).
 import { observe } from "../observe"
 import { isPR, isPRFiles } from "../page-detect"
 import { v3 } from "../api"
@@ -37,7 +35,9 @@ async function approveNow(e: MouseEvent): Promise<void> {
   const isAlt = e.altKey
   let message = ""
   if (!isAlt) {
-    const input = window.prompt("Approve this PR? You can add an optional message (leave blank for none):")
+    // Confirm gate (matches feature.confirm) before any optional message prompt.
+    if (!window.confirm(feature.confirm!)) return
+    const input = window.prompt("Optional review message (leave blank for none):")
     if (input === null) return
     message = input
   }

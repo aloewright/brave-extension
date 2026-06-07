@@ -61,7 +61,7 @@ const feature: FeatureMeta = {
   needsToken: true,
   isWrite: true,
   writeScopes: ["repo"],
-  pageTest: (url) => isNewRepo(url) || (typeof sessionStorage !== "undefined" && Boolean(sessionStorage.getItem(SESSION_KEY)) && Boolean(url)),
+  pageTest: (url) => isNewRepo(url) || (typeof sessionStorage !== "undefined" && Boolean(sessionStorage.getItem(SESSION_KEY))),
   init: async (signal) => {
     if (!await hasToken()) return
 
