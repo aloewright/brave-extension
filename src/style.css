@@ -1206,6 +1206,18 @@ body {
   padding-right: 4px;
 }
 
+.newtab-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.newtab-shortcut-row--kept-active .newtab-shortcut {
+  border-color: rgb(var(--primary) / 0.34);
+  background: rgb(var(--primary) / 0.1);
+}
+
 .newtab-shortcut {
   width: 100%;
   min-height: 42px;
@@ -1222,6 +1234,41 @@ body {
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.newtab-shortcut__action {
+  width: 34px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: rgb(var(--muted-foreground));
+  background: rgb(var(--background) / 0.28);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.newtab-shortcut__action:hover,
+.newtab-shortcut__action:focus-visible {
+  border-color: rgb(var(--border));
+  color: rgb(var(--foreground));
+  background: rgb(var(--accent));
+  outline: none;
+}
+
+.newtab-shortcut__action[aria-pressed="true"] {
+  border-color: rgb(var(--primary) / 0.42);
+  color: rgb(var(--primary));
+  background: rgb(var(--primary) / 0.12);
+}
+
+.newtab-shortcut__action svg {
+  width: 16px;
+  height: 16px;
 }
 
 .newtab-shortcut:hover,

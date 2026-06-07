@@ -301,6 +301,14 @@ describe("new tab workspace apps", () => {
     expect(source).toContain("https://search.brave.com/search");
     expect(source).toContain("chrome.tabs.query");
     expect(source).toContain("chrome.history.search");
+    expect(source).toContain("tab.autoDiscardable === false");
+    expect(source).toContain(
+      "chrome.tabs.update(item.tabId, { autoDiscardable: !keepActive })",
+    );
+    expect(source).toContain("aria-pressed={item.keepActive}");
+    expect(source).toContain("Keep ${item.title} active");
+    expect(source).toContain("Allow ${item.title} to sleep");
+    expect(source).toContain("onToggleKeepActive={toggleKeepActive}");
     expect(source).toContain("maxResults: 0");
     expect(source).not.toContain("chrome.bookmarks.getRecent");
     expect(source).toContain('title="Open Tabs"');
@@ -325,5 +333,9 @@ describe("new tab workspace apps", () => {
     expect(styles).toContain(
       "grid-template-columns: repeat(2, minmax(0, 1fr));",
     );
+    expect(styles).toContain(
+      ".newtab-shortcut-row--kept-active .newtab-shortcut",
+    );
+    expect(styles).toContain('.newtab-shortcut__action[aria-pressed="true"]');
   });
 });
