@@ -98,6 +98,32 @@ curl https://agent.fly.pm/api/models \
 # { "models": [ { "id": "@cf/openai/gpt-oss-120b", "label": "...", "kind": "workers-ai" }, ... ] }
 ```
 
+## Self-learning (memory)
+
+The agent has a durable, self-learning memory layer (`src/memory.ts`).
+
+- **Storage.** Memories are the system-of-record in D1 table `agent_memories`
+  (`id`, `user_id`, `session_id`, `kind`, `content`, `hindsight_ref`,
+  `created_at`) and are mirrored into the shared Vectorize index
+  (`sidebar-search`) with metadata `type: "agent_memory"` and `user_id` so
+  recall can be scoped per user.
+- **Embeddings.** Both retain and recall embed text with
+  `@cf/baai/bge-base-en-v1.5` routed through AI Gateway `x`
+  (`env.AI.run(..., { gateway: { id: "x" } })`, the CLAUDE.md-sanctioned
+  Worker-side pattern).
+- **Recall.** On each turn the `ChatAgent` embeds the user message, queries
+  Vectorize filtered to the caller's `user_id`, joins the matching D1 rows, and
+  prepends them as a system message ("Relevant memories about this user:")
+  before generating. The `user_id` is threaded from the authenticated route
+  (`sessions.ts`) into the DO body; when absent (`"unknown"`) recall is skipped.
+- **Reflection.** After each turn the agent runs `reflect()` best-effort: it
+  summarizes the latest exchange via `collectCompletion` and, unless the model
+  replies `NONE`, retains the extracted fact as a `reflection` memory. Failures
+  are swallowed so a reflection error never breaks a chat turn.
+- **Future swap.** This D1+Vectorize implementation can be replaced by the
+  `@vectorize-io/hindsight-client` service later behind the same `memory.ts`
+  interface (`embed`/`retainMemory`/`recallMemories`/`reflect`).
+
 ## Architecture notes
 
 - `src/index.ts` is the deployed entry (re-exports the `ChatAgent` Durable
