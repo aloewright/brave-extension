@@ -5,10 +5,17 @@ import conversationLinks from "./features/conversation-links"
 import copyFilePath from "./features/copy-file-path"
 import defaultBranchButton from "./features/default-branch-button"
 import expandAllFiles from "./features/expand-all-files"
+import newRepoDisableProjectsAndWikis from "./features/new-repo-disable-projects-and-wikis"
+import quickLabelRemoval from "./features/quick-label-removal"
 import quickRepoDeletion from "./features/quick-repo-deletion"
+import quickReview from "./features/quick-review"
+import resizeRepositoryButtons from "./features/resize-repository-buttons"
+import restoreFile from "./features/restore-file"
 import showWhitespaceToggle from "./features/show-whitespace-toggle"
 import stickyFileHeaders from "./features/sticky-file-headers"
 import stickyPrTabs from "./features/sticky-pr-tabs"
+import syncPrCommitTitle from "./features/sync-pr-commit-title"
+import updatePrFromBaseBranch from "./features/update-pr-from-base-branch"
 import usefulNotFoundPage from "./features/useful-not-found-page"
 
 export type FeatureCategory =
@@ -35,10 +42,17 @@ export const FEATURES: FeatureMeta[] = [
   copyFilePath,
   defaultBranchButton,
   expandAllFiles,
+  newRepoDisableProjectsAndWikis,
+  quickLabelRemoval,
   quickRepoDeletion,
+  quickReview,
+  resizeRepositoryButtons,
+  restoreFile,
   showWhitespaceToggle,
   stickyFileHeaders,
   stickyPrTabs,
+  syncPrCommitTitle,
+  updatePrFromBaseBranch,
   usefulNotFoundPage,
 ]
 
