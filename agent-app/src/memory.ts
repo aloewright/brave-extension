@@ -1,6 +1,8 @@
 import type { Env } from "./env"
 import { AI_GATEWAY_ID } from "./env"
 import { ulid } from "./ulid"
+import { collectCompletion, type ChatMsg } from "./chat"
+import { DEFAULT_MODEL_ID } from "./models"
 
 // Embedding model routed through gateway "x" (CLAUDE.md sanctioned env.AI.run).
 export const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5"
@@ -83,4 +85,38 @@ export async function recallMemories(
   const byId = new Map((rows.results as unknown as MemoryRow[]).map((r) => [r.id, r]))
   // Preserve the relevance order from the vector query.
   return ids.map((id) => byId.get(id)).filter((r): r is MemoryRow => !!r)
+}
+
+/**
+ * Summarize the latest exchange into a durable memory. Best-effort: failures
+ * are swallowed so a reflection error never breaks a chat turn.
+ */
+export async function reflect(
+  env: Env,
+  userId: string,
+  sessionId: string,
+  recent: ChatMsg[]
+): Promise<void> {
+  try {
+    const transcript = recent.map((m) => `${m.role}: ${m.content}`).join("\n")
+    const summary = await collectCompletion(
+      env,
+      DEFAULT_MODEL_ID,
+      [
+        {
+          role: "system",
+          content:
+            "Extract one durable fact about the user or task worth remembering for future conversations. Reply with the single fact only, or 'NONE' if nothing is worth retaining."
+        },
+        { role: "user", content: transcript }
+      ],
+      false
+    )
+    const fact = summary.trim()
+    if (fact && fact.toUpperCase() !== "NONE") {
+      await retainMemory(env, { userId, sessionId, kind: "reflection", content: fact })
+    }
+  } catch {
+    /* reflection is best-effort */
+  }
 }

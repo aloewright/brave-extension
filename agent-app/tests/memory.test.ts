@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { makeEnv } from "./helpers"
-import { retainMemory, recallMemories } from "../src/memory"
+import { retainMemory, recallMemories, reflect } from "../src/memory"
 
 describe("memory", () => {
   it("retains a memory to D1 and recalls it by query", async () => {
@@ -22,5 +22,29 @@ describe("memory", () => {
   it("returns empty when the user has no memories", async () => {
     const env = makeEnv()
     expect(await recallMemories(env, "nobody", "q", 5)).toEqual([])
+  })
+
+  it("reflect retains a fact from a transcript", async () => {
+    const env = makeEnv()
+    const enc = new TextEncoder()
+    ;(env.AI.run as any).mockImplementation(async (model: string) => {
+      if (String(model).includes("bge")) return { data: [new Array(768).fill(0.01)] }
+      // streaming completion
+      return new ReadableStream({
+        start(c) {
+          c.enqueue(
+            enc.encode(`data: ${JSON.stringify({ response: "user prefers dark mode" })}\n\n`)
+          )
+          c.enqueue(enc.encode("data: [DONE]\n\n"))
+          c.close()
+        }
+      })
+    })
+    await reflect(env, "u1", "s1", [
+      { role: "user", content: "I always use dark mode" },
+      { role: "assistant", content: "noted" }
+    ])
+    const r = await recallMemories(env, "u1", "appearance", 5)
+    expect(r.some((m) => m.kind === "reflection")).toBe(true)
   })
 })
