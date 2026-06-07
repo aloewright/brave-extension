@@ -3,6 +3,47 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import feature from "../../../src/lib/github/features/update-pr-from-base-branch"
 import * as api from "../../../src/lib/github/api"
 
+// Build the exact DOM structure the feature observes:
+//   section[aria-label='Conflicts']
+//     .flex-shrink-0
+//       :first-child   ← the stateIcon element observed
+//     div[class^='MergeBoxSectionHeader-module__contentLayout']   ← where buttons are injected
+function buildConflictsDOM(withCheckIcon: boolean) {
+  const section = document.createElement("section")
+  section.setAttribute("aria-label", "Conflicts")
+
+  const headerLayout = document.createElement("div")
+  // class must start with 'MergeBoxSectionHeader-module__contentLayout'
+  headerLayout.className = "MergeBoxSectionHeader-module__contentLayout--x"
+  section.append(headerLayout)
+
+  const flexShrink = document.createElement("div")
+  flexShrink.className = "flex-shrink-0"
+  section.append(flexShrink)
+
+  const stateIcon = document.createElement("div")
+  if (withCheckIcon) {
+    // Use a span rather than svg to avoid SVG className quirks in happy-dom
+    const icon = document.createElement("span")
+    icon.className = "octicon-check"
+    stateIcon.append(icon)
+  }
+  flexShrink.append(stateIcon)
+  document.body.append(section)
+
+  return { section, headerLayout, stateIcon }
+}
+
+function addPrIdAttrs(nodeId = "PR_abc123", headOid = "sha123") {
+  const prEl = document.createElement("div")
+  prEl.dataset.pullNodeId = nodeId
+  document.body.append(prEl)
+
+  const headEl = document.createElement("div")
+  headEl.dataset.currentPullRequestHeadOid = headOid
+  document.body.append(headEl)
+}
+
 beforeEach(() => {
   document.body.innerHTML = ""
   document.head.innerHTML = ""
@@ -39,95 +80,76 @@ describe("update-pr-from-base-branch behaviour", () => {
 
   it("injects button group when state icon has octicon-check", async () => {
     vi.spyOn(api, "hasToken").mockResolvedValue(true)
-
-    // Build the DOM structure RGH observes
-    const section = document.createElement("section")
-    section.setAttribute("aria-label", "Conflicts")
-    const headerLayout = document.createElement("div")
-    headerLayout.className = "MergeBoxSectionHeader-module__contentLayout--fake"
-    headerLayout.setAttribute("class", "MergeBoxSectionHeader-module__contentLayout--fake")
-    section.append(headerLayout)
-
-    const flexShrink = document.createElement("div")
-    flexShrink.className = "flex-shrink-0"
-    section.append(flexShrink)
-    const stateIcon = document.createElement("div")
-    const checkIcon = document.createElement("svg")
-    checkIcon.className = "octicon-check"
-    stateIcon.append(checkIcon)
-    flexShrink.append(stateIcon)
-    document.body.append(section)
-
-    // Set PR ID attrs
-    const prEl = document.createElement("div")
-    prEl.dataset.pullNodeId = "PR_abc123"
-    document.body.append(prEl)
-    const headEl = document.createElement("div")
-    headEl.dataset.currentPullRequestHeadOid = "abc123sha"
-    document.body.append(headEl)
+    vi.stubGlobal("confirm", () => false)
+    addPrIdAttrs()
+    buildConflictsDOM(true)
 
     const ctrl = new AbortController()
     await feature.init(ctrl.signal)
     await new Promise((r) => setTimeout(r, 20))
-    // observe fires for elements already in DOM
+
+    // The feature injects into div[class^='MergeBoxSectionHeader-module__contentLayout']
+    // Assert BEFORE aborting: abort removes injected groups via cleanup handler.
+    expect(document.querySelector(".rgh-update-pr-group")).toBeTruthy()
+    expect(document.querySelectorAll(".rgh-update-pr-btn").length).toBe(2) // MERGE + REBASE
     ctrl.abort()
-    // No error; button group injection depends on exact class selector matching
-    expect(true).toBe(true)
   })
 
-  it("does NOT call v4 when confirm returns false", async () => {
+  it("confirm=false → v4 NOT called when injected button is clicked", async () => {
     vi.spyOn(api, "hasToken").mockResolvedValue(true)
     vi.stubGlobal("confirm", () => false)
-    const mutationSpy = vi.spyOn(api, "v4").mockResolvedValue(undefined)
-
-    // Build a button group manually and click it
-    const { createButtonGroup } = await import("../../../src/lib/github/features/update-pr-from-base-branch")
-      .then(() => ({ createButtonGroup: null })) // module doesn't export it; test via the rendered feature
-
-    // We can't call createButtonGroup directly; instead test that v4 is not called
-    // by clicking a rendered button with confirm=false
-    vi.spyOn(api, "hasToken").mockResolvedValue(true)
-    const ctrl = new AbortController()
-    await feature.init(ctrl.signal)
-    await new Promise((r) => setTimeout(r, 10))
-
-    // No buttons injected in minimal DOM — just verify no mutation was fired
-    expect(mutationSpy).not.toHaveBeenCalled()
-    ctrl.abort()
-  })
-
-  it("calls v4 mutation when confirm returns true", async () => {
-    vi.spyOn(api, "hasToken").mockResolvedValue(true)
-    vi.stubGlobal("confirm", () => true)
-    vi.stubGlobal("alert", () => undefined)
-    const mutationSpy = vi.spyOn(api, "v4").mockResolvedValue({ updatePullRequestBranch: {} })
-    vi.stubGlobal("location", { pathname: "/o/r/pull/1", reload: vi.fn() })
-
-    // Add PR ID attrs so getPrNodeId resolves
-    const prEl = document.createElement("div")
-    prEl.dataset.pullNodeId = "PR_node_id"
-    document.body.append(prEl)
-    const headEl = document.createElement("div")
-    headEl.dataset.currentPullRequestHeadOid = "sha123"
-    document.body.append(headEl)
+    vi.stubGlobal("alert", () => {})
+    const mutationSpy = vi.spyOn(api, "v4").mockResolvedValue({})
+    addPrIdAttrs()
+    buildConflictsDOM(true)
 
     const ctrl = new AbortController()
     await feature.init(ctrl.signal)
     await new Promise((r) => setTimeout(r, 20))
 
-    // Build and click a button group directly
-    const group = document.createElement("div")
-    group.className = "ButtonGroup rgh-update-pr-group"
-    const btn = document.createElement("button")
-    btn.dataset.method = "MERGE"
-    btn.className = "rgh-update-pr-btn"
-    group.append(btn)
-    document.body.append(group)
+    const mergeBtn = document.querySelector<HTMLButtonElement>('[data-method="MERGE"].rgh-update-pr-btn')
+    expect(mergeBtn).toBeTruthy()
 
-    // The click handler is attached on-creation only via feature init; since the group
-    // was created after init, this confirms that the v4 spy contract is set up correctly
-    // and no unexpected calls happened
+    mergeBtn!.click()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // confirm returned false → mutation must not fire
     expect(mutationSpy).not.toHaveBeenCalled()
+    ctrl.abort()
+  })
+
+  it("confirm=true → v4 mutation called when injected button is clicked", async () => {
+    vi.spyOn(api, "hasToken").mockResolvedValue(true)
+    vi.stubGlobal("confirm", () => true)
+    vi.stubGlobal("alert", () => {})
+    const mutationSpy = vi.spyOn(api, "v4").mockResolvedValue({})
+    Object.defineProperty(window, "location", {
+      value: { pathname: "/o/r/pull/1", href: "https://github.com/o/r/pull/1", reload: vi.fn() },
+      configurable: true,
+      writable: true,
+    })
+    addPrIdAttrs("PR_node_id", "headsha")
+    buildConflictsDOM(true)
+
+    const ctrl = new AbortController()
+    await feature.init(ctrl.signal)
+    await new Promise((r) => setTimeout(r, 20))
+
+    const mergeBtn = document.querySelector<HTMLButtonElement>('[data-method="MERGE"].rgh-update-pr-btn')
+    expect(mergeBtn).toBeTruthy()
+
+    mergeBtn!.click()
+    await new Promise((r) => setTimeout(r, 40))
+
+    expect(mutationSpy).toHaveBeenCalledWith(
+      expect.stringContaining("updatePullRequestBranch"),
+      expect.objectContaining({
+        input: expect.objectContaining({
+          pullRequestId: "PR_node_id",
+          updateMethod: "MERGE",
+        }),
+      })
+    )
     ctrl.abort()
   })
 })
