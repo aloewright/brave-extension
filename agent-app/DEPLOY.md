@@ -48,6 +48,56 @@ curl -X POST https://agent.fly.pm/api/sessions \
   -H 'content-type: application/json' -d '{"title":"smoke"}'
 ```
 
+## Models
+
+Plan 2 adds model selection + streamed completions through Cloudflare AI
+Gateway `x`.
+
+### Endpoints
+
+- `GET /api/models` — returns the model catalog (`{ models: [...] }`). Each
+  entry has `id`, `label`, `kind` (`workers-ai` | `advanced`), and
+  `experimental?`.
+- `GET /api/prefs/model` — the caller's selected model id (defaults to
+  `DEFAULT_MODEL_ID` when unset).
+- `PUT /api/prefs/model` — set the caller's selected model (`{ modelId }`);
+  unknown ids fall back to the default. Stored in KV under
+  `pref:model:<userId>`.
+- `POST /api/sessions/:id/messages/stream` — streamed send. Returns
+  `text/event-stream` with `data: {"delta":"..."}` chunks ending in
+  `data: [DONE]`. Body: `{ content, modelId?, advanced? }`. `modelId` defaults
+  to the user's KV preference. The non-stream `POST /api/sessions/:id/messages`
+  also honors `modelId`/`advanced`.
+
+### Reliability
+
+- **Workers AI** models (`kind: "workers-ai"`) are the reliable default — they
+  run via `env.AI.run("@cf/<model>", payload, { gateway: { id: "x" } })`, the
+  only Worker-side gateway path that works today (see
+  `~/.claude/CLAUDE.md` → "Inside a Worker").
+- **Advanced** models (`kind: "advanced"`, `experimental: true`) call explicit
+  non-CF model ids via the gateway compat run, gated behind the per-request
+  `advanced` flag. This path may be unreliable until the upstream dynamic-route
+  Worker bug is fixed — surface it to users as experimental.
+
+### Before deploy
+
+- **Verify Workers AI model ids are current.** CLAUDE.md notes ids get removed
+  (e.g. `@cf/meta/llama-3.3-70b-instruct-fp8-fast` and
+  `@cf/meta/llama-3.1-8b-instruct-fast` were removed). `@cf/openai/gpt-oss-120b`
+  and `@cf/meta/llama-3.1-8b-instruct-fp8` were current as of 2026-05-10.
+  Update `src/models.ts` and bump the `models:catalog:v1` KV cache key if the
+  catalog changes (the catalog is KV-cached).
+
+### Smoke test
+
+```bash
+curl https://agent.fly.pm/api/models \
+  -H "CF-Access-Client-Id: $ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $ACCESS_CLIENT_SECRET"
+# { "models": [ { "id": "@cf/openai/gpt-oss-120b", "label": "...", "kind": "workers-ai" }, ... ] }
+```
+
 ## Architecture notes
 
 - `src/index.ts` is the deployed entry (re-exports the `ChatAgent` Durable
