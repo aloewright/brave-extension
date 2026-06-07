@@ -54,6 +54,10 @@ export function AgentChatSection() {
   const clientRef = useRef<AgentApiClient | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream when the section unmounts (tab switch).
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   // Initial load: settings → client → models/pref/session.
   useEffect(() => {
@@ -131,11 +135,16 @@ export function AgentChatSection() {
     setMessages((prev) => [...prev, userMessage])
     setStreaming("")
 
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     let acc = ""
     try {
       for await (const delta of client.streamMessage(sessionId, {
         content: text,
-        modelId
+        modelId,
+        signal: controller.signal
       })) {
         acc = appendDelta(acc, delta)
         setStreaming(acc)
