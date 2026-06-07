@@ -140,6 +140,7 @@ export function migrateCloudosToSidebar(settings: Settings): Settings {
 }
 
 export function migrateLegacySidebarApiUrl(settings: Settings): Settings {
+  if (typeof settings.sidebarApiUrl !== "string") return settings
   const normalized = settings.sidebarApiUrl.replace(/\/+$/, "")
   if (!LEGACY_SIDEBAR_API_URLS.includes(normalized)) return settings
   return { ...settings, sidebarApiUrl: TXT_SIDEBAR_API_URL }
