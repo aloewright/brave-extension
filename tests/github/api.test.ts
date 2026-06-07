@@ -14,7 +14,7 @@ describe("github api", () => {
     ;(globalThis as any).fetch = fetchMock
     const out = await v3("/repos/o/r")
     expect(out).toEqual({ ok: true })
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL | RequestInfo, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] as any
     expect(String(url)).toBe("https://api.github.com/repos/o/r")
     expect((init as RequestInit).headers).toMatchObject({
       Authorization: "Bearer ghp_test"
@@ -32,7 +32,7 @@ describe("github api", () => {
     ;(globalThis as any).fetch = fetchMock
     const out = await v4("query{viewer{login}}")
     expect(out).toEqual({ viewer: { login: "me" } })
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL | RequestInfo, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] as any
     expect(String(url)).toBe("https://api.github.com/graphql")
     expect((init as RequestInit).method).toBe("POST")
   })
