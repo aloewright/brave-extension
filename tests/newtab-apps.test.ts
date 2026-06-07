@@ -27,6 +27,18 @@ describe("backfillBuiltinQuickLinks", () => {
     expect(restored.quickLinks!.length).toBeGreaterThan(0);
   });
 
+  it("restores built-in quick links when the stored URL drifted by a trailing slash", () => {
+    const custom = {
+      name: "Cloudflare",
+      domain: cloudflare.domain,
+      url: `${cloudflare.url}/`, // trailing slash from an older normalizer
+      icon: cloudflare.icon,
+      accent: cloudflare.accent,
+    };
+    const [restored] = backfillBuiltinQuickLinks([custom]);
+    expect(restored.quickLinks).toEqual(cloudflare.quickLinks);
+  });
+
   it("leaves an app that already has its own quick links untouched", () => {
     const own = { ...cloudflare, quickLinks: [{ label: "Mine", url: "https://x.test" }] };
     const [result] = backfillBuiltinQuickLinks([own]);

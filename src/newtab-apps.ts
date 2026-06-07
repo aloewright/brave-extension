@@ -163,18 +163,37 @@ export const WORKSPACE_APPS: WorkspaceApp[] = [
  * built-in that owns them was hidden — so the custom entry permanently shadowed
  * the built-in and its quick links disappeared. Backfilling by URL self-heals
  * that state. An app that already has its own quick links is left untouched.
+ *
+ * Matching is done on a normalized URL (lowercased host, no trailing slash, no
+ * search/hash on a bare-host URL) so a stored entry that drifted from the
+ * built-in by something cosmetic — e.g. a trailing slash from an older
+ * normalizer — still recovers its quick links.
  */
+function quickLinkMatchKey(url: string): string {
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.host.toLowerCase();
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (!path && !parsed.search && !parsed.hash) {
+      return `${parsed.protocol}//${host}`;
+    }
+    return `${parsed.protocol}//${host}${path}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url.trim().replace(/\/+$/, "");
+  }
+}
+
 export function backfillBuiltinQuickLinks(apps: WorkspaceApp[]): WorkspaceApp[] {
   const builtinLinks = new Map<string, WorkspaceAppQuickLink[]>(
     WORKSPACE_APPS.filter((app) => app.quickLinks?.length).map((app) => [
-      app.url,
+      quickLinkMatchKey(app.url),
       app.quickLinks!,
     ]),
   );
   if (builtinLinks.size === 0) return apps;
   return apps.map((app) => {
     if (app.quickLinks?.length) return app;
-    const links = builtinLinks.get(app.url);
+    const links = builtinLinks.get(quickLinkMatchKey(app.url));
     return links ? { ...app, quickLinks: links } : app;
   });
 }
