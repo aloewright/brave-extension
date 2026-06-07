@@ -1,7 +1,10 @@
 // src/lib/github/registry.ts
 import type { GitHubFeatureSettings } from "../../types"
 import cleanIssueLabels from "./features/clean-issue-labels"
+import conversationLinks from "./features/conversation-links"
 import copyFilePath from "./features/copy-file-path"
+import defaultBranchButton from "./features/default-branch-button"
+import expandAllFiles from "./features/expand-all-files"
 import quickRepoDeletion from "./features/quick-repo-deletion"
 import showWhitespaceToggle from "./features/show-whitespace-toggle"
 import stickyFileHeaders from "./features/sticky-file-headers"
@@ -28,7 +31,10 @@ export interface FeatureMeta {
 // Populated in Phase 5 as features are ported. Keep alphabetised by id.
 export const FEATURES: FeatureMeta[] = [
   cleanIssueLabels,
+  conversationLinks,
   copyFilePath,
+  defaultBranchButton,
+  expandAllFiles,
   quickRepoDeletion,
   showWhitespaceToggle,
   stickyFileHeaders,
