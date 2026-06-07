@@ -50,6 +50,12 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
   conversation. Hard Stop button. Single rolling conversation with
   compaction. Requires Apple Intelligence enabled (macOS 26+,
   M-series).
+- **Agent chat:** the sidebar's **Agent** tab streams a conversation with the
+  deployed `agent-app` Cloudflare Worker (remote LLM work, memory, and session
+  storage), including a model picker and per-session history. It requires the
+  Agent API URL plus a Cloudflare Access service token (client id + secret) set
+  in Settings → Agent API (Cloudflare Access); without those the tab shows a
+  configuration hint instead of a chat.
 - **Bookmarks and history:** pull a local bookmark snapshot into the extension,
   browse bookmarks alphabetically, by favorites, or by category, and show recent
   history on the new tab page.
