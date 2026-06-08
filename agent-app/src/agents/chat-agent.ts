@@ -313,9 +313,11 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
               }
               if (r.appendText) acc += r.appendText
               if (r.trace.length) trace.push(...r.trace)
-              // Stop consuming once the turn is logically finished so trailing
-              // events after RUN_FINISHED aren't enqueued to the client.
-              if (r.finished) break
+              // NOTE: do NOT break on r.finished. chat()'s Code Mode loop is
+              // multi-round — it emits a RUN_FINISHED after the tool-call round,
+              // then runs another round to produce the final text answer. Breaking
+              // on the first RUN_FINISHED truncates the turn to an empty reply.
+              // chat() closes the iterable when the whole agentic loop is done.
             }
           } catch (err) {
             if (!emitted) {
