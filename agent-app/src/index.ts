@@ -1,4 +1,6 @@
 import { buildApp } from "./app"
+import { consolidateMemories } from "./cron/consolidate"
+import type { Env } from "./env"
 
 // Re-export so the [[durable_objects]] binding resolves the class.
 export { ChatAgent } from "./agents/chat-agent"
@@ -27,4 +29,9 @@ app.notFound((c) => {
   return c.json({ error: { code: "not_found", message: "no such route" } }, 404)
 })
 
-export default app
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(consolidateMemories(env, { maxUsers: 100, maxMessagesPerUser: 200 }))
+  }
+}
