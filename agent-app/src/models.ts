@@ -7,13 +7,14 @@ export interface ModelEntry {
   label: string         // display name for the picker
   kind: ModelKind
   experimental?: boolean // true for advanced/non-CF entries
+  supportsTools?: boolean // true for models capable of tool use
 }
 
 // Reliable Workers AI text models routed through gateway "x" via env.AI.run.
 // VERIFY these ids are current before deploy (CLAUDE.md notes ids get removed).
 const WORKERS_AI: ModelEntry[] = [
-  { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B (Workers AI)", kind: "workers-ai" },
-  { id: "@cf/openai/gpt-oss-20b", label: "GPT-OSS 20B (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B (Workers AI)", kind: "workers-ai", supportsTools: true },
+  { id: "@cf/openai/gpt-oss-20b", label: "GPT-OSS 20B (Workers AI)", kind: "workers-ai", supportsTools: true },
   { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6 (Workers AI)", kind: "workers-ai" },
   { id: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B (Workers AI)", kind: "workers-ai" },
   { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B (Workers AI)", kind: "workers-ai" },
@@ -44,8 +45,8 @@ export const DEFAULT_MODEL_ID = "@cf/openai/gpt-oss-120b"
 // Bump this key whenever WORKERS_AI / IMAGE / ADVANCED change, otherwise the
 // KV-cached catalog keeps serving the old list (cache is never invalidated on
 // deploy). v2: added gpt-oss-20b, kimi-k2.6, gemma-4-26b, nemotron-3-120b,
-// glm-4.7-flash, qwen3-30b + flux-2 image model.
-const CATALOG_KEY = "models:catalog:v2"
+// glm-4.7-flash, qwen3-30b + flux-2 image model. v3: adds supportsTools tagging.
+const CATALOG_KEY = "models:catalog:v3"
 
 export async function getCatalog(env: Env): Promise<ModelEntry[]> {
   const cached = await env.AGENT_KV.get(CATALOG_KEY)

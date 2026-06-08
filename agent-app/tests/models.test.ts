@@ -28,7 +28,16 @@ describe("models catalog", () => {
   it("caches the catalog in KV", async () => {
     const env = makeEnv()
     await getCatalog(env)
-    const cached = await env.AGENT_KV.get("models:catalog:v2")
+    const cached = await env.AGENT_KV.get("models:catalog:v3")
     expect(cached).toBeTruthy()
+  })
+
+  it("tags tool-capable models with supportsTools", async () => {
+    const env = makeEnv()
+    const cat = await getCatalog(env)
+    const oss = cat.find((m) => m.id === "@cf/openai/gpt-oss-120b")
+    expect(oss?.supportsTools).toBe(true)
+    const img = cat.find((m) => m.kind === "image")
+    expect(img?.supportsTools ?? false).toBe(false)
   })
 })
