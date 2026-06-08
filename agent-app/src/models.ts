@@ -41,10 +41,6 @@ const ADVANCED: ModelEntry[] = [
 ]
 
 export const DEFAULT_MODEL_ID = "@cf/openai/gpt-oss-120b"
-// Bump this key whenever WORKERS_AI / IMAGE / ADVANCED change, otherwise the
-// KV-cached catalog keeps serving the old list (cache is never invalidated on
-// deploy). v2: added gpt-oss-20b, kimi-k2.6, gemma-4-26b, nemotron-3-120b,
-// glm-4.7-flash, qwen3-30b + flux-2 image model.
 const CATALOG_KEY = "models:catalog:v2"
 
 export async function getCatalog(env: Env): Promise<ModelEntry[]> {
