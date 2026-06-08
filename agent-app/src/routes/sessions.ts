@@ -53,7 +53,10 @@ sessions.post("/:id/messages", async (c) => {
           content: body.content,
           modelId,
           advanced: body.advanced === true,
-          userId: c.get("userId")
+          userId: c.get("userId"),
+          // Public origin so the Code Mode isolate driver can reach
+          // /internal/code-exec (the DO's own request origin is unreachable).
+          origin: new URL(c.req.url).origin
         })
       })
     )
@@ -93,7 +96,10 @@ sessions.post("/:id/messages/stream", async (c) => {
           content: body.content,
           modelId,
           advanced: body.advanced === true,
-          userId: c.get("userId")
+          userId: c.get("userId"),
+          // Public origin so the Code Mode isolate driver can reach
+          // /internal/code-exec (the DO's own request origin is unreachable).
+          origin: new URL(c.req.url).origin
         })
       })
     )

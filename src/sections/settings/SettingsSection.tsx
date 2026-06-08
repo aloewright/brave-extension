@@ -4,6 +4,7 @@ import { useNativeHost } from "../../hooks/useNativeHost"
 import { useSidebarSync } from "../../hooks/useSidebarSync"
 import { useEffect, useRef, useState } from "react"
 import type { DopplerStatus, MCPServer, MCPStatus } from "../../types"
+import { createAgentApiClient, type ToolSourceState } from "../../lib/agent-api"
 
 const SIDEBAR_API_SECRET_NAMES = [
   "SIDEBAR_API_URL",
@@ -106,6 +107,7 @@ export function SettingsSection() {
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpStatus, setMcpStatus] = useState<MCPStatus | null>(null)
   const [dopplerStatus, setDopplerStatus] = useState<DopplerStatus | null>(null)
+  const [agentToolStatus, setAgentToolStatus] = useState<ToolSourceState[]>([])
   const [pendingActions, setPendingActions] = useState<PendingActionState>({})
   const [loadingActions, setLoadingActions] = useState<PendingActionState>({})
   const [toast, setToast] = useState<string | null>(null)
@@ -353,6 +355,39 @@ export function SettingsSection() {
     return () => clearInterval(t)
   }, [nativeHost.connected, settings?.claudeConfigPath])
 
+  // Fetch cloud-agent tool reachability when the agent client is configured.
+  useEffect(() => {
+    if (
+      !settings?.agentApiUrl ||
+      !settings?.agentAccessClientId ||
+      !settings?.agentAccessClientSecret
+    ) {
+      setAgentToolStatus([])
+      return
+    }
+    let cancelled = false
+    const client = createAgentApiClient({
+      baseUrl: settings.agentApiUrl,
+      clientId: settings.agentAccessClientId,
+      clientSecret: settings.agentAccessClientSecret
+    })
+    client
+      .getToolStatus()
+      .then((sources) => {
+        if (!cancelled) setAgentToolStatus(sources)
+      })
+      .catch(() => {
+        if (!cancelled) setAgentToolStatus([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    settings?.agentApiUrl,
+    settings?.agentAccessClientId,
+    settings?.agentAccessClientSecret
+  ])
+
   if (!settings) {
     return (
       <div className="flex items-center justify-center h-full text-fg/40 text-xs">
@@ -368,6 +403,7 @@ export function SettingsSection() {
       onClose={() => {}}
       nativeHost={nativeHost}
       mcpServers={mcpServers}
+      agentToolStatus={agentToolStatus}
       sidebarSync={sidebarSync}
       mcp={{
         status: mcpStatus,
