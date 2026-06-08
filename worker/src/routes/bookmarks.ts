@@ -134,4 +134,15 @@ bookmarks.get("/:id", async (c) => {
   return c.json(row)
 })
 
+// Per-item delete. The extension tombstones server-deleted bookmark ids so it
+// never re-pushes them (real browser bookmarks are untouched). Cleans Vectorize.
+bookmarks.delete("/:id", async (c) => {
+  const id = c.req.param("id")
+  const row = await getBookmark(c.env, id)
+  if (!row) return c.json({ error: { code: "not_found", message: "no such bookmark" } }, 404)
+  await deleteFor(c.env, "bookmark", id, row.chunk_count)
+  await deleteBookmark(c.env, id)
+  return c.json({ ok: true, id })
+})
+
 export default bookmarks
