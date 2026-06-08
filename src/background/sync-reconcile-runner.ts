@@ -1,5 +1,5 @@
 import { getSettings } from "../storage"
-import { createSidebarApiClient } from "../lib/sidebar-api"
+import { createSidebarApiClient, normalizeTags } from "../lib/sidebar-api"
 import {
   runSyncReconcile,
   type LocalLink,
@@ -36,7 +36,15 @@ export async function runBackgroundSyncReconcile(): Promise<void> {
       getLocalLinks: async () => {
         const got = await chrome.storage.local.get(LOCAL_LINKS_KEY)
         const raw = got[LOCAL_LINKS_KEY]
-        return Array.isArray(raw) ? (raw as LocalLink[]) : []
+        if (!Array.isArray(raw)) return []
+        // Self-heal: coerce any stringified tags back to arrays so a prior bad
+        // sync can't keep corrupting local storage.
+        return (raw as Array<Omit<LocalLink, "tags"> & { tags?: unknown }>).map((l) => ({
+          id: l.id,
+          url: l.url,
+          title: l.title,
+          tags: normalizeTags(l.tags)
+        }))
       },
       setLocalLinks: async (links) => {
         await chrome.storage.local.set({ [LOCAL_LINKS_KEY]: links })

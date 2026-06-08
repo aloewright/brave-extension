@@ -107,6 +107,23 @@ export interface LinkListItem {
   tags?: string[]
 }
 
+/**
+ * Coerce a tags value into a string[]. The server persists tags as a JSON
+ * string (D1 TEXT); accept an array, a JSON-array string, or anything else.
+ */
+export function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return tags.filter((t): t is string => typeof t === "string")
+  if (typeof tags === "string" && tags.trim()) {
+    try {
+      const parsed = JSON.parse(tags)
+      if (Array.isArray(parsed)) return parsed.filter((t): t is string => typeof t === "string")
+    } catch {
+      /* not JSON — fall through */
+    }
+  }
+  return []
+}
+
 export interface BookmarkListItem {
   id: string
   url?: string
@@ -218,8 +235,18 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
       upsert: (payload) =>
         jsonRequest("/api/links", { method: "POST", body: JSON.stringify(payload) }),
       list: async () => {
-        const body = await jsonRequest<{ links?: LinkListItem[] }>("/api/links?limit=500")
-        return body.links ?? []
+        // The server stores tags as a JSON string (D1 TEXT). Normalize to an
+        // array here so consumers (reconcile, local storage, UI) never see a
+        // raw string — that caused `tags.map is not a function`.
+        const body = await jsonRequest<{ links?: Array<Omit<LinkListItem, "tags"> & { tags?: unknown }> }>(
+          "/api/links?limit=500"
+        )
+        return (body.links ?? []).map((l) => ({
+          id: l.id,
+          url: l.url,
+          title: l.title,
+          tags: normalizeTags(l.tags)
+        }))
       },
       remove: async (id) => {
         await jsonRequest(`/api/links/${encodeURIComponent(id)}`, { method: "DELETE" })
