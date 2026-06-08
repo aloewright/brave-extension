@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { requireAccess } from "./auth"
 import sessions from "./routes/sessions"
 import models from "./routes/models"
+import agentTools from "./routes/agent-tools"
 import type { Env } from "./env"
 import { log, since } from "./log"
 
@@ -37,6 +38,7 @@ export function buildApp() {
 
   app.route("/api/sessions", sessions)
   app.route("/api", models)
+  app.route("/api/agent", agentTools)
 
   return app
 }
