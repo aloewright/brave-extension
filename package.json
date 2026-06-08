@@ -109,6 +109,13 @@
           "default": "Alt+Shift+A"
         },
         "description": "Toggle Brave Dev Extension"
+      },
+      "save-link": {
+        "suggested_key": {
+          "default": "Ctrl+Shift+L",
+          "mac": "Command+Shift+L"
+        },
+        "description": "Save the current page link to your library"
       }
     }
   }
