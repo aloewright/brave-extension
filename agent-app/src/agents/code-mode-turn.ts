@@ -14,6 +14,24 @@ export function shouldUseCodeMode(model: ModelEntry, toolCount: number): boolean
   return model.supportsTools === true && toolCount > 0
 }
 
+/**
+ * Pure gate for whether a streaming turn should attempt Code Mode. Combines the
+ * request having an `origin` (needed to build the Code Mode sandbox), the model
+ * supporting tools with tools actually available, and the code-exec token being
+ * configured — without a token the driver can't authenticate, so we fall back
+ * to plain chat rather than producing a broken stream.
+ */
+export function codeModeEnabled(args: {
+  origin: boolean
+  supportsTools: boolean
+  toolCount: number
+  hasToken: boolean
+}): boolean {
+  return (
+    args.origin && args.supportsTools && args.toolCount > 0 && args.hasToken
+  )
+}
+
 /** One entry in the persisted tool trace. */
 export interface TraceEntry {
   toolCallId: string

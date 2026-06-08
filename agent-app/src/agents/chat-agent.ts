@@ -14,6 +14,7 @@ import { remoteMcpSource } from "../tools/remote-mcp"
 import { listMcpServers } from "../tools/mcp-config"
 import {
   BASE_SYSTEM_PROMPT,
+  codeModeEnabled,
   shouldUseCodeMode,
   translateEvent,
   type TraceEntry
@@ -63,6 +64,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
         modelId?: string
         advanced?: boolean
         userId?: string
+        origin?: string
       }
     } catch {
       return Response.json({ error: "Invalid JSON body" }, { status: 400 })
@@ -166,7 +168,12 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
     ]
     const { tools } = await buildToolRegistry(sources)
     const origin = body.origin?.trim() || ""
-    const useCM = Boolean(origin) && shouldUseCodeMode(model, tools.length)
+    const useCM = codeModeEnabled({
+      origin: Boolean(origin),
+      supportsTools: model.supportsTools === true,
+      toolCount: tools.length,
+      hasToken: Boolean(this.env.CODE_EXEC_TOKEN)
+    })
     log.info("turn.codemode", {
       sessionId,
       modelId,
@@ -229,12 +236,53 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
       }
     }
 
+    // Emit a one-shot notice only when the model genuinely lacks tool support
+    // (not merely a missing origin/token).
+    const noTooling = model.supportsTools !== true
+    const enc = new TextEncoder()
+
+    // Plain-chat path, factored out so BOTH the non-Code-Mode branch and the
+    // Code-Mode early-failure fallback can run it without duplicating the
+    // streamCompletion loop. Streams deltas, accumulating into `acc`.
+    const runPlainChat = async (
+      controller: ReadableStreamDefaultController<Uint8Array>,
+      withNotice: boolean
+    ): Promise<void> => {
+      if (withNotice && noTooling) {
+        controller.enqueue(
+          enc.encode(
+            `data: ${JSON.stringify({
+              event: "notice",
+              text: "Selected model has no tool support; using plain chat."
+            })}\n\n`
+          )
+        )
+      }
+      const source = await streamCompletion(env, modelId, fullHistory, advanced)
+      const reader = source.getReader()
+      const dec = new TextDecoder()
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const text = dec.decode(value, { stream: true })
+          acc += text
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta: text })}\n\n`))
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    }
+
     if (useCM) {
       const { tool: cmTool, systemPrompt } = buildCodeMode(env, origin, tools)
       const sse = new ReadableStream<Uint8Array>({
         async start(controller) {
-          const enc = new TextEncoder()
           const toolNames = new Map<string, string>()
+          // Track whether ANY SSE frame has been enqueued from a translated
+          // event. If Code Mode fails before emitting anything, we can cleanly
+          // fall back to plain chat; once mid-stream we cannot recover.
+          let emitted = false
           try {
             // chat() messages exclude `system` role — system entries (memory
             // context) flow through systemPrompts; the rest are user/assistant.
@@ -259,12 +307,46 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
             }>
             for await (const ev of events) {
               const r = translateEvent(ev, toolNames)
-              for (const f of r.frames) controller.enqueue(enc.encode(f))
+              for (const f of r.frames) {
+                controller.enqueue(enc.encode(f))
+                emitted = true
+              }
               if (r.appendText) acc += r.appendText
               if (r.trace.length) trace.push(...r.trace)
+              // Stop consuming once the turn is logically finished so trailing
+              // events after RUN_FINISHED aren't enqueued to the client.
+              if (r.finished) break
             }
           } catch (err) {
-            log.error("turn.stream.error", {
+            if (!emitted) {
+              // Nothing reached the client yet — degrade gracefully to plain
+              // chat so the user still gets a reply (driver auth, tool-call SSE
+              // shape mismatch, ordering, etc.).
+              log.warn("turn.codemode.fallback", {
+                sessionId,
+                modelId,
+                ms: since(turnStartedAt),
+                error: err instanceof Error ? err.message : String(err)
+              })
+              acc = ""
+              trace.length = 0
+              try {
+                await runPlainChat(controller, false)
+              } catch (err2) {
+                log.error("turn.stream.error", {
+                  sessionId,
+                  modelId,
+                  ms: since(turnStartedAt),
+                  error: err2 instanceof Error ? err2.message : String(err2)
+                })
+                controller.error(err2)
+                return
+              }
+              await finalize(controller)
+              return
+            }
+            // Mid-stream: cannot cleanly recover.
+            log.error("turn.codemode.midstream_fail", {
               sessionId,
               modelId,
               codeMode: true,
@@ -286,35 +368,12 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
       })
     }
 
-    // Fallback: plain completion. Emit a one-shot notice only when the model
-    // genuinely lacks tool support (not merely a missing origin).
-    const noTooling = model.supportsTools !== true
-    const source = await streamCompletion(this.env, model.id, fullHistory, advanced)
+    // Plain completion path (no Code Mode).
     const sse = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const reader = source.getReader()
-        const dec = new TextDecoder()
-        const enc = new TextEncoder()
-        if (noTooling) {
-          controller.enqueue(
-            enc.encode(
-              `data: ${JSON.stringify({
-                event: "notice",
-                text: "Selected model has no tool support; using plain chat."
-              })}\n\n`
-            )
-          )
-        }
         try {
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            const text = dec.decode(value, { stream: true })
-            acc += text
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta: text })}\n\n`))
-          }
+          await runPlainChat(controller, true)
         } catch (err) {
-          reader.releaseLock()
           log.error("turn.stream.error", {
             sessionId,
             modelId,
@@ -324,55 +383,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
           controller.error(err)
           return
         }
-        reader.releaseLock()
-
-        // CRITICAL: persist the assistant reply BEFORE signalling [DONE]/close.
-        // Doing it after close raced the Durable Object's eviction and could
-        // silently drop the reply — which is why conversations didn't hold.
-        // The response stream stays open until close(), keeping the DO alive
-        // for this await.
-        try {
-          await insertMessage(env, {
-            sessionId,
-            role: "assistant",
-            content: acc,
-            model: modelId
-          })
-        } catch (e) {
-          log.error("turn.stream.persist_failed", {
-            sessionId,
-            modelId,
-            error: e instanceof Error ? e.message : String(e)
-          })
-        }
-
-        controller.enqueue(enc.encode("data: [DONE]\n\n"))
-        controller.close()
-
-        log.info("turn.done", {
-          sessionId,
-          modelId,
-          replyChars: acc.length,
-          ms: since(turnStartedAt),
-          stream: true,
-          empty: acc.trim().length === 0
-        })
-
-        // Memory reflection is best-effort background work; waitUntil keeps the
-        // DO alive without blocking the client's stream completion.
-        if (reflectUserId !== "unknown" && acc.trim()) {
-          ctx.waitUntil(
-            reflect(env, reflectUserId, sessionId, [
-              { role: "user", content: reflectContent },
-              { role: "assistant", content: acc }
-            ]).catch((e) =>
-              log.error("reflect.error", {
-                sessionId,
-                error: e instanceof Error ? e.message : String(e)
-              })
-            )
-          )
-        }
+        await finalize(controller)
       }
     })
     return new Response(sse, {

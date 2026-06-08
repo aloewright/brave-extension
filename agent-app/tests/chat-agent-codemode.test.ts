@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { EventType } from "@tanstack/ai"
-import { shouldUseCodeMode, translateEvent } from "../src/agents/code-mode-turn"
+import {
+  codeModeEnabled,
+  shouldUseCodeMode,
+  translateEvent
+} from "../src/agents/code-mode-turn"
 
 describe("shouldUseCodeMode", () => {
   it("true only when supportsTools and tools exist", () => {
@@ -8,6 +12,24 @@ describe("shouldUseCodeMode", () => {
     expect(shouldUseCodeMode({ supportsTools: false } as any, 3)).toBe(false)
     expect(shouldUseCodeMode({ supportsTools: true } as any, 0)).toBe(false)
     expect(shouldUseCodeMode({} as any, 3)).toBe(false)
+  })
+})
+
+describe("codeModeEnabled", () => {
+  const all = { origin: true, supportsTools: true, toolCount: 1, hasToken: true }
+  it("true when all conditions hold", () => {
+    expect(codeModeEnabled(all)).toBe(true)
+    expect(codeModeEnabled({ ...all, toolCount: 5 })).toBe(true)
+  })
+  it("false when origin missing", () => {
+    expect(codeModeEnabled({ ...all, origin: false })).toBe(false)
+  })
+  it("false when token missing", () => {
+    expect(codeModeEnabled({ ...all, hasToken: false })).toBe(false)
+  })
+  it("false when no tool support or no tools", () => {
+    expect(codeModeEnabled({ ...all, supportsTools: false })).toBe(false)
+    expect(codeModeEnabled({ ...all, toolCount: 0 })).toBe(false)
   })
 })
 
