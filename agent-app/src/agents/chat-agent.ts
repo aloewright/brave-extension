@@ -1,5 +1,5 @@
 import { Agent } from "agents"
-import { chat } from "@tanstack/ai"
+import { chat, maxIterations } from "@tanstack/ai"
 import type { Env } from "../env"
 import { insertMessage, listMessages } from "../db"
 import { resolveModel } from "../models"
@@ -298,7 +298,13 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
               adapter: envAiAdapter(env, modelId),
               tools: [cmTool],
               systemPrompts: cmSystemPrompts,
-              messages: cmMessages
+              messages: cmMessages,
+              // Without an agent-loop strategy chat() stops after the first
+              // tool-call round, yielding an empty reply (the model runs
+              // execute_typescript but never produces the follow-up answer).
+              // Allow several iterations so it continues: tool call → result →
+              // final text answer.
+              agentLoopStrategy: maxIterations(6)
             }) as AsyncIterable<{
               type: string
               delta?: string
