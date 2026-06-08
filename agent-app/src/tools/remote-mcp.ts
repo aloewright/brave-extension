@@ -115,7 +115,7 @@ export function remoteMcpSource(cfg: McpServerCfg, fetchFn: typeof fetch = fetch
       const tools = await listTools()
       return { state: "connected", tools: tools.length }
     } catch (err: any) {
-      const reason = err?.message ?? String(err)
+      const reason = String(err?.message ?? err).slice(0, 200)
       if (err?.authError) return { state: "needs-auth", reason }
       return { state: "failed", reason }
     }

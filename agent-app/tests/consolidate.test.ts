@@ -46,4 +46,52 @@ describe("consolidateMemories", () => {
     expect(res.usersProcessed).toBe(0)
     expect(res.usersFailed).toBe(1)
   })
+
+  it("pages within a single tick so no messages are skipped", async () => {
+    const env = makeEnv()
+    vi.mocked(collectCompletion).mockReset()
+    vi.mocked(collectCompletion).mockResolvedValue("a fact")
+    const sess = await createSession(env, "user-page", "s")
+    // 3 messages, distinct ascending created_at to exercise multi-page paging.
+    for (let i = 0; i < 3; i++) {
+      await env.DB.prepare(
+        `INSERT INTO agent_messages (id, session_id, role, content, model, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(`m${i}`, sess.id, "user", `msg ${i}`, null, 1000 + i)
+        .run()
+    }
+
+    const first = await consolidateMemories(env, { maxUsers: 10, maxMessagesPerUser: 2 })
+    expect(first.usersProcessed).toBe(1)
+    // page1 (2 msgs) + page2 (1 msg) => 2 distill calls in one tick.
+    expect(vi.mocked(collectCompletion)).toHaveBeenCalledTimes(2)
+
+    // Second tick: nothing new => skipped.
+    vi.mocked(collectCompletion).mockClear()
+    const second = await consolidateMemories(env, { maxUsers: 10, maxMessagesPerUser: 2 })
+    expect(second.usersProcessed).toBe(0)
+    expect(second.skipped).toBe(1)
+    expect(vi.mocked(collectCompletion)).not.toHaveBeenCalled()
+  })
+
+  it("caps a giant message in the transcript passed to the model", async () => {
+    const env = makeEnv()
+    let capturedTranscript = ""
+    vi.mocked(collectCompletion).mockImplementation(async (_e, _m, msgs) => {
+      capturedTranscript = (msgs as Array<{ role: string; content: string }>)[1]!.content
+      return "ok"
+    })
+    const sess = await createSession(env, "user-big", "s")
+    await insertMessage(env, {
+      sessionId: sess.id,
+      role: "user",
+      content: "x".repeat(5000),
+      model: null
+    })
+    await consolidateMemories(env, { maxUsers: 10, maxMessagesPerUser: 50 })
+    // "user: " prefix + 500 chars + "…"
+    expect(capturedTranscript.length).toBeLessThanOrEqual(520)
+    expect(capturedTranscript).toContain("…")
+  })
 })

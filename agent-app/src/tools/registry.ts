@@ -28,7 +28,7 @@ export async function aggregateStatus(
           id: s.id,
           status: {
             state: "failed",
-            reason: e instanceof Error ? e.message : "error"
+            reason: (e instanceof Error ? e.message : "error").slice(0, 200)
           } as ToolSourceStatus
         }
       }
