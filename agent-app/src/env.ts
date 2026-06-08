@@ -22,6 +22,13 @@ export interface Env {
   // --- AI Gateway (used in Plan 2) ---
   CF_ACCOUNT_ID?: string
   CF_AIG_TOKEN?: string
+
+  // --- Hindsight remote MCP creds + code-exec shared secret ---
+  HINDSIGHT_URL?: string
+  HINDSIGHT_BEARER?: string
+  HINDSIGHT_ACCESS_CLIENT_ID?: string
+  HINDSIGHT_ACCESS_CLIENT_SECRET?: string
+  CODE_EXEC_TOKEN?: string
 }
 
 // AI Gateway id per CLAUDE.md. Dynamic routes are broken inside a Worker;
