@@ -26,6 +26,7 @@
     "hono-agents": "^3.0.11",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "ts-blank-space": "^0.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2025-01-28"
 compatibility_flags = ["nodejs_compat"]
 
+# Alias the Node-only `esbuild` package (used by @tanstack/ai-code-mode's
+# stripTypeScript) to a pure-JS, Worker-compatible type-stripper shim. The real
+# esbuild relies on __filename + a native binary and throws
+# "__filename is not defined" in the Workers runtime. See src/esbuild-shim.ts.
+[alias]
+esbuild = "./src/esbuild-shim.ts"
+
 # Workers Logs — captures console output (our structured JSON log lines) so the
 # app request flow + AI calls are observable in the dashboard and `wrangler tail`.
 [observability]
