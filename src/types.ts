@@ -190,7 +190,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Enabled by default so saved links/highlights surface in the hub + search.
   // Still gated on sidebarApiUrl + sidebarApiToken being set, so nothing syncs
   // until the backend is configured (the token auto-loads from Doppler).
-  sidebarSyncEnabled: true,
+  sidebarSyncEnabled: false,
   sidebarApiUrl: "https://txt.fly.pm",
   sidebarApiToken: "",
   tasksApiToken: "",
