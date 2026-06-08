@@ -151,7 +151,7 @@ export function LinksSection({ links, onAdd, onRemove, onUpdate, onClear, settin
               </a>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="text-[10px] text-fg/30 truncate max-w-[200px]">{link.url}</span>
-                {link.tags.map((t) => (
+                {(Array.isArray(link.tags) ? link.tags : []).map((t) => (
                   <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-accent text-fg/50 group/tag inline-flex items-center gap-1">
                     {t}
                     <button
