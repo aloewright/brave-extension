@@ -7,6 +7,7 @@ import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { syncHighlight, syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
+import { triggerBackgroundSyncReconcile } from "./background/sync-reconcile-runner";
 import { getSettings } from "./storage";
 import { createSidebarApiClient } from "./lib/sidebar-api";
 import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
@@ -316,6 +317,13 @@ void ensureCalTasksOriginRule().catch((err) => {
 void ensureBookmarkSnapshot().catch((err) => {
   safeRuntimeWarning("failed to initialize bookmark snapshot", err);
 });
+
+// Periodic server-authoritative bidirectional sync. Gated internally on
+// settings.sidebarSyncEnabled; fire-and-forget (never throws).
+triggerBackgroundSyncReconcile();
+setInterval(() => {
+  triggerBackgroundSyncReconcile();
+}, 60_000);
 
 async function reloadTabsOnceForStaleErrorCapture() {
   try {
@@ -709,6 +717,8 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "ai-dev-sidebar") {
     const id = crypto.randomUUID();
     sidebarPorts.set(id, port);
+    // Server-authoritative bidirectional sync: reconcile on sidebar connect.
+    triggerBackgroundSyncReconcile();
     void syncNormalBrowserWindows().then(() => {
       reconcileTerminalKeepAlive();
     });

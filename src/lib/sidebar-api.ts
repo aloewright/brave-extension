@@ -100,6 +100,19 @@ export interface BrowserAgentChatPayload {
   cloudUse?: BrowserAgentCloudUse
 }
 
+export interface LinkListItem {
+  id: string
+  url: string
+  title: string
+  tags?: string[]
+}
+
+export interface BookmarkListItem {
+  id: string
+  url?: string
+  title?: string
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message)
@@ -115,6 +128,8 @@ export interface SidebarApiClient {
   }
   links: {
     upsert: (payload: LinkUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
+    list: () => Promise<LinkListItem[]>
+    remove: (id: string) => Promise<void>
   }
   highlights: {
     upsert: (payload: HighlightUpsertPayload) => Promise<{ id: string; created: boolean; chunkCount: number }>
@@ -124,6 +139,8 @@ export interface SidebarApiClient {
       bookmarks: BookmarkPayload[],
       pulledAt?: string
     ) => Promise<{ inserted: number; updated: number; deleted: number; reembedded: number }>
+    list: () => Promise<BookmarkListItem[]>
+    remove: (id: string) => Promise<void>
   }
   recordings: {
     upload: (
@@ -199,7 +216,14 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
     },
     links: {
       upsert: (payload) =>
-        jsonRequest("/api/links", { method: "POST", body: JSON.stringify(payload) })
+        jsonRequest("/api/links", { method: "POST", body: JSON.stringify(payload) }),
+      list: async () => {
+        const body = await jsonRequest<{ links?: LinkListItem[] }>("/api/links?limit=500")
+        return body.links ?? []
+      },
+      remove: async (id) => {
+        await jsonRequest(`/api/links/${encodeURIComponent(id)}`, { method: "DELETE" })
+      }
     },
     highlights: {
       upsert: (payload) =>
@@ -210,7 +234,14 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
         jsonRequest("/api/bookmarks/snapshot", {
           method: "POST",
           body: JSON.stringify({ bookmarks, pulledAt })
-        })
+        }),
+      list: async () => {
+        const body = await jsonRequest<{ bookmarks?: BookmarkListItem[] }>("/api/bookmarks?limit=1000")
+        return body.bookmarks ?? []
+      },
+      remove: async (id) => {
+        await jsonRequest(`/api/bookmarks/${encodeURIComponent(id)}`, { method: "DELETE" })
+      }
     },
     videos: {
       import: (payload) =>

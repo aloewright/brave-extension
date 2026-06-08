@@ -1,6 +1,7 @@
 import { getSettings } from "../storage"
 import { pullBookmarkSnapshot, type StoredBookmark } from "../lib/bookmark-snapshot"
 import { createSidebarApiClient, type BookmarkPayload } from "../lib/sidebar-api"
+import { getBookmarkTombstones, setLastSyncedBookmarkIds } from "../lib/bookmark-tombstones"
 
 const DEBOUNCE_MS = 5000
 const LAST_PUSH_KEY = "ai-dev-sidebar-bookmark-last-push"
@@ -55,8 +56,15 @@ export async function pushSnapshot(): Promise<{ pushed: boolean; reason?: string
     }
 
     const snapshot = await pullBookmarkSnapshot()
+    // Exclude bookmarks the server already deleted (tombstoned) so we never
+    // re-push them. Server is the source of truth.
+    const tombstones = await getBookmarkTombstones()
+    const pushable = snapshot.bookmarks.filter((b) => !tombstones.has(b.id))
     const client = createSidebarApiClient(settings.sidebarApiToken, settings.sidebarApiUrl)
-    await client.bookmarks.snapshot(snapshot.bookmarks.map(toPayload), snapshot.pulledAt)
+    await client.bookmarks.snapshot(pushable.map(toPayload), snapshot.pulledAt)
+    // Record the ids we actually pushed so the reconciler can detect future
+    // server-side deletions (lastSynced minus server).
+    await setLastSyncedBookmarkIds(pushable.map((b) => b.id))
     await chrome.storage.local.set({ [LAST_PUSH_KEY]: Date.now() })
     return { pushed: true }
   } catch (err) {
