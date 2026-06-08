@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { EventType } from "@tanstack/ai"
-import { envAiAdapter } from "../src/ai/env-ai-adapter"
+import { envAiAdapter, toWorkersAiMessages } from "../src/ai/env-ai-adapter"
 import type { Env } from "../src/env"
 
 // Build a ReadableStream of SSE bytes from raw line strings.
@@ -132,5 +132,88 @@ describe("envAiAdapter", () => {
         }
       }
     ])
+  })
+})
+
+describe("toWorkersAiMessages", () => {
+  it("leaves a user message with string content unchanged", () => {
+    const out = toWorkersAiMessages([{ role: "user", content: "hi" }])
+    expect(out).toEqual([{ role: "user", content: "hi" }])
+  })
+
+  it("flattens an assistant message whose content is an array of text parts", () => {
+    const out = toWorkersAiMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", content: "Hello " },
+          { type: "text", content: "world" }
+        ]
+      }
+    ])
+    expect(out).toEqual([{ role: "assistant", content: "Hello world" }])
+  })
+
+  it("maps assistant toolCalls into a tool_calls array with stringified arguments", () => {
+    const out = toWorkersAiMessages([
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "execute_typescript", arguments: { code: "1+1" } }
+          }
+        ]
+      }
+    ])
+    expect(out).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "execute_typescript", arguments: JSON.stringify({ code: "1+1" }) }
+          }
+        ]
+      }
+    ])
+  })
+
+  it("preserves an already-stringified arguments string on tool calls", () => {
+    const out = toWorkersAiMessages([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "c2", type: "function", function: { name: "f", arguments: '{"a":1}' } }
+        ]
+      }
+    ])
+    expect(((out[0] as any).tool_calls as any[])[0].function.arguments).toBe('{"a":1}')
+  })
+
+  it("maps a role:tool result message to tool_call_id + stringified content", () => {
+    const out = toWorkersAiMessages([
+      { role: "tool", toolCallId: "call_1", content: { result: 2 } }
+    ])
+    expect(out).toEqual([
+      { role: "tool", tool_call_id: "call_1", content: JSON.stringify({ result: 2 }) }
+    ])
+  })
+
+  it("leaves a string tool result content as-is", () => {
+    const out = toWorkersAiMessages([
+      { role: "tool", toolCallId: "c", content: "plain" }
+    ])
+    expect(out).toEqual([{ role: "tool", tool_call_id: "c", content: "plain" }])
+  })
+
+  it("maps a system message to string content", () => {
+    const out = toWorkersAiMessages([{ role: "system", content: "be nice" }])
+    expect(out).toEqual([{ role: "system", content: "be nice" }])
   })
 })

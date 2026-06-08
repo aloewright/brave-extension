@@ -17,6 +17,89 @@ import { BaseTextAdapter } from "@tanstack/ai/adapters"
 import { AI_GATEWAY_ID, type Env } from "../env"
 import { ulid } from "../ulid"
 
+// Normalize TanStack `ModelMessage[]` into the OpenAI/Workers-AI chat schema
+// (`{ role, content: <string> }` per message, with `tool_calls` / `tool_call_id`
+// for tool round-trips). Workers AI's chat oneOf requires `content` to be a
+// string, so on the SECOND agent-loop round — when options.messages contains an
+// assistant message whose content is an ARRAY of content-parts (or null) plus a
+// role:"tool" result message — passing options.messages straight through is
+// rejected with error 5006. This maps every message to the string-content shape.
+//
+// Field names verified against @tanstack/ai types.d.ts:
+//   ModelMessage { role: 'user'|'assistant'|'tool'; content: string|null|Array<ContentPart>;
+//                  toolCalls?: ToolCall[]; toolCallId?: string }
+//   ToolCall     { id; type:'function'; function:{ name; arguments: string } }
+//   TextPart     { type:'text'; content: string }
+function partsToText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (content == null) return ""
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => {
+        if (typeof p === "string") return p
+        if (p && typeof p === "object" && (p as any).type === "text") {
+          return String((p as any).content ?? "")
+        }
+        return ""
+      })
+      .join("")
+  }
+  return ""
+}
+
+function stringifyArgs(args: unknown): string {
+  if (typeof args === "string") return args
+  if (args == null) return "{}"
+  try {
+    return JSON.stringify(args)
+  } catch {
+    return "{}"
+  }
+}
+
+function stringifyResult(content: unknown): string {
+  if (typeof content === "string") return content
+  if (content == null) return ""
+  try {
+    return JSON.stringify(content)
+  } catch {
+    return String(content)
+  }
+}
+
+export function toWorkersAiMessages(messages: any[]): Array<Record<string, unknown>> {
+  if (!Array.isArray(messages)) return []
+  return messages.map((m) => {
+    const role = m?.role
+
+    if (role === "tool") {
+      return {
+        role: "tool",
+        tool_call_id: m?.toolCallId ?? m?.tool_call_id ?? "",
+        content: stringifyResult(m?.content ?? m?.result)
+      }
+    }
+
+    if (role === "assistant" && Array.isArray(m?.toolCalls) && m.toolCalls.length > 0) {
+      return {
+        role: "assistant",
+        content: partsToText(m?.content),
+        tool_calls: m.toolCalls.map((tc: any) => ({
+          id: tc?.id ?? "",
+          type: "function",
+          function: {
+            name: tc?.function?.name ?? tc?.name ?? "",
+            arguments: stringifyArgs(tc?.function?.arguments ?? tc?.arguments)
+          }
+        }))
+      }
+    }
+
+    // system / user / assistant (text only)
+    return { role: role ?? "user", content: partsToText(m?.content) }
+  })
+}
+
 interface OpenAiToolDelta {
   index?: number
   id?: string
@@ -140,13 +223,20 @@ class EnvAiTextAdapter extends BaseTextAdapter<
     if (messageId !== null) {
       yield { type: EventType.TEXT_MESSAGE_END, messageId } as StreamChunk
     }
+    let hadToolCalls = false
     for (const acc of tools.values()) {
       if (acc.started) {
+        hadToolCalls = true
         yield { type: EventType.TOOL_CALL_END, toolCallId: acc.id } as StreamChunk
       }
     }
 
-    yield { type: EventType.RUN_FINISHED, threadId, runId } as StreamChunk
+    // The chat() agent loop only executes pending tool calls when the finished
+    // event reports finishReason === "tool_calls" (see @tanstack/ai chat
+    // index.js). Without this, a Code Mode turn emits the execute_typescript
+    // call but the loop never runs it and stops with an empty reply.
+    const finishReason = hadToolCalls ? "tool_calls" : "stop"
+    yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason } as StreamChunk
   }
 
   // Minimal-but-correct structured output: drain a non-streaming run and return
@@ -191,7 +281,7 @@ class EnvAiTextAdapter extends BaseTextAdapter<
 
   #run(options: TextOptions<Record<string, any>>, stream = true) {
     const body: Record<string, unknown> = {
-      messages: options.messages,
+      messages: toWorkersAiMessages(options.messages as any[]),
       stream
     }
     if (options.tools && options.tools.length > 0) {
