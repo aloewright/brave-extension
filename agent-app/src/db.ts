@@ -64,7 +64,14 @@ export async function getSession(
 
 export async function insertMessage(
   env: Env,
-  m: { sessionId: string; role: string; content: string; model: string | null }
+  m: {
+    sessionId: string
+    role: string
+    content: string
+    model: string | null
+    // Optional JSON string for the Code Mode tool trace (column from 0007).
+    toolTrace?: string | null
+  }
 ): Promise<MessageRow> {
   const row: MessageRow = {
     id: ulid(),
@@ -74,10 +81,11 @@ export async function insertMessage(
     model: m.model,
     created_at: Date.now()
   }
+  const toolTrace = m.toolTrace ?? null
   const stmt1 = env.DB.prepare(
-    `INSERT INTO agent_messages (id, session_id, role, content, model, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(row.id, row.session_id, row.role, row.content, row.model, row.created_at)
+    `INSERT INTO agent_messages (id, session_id, role, content, model, created_at, tool_trace)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(row.id, row.session_id, row.role, row.content, row.model, row.created_at, toolTrace)
   const stmt2 = env.DB.prepare(`UPDATE agent_sessions SET updated_at = ? WHERE id = ?`).bind(
     row.created_at,
     m.sessionId

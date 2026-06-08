@@ -1,5 +1,5 @@
 import { vi } from "vitest"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { createRequire } from "node:module"
@@ -23,11 +23,14 @@ function loadSqlite(): { DatabaseSync: new (path: string) => DatabaseSync } {
 }
 
 function applyMigrations(db: DatabaseSync): void {
-  const sql = readFileSync(
-    join(__dirname, "..", "migrations", "0001_agent_core.sql"),
-    "utf8"
-  )
-  db.exec(sql)
+  // Apply every numbered migration in order so the test schema tracks prod.
+  const dir = join(__dirname, "..", "migrations")
+  const files = readdirSync(dir)
+    .filter((f) => /^\d+.*\.sql$/.test(f))
+    .sort()
+  for (const f of files) {
+    db.exec(readFileSync(join(dir, f), "utf8"))
+  }
 }
 
 // Minimal D1 shim over node:sqlite. Supports the prepare().bind().run/first/all

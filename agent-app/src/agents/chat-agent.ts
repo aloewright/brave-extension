@@ -1,10 +1,26 @@
 import { Agent } from "agents"
+import { chat } from "@tanstack/ai"
 import type { Env } from "../env"
 import { insertMessage, listMessages } from "../db"
 import { resolveModel } from "../models"
 import { streamCompletion, collectCompletion, type ChatMsg } from "../chat"
 import { recallMemories, reflect } from "../memory"
 import { log, since } from "../log"
+import { envAiAdapter } from "../ai/env-ai-adapter"
+import { buildCodeMode } from "../ai/code-mode"
+import { buildToolRegistry } from "../tools/registry"
+import { workerNativeSource } from "../tools/worker-native"
+import { remoteMcpSource } from "../tools/remote-mcp"
+import { listMcpServers } from "../tools/mcp-config"
+import {
+  BASE_SYSTEM_PROMPT,
+  shouldUseCodeMode,
+  translateEvent,
+  type TraceEntry
+} from "./code-mode-turn"
+
+// Re-export the pure gate so callers/tests can import from chat-agent too.
+export { shouldUseCodeMode } from "./code-mode-turn"
 
 export interface ChatAgentState {
   sessionId: string | null
@@ -38,6 +54,7 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
       modelId?: string
       advanced?: boolean
       userId?: string
+      origin?: string
     }
     try {
       body = (await request.json()) as {
@@ -135,18 +152,159 @@ export class ChatAgent extends Agent<Env, ChatAgentState> {
     }
 
     // Streaming path: forward deltas as SSE while accumulating for persistence.
-    const source = await streamCompletion(this.env, model.id, fullHistory, advanced)
     const env = this.env
     const ctx = this.ctx
     const modelId = model.id
     const reflectUserId = userId
     const reflectContent = content
+
+    // Build the tool registry up-front so we can decide between Code Mode and
+    // plain chat. Sources: worker-native capabilities + the user's MCP servers.
+    const sources = [
+      workerNativeSource(env, userId),
+      ...(await listMcpServers(env, userId)).map((s) => remoteMcpSource(s))
+    ]
+    const { tools } = await buildToolRegistry(sources)
+    const origin = body.origin?.trim() || ""
+    const useCM = Boolean(origin) && shouldUseCodeMode(model, tools.length)
+    log.info("turn.codemode", {
+      sessionId,
+      modelId,
+      tools: tools.length,
+      used: useCM
+    })
+
     let acc = ""
+    const trace: TraceEntry[] = []
+
+    // Each ReadableStream variant streams SSE frames, accumulates `acc`, persists
+    // before [DONE], then schedules reflection. They differ only in the event
+    // source: the Code Mode `chat()` loop vs the plain `streamCompletion` bytes.
+    const finalize = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+      const enc = new TextEncoder()
+      // CRITICAL: persist the assistant reply BEFORE signalling [DONE]/close.
+      // Doing it after close raced the Durable Object's eviction and could
+      // silently drop the reply — which is why conversations didn't hold.
+      try {
+        await insertMessage(env, {
+          sessionId,
+          role: "assistant",
+          content: acc,
+          model: modelId,
+          toolTrace: trace.length > 0 ? JSON.stringify(trace) : null
+        })
+      } catch (e) {
+        log.error("turn.stream.persist_failed", {
+          sessionId,
+          modelId,
+          error: e instanceof Error ? e.message : String(e)
+        })
+      }
+
+      controller.enqueue(enc.encode("data: [DONE]\n\n"))
+      controller.close()
+
+      log.info("turn.done", {
+        sessionId,
+        modelId,
+        replyChars: acc.length,
+        ms: since(turnStartedAt),
+        stream: true,
+        codeMode: useCM,
+        empty: acc.trim().length === 0
+      })
+
+      if (reflectUserId !== "unknown" && acc.trim()) {
+        ctx.waitUntil(
+          reflect(env, reflectUserId, sessionId, [
+            { role: "user", content: reflectContent },
+            { role: "assistant", content: acc }
+          ]).catch((e) =>
+            log.error("reflect.error", {
+              sessionId,
+              error: e instanceof Error ? e.message : String(e)
+            })
+          )
+        )
+      }
+    }
+
+    if (useCM) {
+      const { tool: cmTool, systemPrompt } = buildCodeMode(env, origin, tools)
+      const sse = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const enc = new TextEncoder()
+          const toolNames = new Map<string, string>()
+          try {
+            // chat() messages exclude `system` role — system entries (memory
+            // context) flow through systemPrompts; the rest are user/assistant.
+            const cmMessages = fullHistory
+              .filter((m) => m.role !== "system")
+              .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+            const cmSystemPrompts = [
+              BASE_SYSTEM_PROMPT,
+              systemPrompt,
+              ...fullHistory.filter((m) => m.role === "system").map((m) => m.content)
+            ]
+            const events = chat({
+              adapter: envAiAdapter(env, modelId),
+              tools: [cmTool],
+              systemPrompts: cmSystemPrompts,
+              messages: cmMessages
+            }) as AsyncIterable<{
+              type: string
+              delta?: string
+              toolCallId?: string
+              toolCallName?: string
+            }>
+            for await (const ev of events) {
+              const r = translateEvent(ev, toolNames)
+              for (const f of r.frames) controller.enqueue(enc.encode(f))
+              if (r.appendText) acc += r.appendText
+              if (r.trace.length) trace.push(...r.trace)
+            }
+          } catch (err) {
+            log.error("turn.stream.error", {
+              sessionId,
+              modelId,
+              codeMode: true,
+              ms: since(turnStartedAt),
+              error: err instanceof Error ? err.message : String(err)
+            })
+            controller.error(err)
+            return
+          }
+          await finalize(controller)
+        }
+      })
+      return new Response(sse, {
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive"
+        }
+      })
+    }
+
+    // Fallback: plain completion. Emit a one-shot notice only when the model
+    // genuinely lacks tool support (not merely a missing origin).
+    const noTooling = model.supportsTools !== true
+    const source = await streamCompletion(this.env, model.id, fullHistory, advanced)
     const sse = new ReadableStream<Uint8Array>({
       async start(controller) {
         const reader = source.getReader()
         const dec = new TextDecoder()
         const enc = new TextEncoder()
+        if (noTooling) {
+          controller.enqueue(
+            enc.encode(
+              `data: ${JSON.stringify({
+                event: "notice",
+                text: "Selected model has no tool support; using plain chat."
+              })}\n\n`
+            )
+          )
+        }
         try {
           for (;;) {
             const { done, value } = await reader.read()
