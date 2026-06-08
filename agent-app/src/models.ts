@@ -13,6 +13,12 @@ export interface ModelEntry {
 // VERIFY these ids are current before deploy (CLAUDE.md notes ids get removed).
 const WORKERS_AI: ModelEntry[] = [
   { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/openai/gpt-oss-20b", label: "GPT-OSS 20B (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6 (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/zai-org/glm-4.7-flash", label: "GLM 4.7 Flash (Workers AI)", kind: "workers-ai" },
+  { id: "@cf/qwen/qwen3-30b-a3b-fp8", label: "Qwen3 30B (Workers AI)", kind: "workers-ai" },
   { id: "@cf/meta/llama-3.1-8b-instruct-fp8", label: "Llama 3.1 8B (Workers AI)", kind: "workers-ai" }
 ]
 
@@ -24,7 +30,7 @@ const ADVANCED: ModelEntry[] = [
 ]
 
 export const DEFAULT_MODEL_ID = "@cf/openai/gpt-oss-120b"
-const CATALOG_KEY = "models:catalog:v1"
+const CATALOG_KEY = "models:catalog:v2"
 
 export async function getCatalog(env: Env): Promise<ModelEntry[]> {
   const cached = await env.AGENT_KV.get(CATALOG_KEY)
