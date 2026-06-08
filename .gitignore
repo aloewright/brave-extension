@@ -11,3 +11,6 @@ dist/
 # Local-only state from agent tooling and wrangler dev runs.
 .claude/
 .wrangler/
+
+# Local git worktrees from other sessions
+.worktrees/

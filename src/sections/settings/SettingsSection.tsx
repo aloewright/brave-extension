@@ -16,13 +16,9 @@ const SIDEBAR_API_SECRET_NAMES = [
   "CAL_TASKS_API_TOKEN",
   "CAL_TASKS_TOKEN",
   "AGENT_API_URL",
+  "AGENT_URL",
   "AGENT_ACCESS_CLIENT_ID",
-  "AGENT_ACCESS_CLIENT_SECRET"
-]
-
-const AGENT_API_URL_SECRET_NAMES = ["AGENT_API_URL", "AGENT_APIURL"]
-const AGENT_ACCESS_CLIENT_ID_SECRET_NAMES = ["AGENT_ACCESS_CLIENT_ID", "AGENT_CLIENT_ID"]
-const AGENT_ACCESS_CLIENT_SECRET_SECRET_NAMES = [
+  "AGENT_CLIENT_ID",
   "AGENT_ACCESS_CLIENT_SECRET",
   "AGENT_CLIENT_SECRET"
 ]
@@ -39,6 +35,15 @@ const TASKS_TOKEN_SECRET_NAMES = [
   "TASKS_TOKEN",
   "CAL_TASKS_API_TOKEN",
   "CAL_TASKS_TOKEN"
+]
+
+const AGENT_API_URL_SECRET_NAMES = ["AGENT_API_URL", "AGENT_APIURL", "AGENT_URL"]
+
+const AGENT_CLIENT_ID_SECRET_NAMES = ["AGENT_ACCESS_CLIENT_ID", "AGENT_CLIENT_ID"]
+
+const AGENT_CLIENT_SECRET_SECRET_NAMES = [
+  "AGENT_ACCESS_CLIENT_SECRET",
+  "AGENT_CLIENT_SECRET"
 ]
 
 function pickSecretValue(
@@ -231,10 +236,10 @@ export function SettingsSection() {
           const tasksApiToken =
             pickSecretValue(secrets, TASKS_TOKEN_SECRET_NAMES) || sidebarApiToken
           const agentApiUrl = pickSecretValue(secrets, AGENT_API_URL_SECRET_NAMES)
-          const agentAccessClientId = pickSecretValue(secrets, AGENT_ACCESS_CLIENT_ID_SECRET_NAMES)
+          const agentAccessClientId = pickSecretValue(secrets, AGENT_CLIENT_ID_SECRET_NAMES)
           const agentAccessClientSecret = pickSecretValue(
             secrets,
-            AGENT_ACCESS_CLIENT_SECRET_SECRET_NAMES
+            AGENT_CLIENT_SECRET_SECRET_NAMES
           )
           if (
             sidebarApiUrl ||
@@ -324,6 +329,9 @@ export function SettingsSection() {
       silent: true
     })
   }, [
+    settings?.agentApiUrl,
+    settings?.agentAccessClientId,
+    settings?.agentAccessClientSecret,
     settings?.sidebarApiUrl,
     settings?.sidebarApiToken,
     settings?.tasksApiToken,

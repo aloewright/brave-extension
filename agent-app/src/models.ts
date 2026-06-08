@@ -1,6 +1,6 @@
 import type { Env } from "./env"
 
-export type ModelKind = "workers-ai" | "advanced"
+export type ModelKind = "workers-ai" | "advanced" | "image"
 
 export interface ModelEntry {
   id: string            // the id passed to the gateway (Workers AI id, or explicit compat id)
@@ -9,7 +9,7 @@ export interface ModelEntry {
   experimental?: boolean // true for advanced/non-CF entries
 }
 
-// Reliable Workers AI models routed through gateway "x" via env.AI.run.
+// Reliable Workers AI text models routed through gateway "x" via env.AI.run.
 // VERIFY these ids are current before deploy (CLAUDE.md notes ids get removed).
 const WORKERS_AI: ModelEntry[] = [
   { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B (Workers AI)", kind: "workers-ai" },
@@ -20,6 +20,17 @@ const WORKERS_AI: ModelEntry[] = [
   { id: "@cf/zai-org/glm-4.7-flash", label: "GLM 4.7 Flash (Workers AI)", kind: "workers-ai" },
   { id: "@cf/qwen/qwen3-30b-a3b-fp8", label: "Qwen3 30B (Workers AI)", kind: "workers-ai" },
   { id: "@cf/meta/llama-3.1-8b-instruct-fp8", label: "Llama 3.1 8B (Workers AI)", kind: "workers-ai" }
+]
+
+// Image-generation Workers AI models. These do NOT use the chat streaming path
+// (text deltas); they need a dedicated image route. Surfaced in the catalog so
+// the UI can show/route them separately — chat send rejects kind:"image".
+const IMAGE: ModelEntry[] = [
+  {
+    id: "@cf/black-forest-labs/flux-2-klein-4b",
+    label: "FLUX.2 Klein 4B (image)",
+    kind: "image"
+  }
 ]
 
 // Experimental explicit-model entries via gateway compat (may be unreliable
@@ -41,7 +52,7 @@ export async function getCatalog(env: Env): Promise<ModelEntry[]> {
       /* fall through to rebuild */
     }
   }
-  const catalog = [...WORKERS_AI, ...ADVANCED]
+  const catalog = [...WORKERS_AI, ...IMAGE, ...ADVANCED]
   await env.AGENT_KV.put(CATALOG_KEY, JSON.stringify(catalog))
   return catalog
 }
