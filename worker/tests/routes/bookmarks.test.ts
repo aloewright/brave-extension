@@ -170,4 +170,17 @@ describe("/api/bookmarks", () => {
     const res = await app.fetch(new Request("http://x/api/bookmarks/snapshot"), env)
     expect(res.status).toBe(401)
   })
+
+  it("DELETE /:id removes a bookmark; 404 when missing", async () => {
+    await authed(env, "/api/bookmarks/snapshot", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ bookmarks: [bm("b1")] })
+    })
+    const del = await authed(env, "/api/bookmarks/b1", { method: "DELETE" })
+    expect(del.status).toBe(200)
+    expect(await getBookmark(env, "b1")).toBeNull()
+    const gone = await authed(env, "/api/bookmarks/b1", { method: "DELETE" })
+    expect(gone.status).toBe(404)
+  })
 })
