@@ -8,6 +8,23 @@ export interface Env {
   CHAT_AGENT: DurableObjectNamespace<import("./agents/chat-agent").ChatAgent>
   /** Static SPA assets binding (wrangler [assets]); SPA fallback to index.html. */
   ASSETS?: Fetcher
+  /**
+   * Worker Loader (Dynamic Workers) binding. Declared in wrangler.toml under
+   * `[[worker_loaders]] binding = "LOADER"`. Used by the @tanstack/ai-isolate-cloudflare
+   * worker to run model-generated Code Mode code in a fresh V8 isolate.
+   * Typed minimally to match what the isolate handler reads (env.LOADER.load(...)).
+   */
+  LOADER?: {
+    load: (options: {
+      compatibilityDate: string
+      mainModule: string
+      modules: Record<string, string>
+      globalOutbound?: unknown
+      env?: Record<string, unknown>
+    }) => {
+      getEntrypoint: (name?: string) => { fetch: (request: Request) => Promise<Response> }
+    }
+  }
 
   // --- Cloudflare Access secrets (Doppler → wrangler secret put) ---
   /** Access service-token client id the extension must present. */

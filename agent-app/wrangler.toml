@@ -56,6 +56,10 @@ class_name = "ChatAgent"
 tag = "v1"
 new_sqlite_classes = ["ChatAgent"]
 
+# Dynamic Worker Loading — runs model-generated Code Mode code in an isolate (no agent-app bindings). Endpoint /internal/code-exec guarded by CODE_EXEC_TOKEN. See docs/superpowers/specs/2026-06-07-agent-code-mode-tools-design.md
+[[worker_loaders]]
+binding = "LOADER"
+
 # Run memory consolidation every 6 hours (4x/day).
 [triggers]
 crons = ["0 */6 * * *"]

@@ -1,6 +1,7 @@
 import { buildApp } from "./app"
 import { consolidateMemories } from "./cron/consolidate"
 import type { Env } from "./env"
+import { codeExecRoute } from "./routes/code-exec"
 
 // Re-export so the [[durable_objects]] binding resolves the class.
 export { ChatAgent } from "./agents/chat-agent"
@@ -17,6 +18,11 @@ export { buildApp } from "./app"
 // requireAccess. A later plan needing the agents client protocol must mount it
 // behind auth + per-session ownership.
 const app = buildApp()
+
+// Internal in-Worker code sandbox. NOT under /api/* so it is NOT behind
+// requireAccess — its own CODE_EXEC_TOKEN bearer guard protects it. Mounted
+// before notFound so it claims the path ahead of the SPA fallthrough.
+app.post("/internal/code-exec", (c) => codeExecRoute(c.req.raw, c.env, c.executionCtx))
 
 app.notFound((c) => {
   // For /api/* paths, return the JSON 404. For everything else, hand off to the
