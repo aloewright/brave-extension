@@ -6,21 +6,17 @@
 // on `__filename` + a native binary and throws "__filename is not defined"
 // inside the Cloudflare Workers runtime, so every execute_typescript call fails.
 //
-// `ts-blank-space` is a pure-JS, dependency-free type-eraser (it blanks type
-// syntax to whitespace, preserving line/column positions). That's exactly what
-// `transform({ loader: "ts" })` does here, and it runs anywhere. We alias the
-// bare `esbuild` specifier to this module in wrangler.toml ([alias]).
+// `sucrase` is a pure-JS transpiler (no esbuild/typescript/native deps, no
+// __filename) designed to run in browsers and edge runtimes. With
+// `transforms: ["typescript"]` it strips TS type syntax to plain JS — exactly
+// what `transform({ loader: "ts" })` does here. We alias the bare `esbuild`
+// specifier to this module in wrangler.toml ([alias]).
 //
 // Only `transform` is implemented because that's the sole esbuild API the
 // Worker bundle uses at runtime. If anything else imports from esbuild at
 // runtime it will hit these throwing stubs and surface loudly rather than
 // silently misbehaving.
-import tsBlankSpaceDefault from "ts-blank-space"
-
-// ts-blank-space ships as a default export; tolerate either interop shape.
-const tsBlankSpace: (code: string) => string =
-  (tsBlankSpaceDefault as unknown as { default?: (c: string) => string }).default ??
-  (tsBlankSpaceDefault as unknown as (c: string) => string)
+import { transform as sucraseTransform } from "sucrase"
 
 export interface TransformResult {
   code: string
@@ -28,9 +24,15 @@ export interface TransformResult {
   warnings: never[]
 }
 
-/** Minimal stand-in for esbuild.transform — strips TS types only. */
+/** Minimal stand-in for esbuild.transform — strips TS types via sucrase. */
 export async function transform(input: string): Promise<TransformResult> {
-  return { code: tsBlankSpace(input), map: "", warnings: [] }
+  const { code } = sucraseTransform(input, {
+    transforms: ["typescript"],
+    // The model code may use top-level constructs inside the wrapper function;
+    // preserve dynamic import + keep output as-is otherwise.
+    preserveDynamicImport: true
+  })
+  return { code, map: "", warnings: [] }
 }
 
 export function build(): never {
