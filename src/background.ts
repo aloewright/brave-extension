@@ -6,6 +6,7 @@ import { handleClipRequest } from "./lib/joplin-clip-handler";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { addHighlight } from "./review";
 import { syncHighlight, syncStoredHighlights } from "./background/highlight-sync";
+import { syncLink, changedLinks } from "./background/link-sync";
 import { getSettings } from "./storage";
 import { createSidebarApiClient } from "./lib/sidebar-api";
 import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
@@ -238,6 +239,30 @@ try {
   chrome.storage?.onChanged?.addListener?.((changes, area) => {
     if (area === "local" && changes["mail2fa.debug"]) {
       mail2faDebugEnabled = Boolean(changes["mail2fa.debug"].newValue);
+    }
+    // Mirror newly-saved/changed links to the sidebar-api Worker so they surface
+    // in the hub + /api/search. Both save paths (the sidebar "save link" button
+    // via lx setLinks and the session-tab SAVE_LINK handler) write the
+    // `lx_collectedLinks` key, so this single listener covers both. syncLink is
+    // fire-and-forget (gated on sidebar sync settings; never throws).
+    if (area === "local" && changes["lx_collectedLinks"]) {
+      const prev = Array.isArray(changes["lx_collectedLinks"].oldValue)
+        ? (changes["lx_collectedLinks"].oldValue as Array<{ id?: string; url: string; title: string; tags?: string[] }>)
+        : [];
+      const next = Array.isArray(changes["lx_collectedLinks"].newValue)
+        ? (changes["lx_collectedLinks"].newValue as Array<{ id?: string; url: string; title: string; tags?: string[] }>)
+        : [];
+      for (const link of changedLinks(prev, next)) {
+        void syncLink({
+          id: link.id,
+          url: link.url,
+          title: link.title,
+          tags: link.tags ?? [],
+          source: "extension",
+        }).catch(() => {
+          /* fire-and-forget: local write already succeeded */
+        });
+      }
     }
   });
 } catch {
