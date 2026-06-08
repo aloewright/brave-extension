@@ -32,6 +32,16 @@ export interface AgentMessage {
   created_at: number
 }
 
+export interface ToolSourceState {
+  id: string
+  status:
+    | { state: "connected"; tools: number }
+    | { state: "degraded"; tools: number; reason: string }
+    | { state: "needs-auth"; reason: string }
+    | { state: "needs-config"; reason: string }
+    | { state: "failed"; reason: string }
+}
+
 export class AgentApiError extends Error {
   constructor(public status: number, message: string) {
     super(message)
@@ -42,6 +52,7 @@ export class AgentApiError extends Error {
 export interface AgentApiClient {
   health(): Promise<boolean>
   listModels(): Promise<AgentModel[]>
+  getToolStatus(): Promise<ToolSourceState[]>
   getModelPref(): Promise<string>
   setModelPref(modelId: string): Promise<string>
   listSessions(): Promise<AgentSession[]>
@@ -80,6 +91,9 @@ export function createAgentApiClient(cfg: AgentApiConfig): AgentApiClient {
     },
     async listModels() {
       return (await jsonReq<{ models: AgentModel[] }>("/api/models")).models
+    },
+    async getToolStatus() {
+      return (await jsonReq<{ sources: ToolSourceState[] }>("/api/agent/tools/status")).sources
     },
     async getModelPref() {
       return (await jsonReq<{ modelId: string }>("/api/prefs/model")).modelId

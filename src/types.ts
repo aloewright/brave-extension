@@ -133,6 +133,11 @@ export interface Settings {
   agentApiUrl: string
   agentAccessClientId: string
   agentAccessClientSecret: string
+  // Hindsight memory service creds (feed the Worker via Doppler later).
+  hindsightUrl: string
+  hindsightBearer: string
+  hindsightAccessClientId: string
+  hindsightAccessClientSecret: string
   github: GitHubFeatureSettings
 }
 
@@ -205,6 +210,10 @@ export const DEFAULT_SETTINGS: Settings = {
   agentApiUrl: "https://agent.fly.pm",
   agentAccessClientId: "",
   agentAccessClientSecret: "",
+  hindsightUrl: "",
+  hindsightBearer: "",
+  hindsightAccessClientId: "",
+  hindsightAccessClientSecret: "",
   github: { enabled: true, features: {} }
 }
 

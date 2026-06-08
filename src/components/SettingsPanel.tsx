@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus } from "../types"
+import type { ToolSourceState } from "../lib/agent-api"
 import { ping } from "../lib/joplin"
 import { BACKEND_INFO } from "../types"
 import {
@@ -15,6 +16,7 @@ export function SettingsPanel({
   onClose,
   nativeHost,
   mcpServers,
+  agentToolStatus,
   sidebarSync,
   mcp,
   doppler
@@ -28,6 +30,7 @@ export function SettingsPanel({
     addMCPServer: (server: any, path?: string) => void
   }
   mcpServers: MCPServer[]
+  agentToolStatus?: ToolSourceState[]
   sidebarSync: { lastSyncAt: number | null; lastError: string | null; pending: boolean; flush: () => void }
   mcp?: {
     status: MCPStatus | null
@@ -153,7 +156,7 @@ export function SettingsPanel({
         {/* MCP Servers */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-[11px] text-fg/50 uppercase tracking-wider">MCP Servers</label>
+            <label className="text-[11px] text-fg/50 uppercase tracking-wider">MCP Servers (local Claude Code)</label>
             <button
               onClick={() => setShowAddMCP(!showAddMCP)}
               className="text-[10px] text-primary hover:text-primary/80"
@@ -251,6 +254,54 @@ export function SettingsPanel({
           ) : (
             <div className="text-[10px] text-fg/30 text-center py-2">
               {nativeHost.connected ? "No MCP servers configured" : "Connect native host to manage servers"}
+            </div>
+          )}
+        </div>
+
+        {/* Agent Tools (cloud agent) — reachability from the AI agent chat */}
+        <div>
+          <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-1 block">
+            Agent Tools (cloud agent)
+          </label>
+          {agentToolStatus && agentToolStatus.length > 0 ? (
+            <div className="space-y-1">
+              {agentToolStatus.map((source) => {
+                const state = source.status.state
+                const toolCount =
+                  "tools" in source.status ? source.status.tools : undefined
+                const reason =
+                  "reason" in source.status ? source.status.reason : undefined
+                return (
+                  <div key={source.id} className="bg-card/20 rounded p-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agentDot(state)}`}
+                        title={state}
+                      />
+                      <div className="text-[11px] text-fg/80 font-medium flex-1 truncate">
+                        {source.id}
+                      </div>
+                      <span className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/40 text-fg/50">
+                        {state}
+                      </span>
+                      {typeof toolCount === "number" && (
+                        <span className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/30 text-fg/40">
+                          {toolCount} tools
+                        </span>
+                      )}
+                    </div>
+                    {reason && (
+                      <div className="text-[9px] text-fg/40 mt-0.5 break-all">{reason}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-[10px] text-fg/30 text-center py-2">
+              {settings.agentApiUrl && settings.agentAccessClientId && settings.agentAccessClientSecret
+                ? "No tool sources reported (or agent unreachable)"
+                : "Configure Agent API (URL + Access client id/secret) below to see tool status"}
             </div>
           )}
         </div>
@@ -675,6 +726,12 @@ export function SettingsPanel({
     </div>
   )
 }
+
+const agentDot = (state: string) =>
+  state === "connected" ? "bg-success" :
+  state === "failed" ? "bg-error" :
+  state === "needs-auth" || state === "needs-config" || state === "degraded" ? "bg-warning" :
+  "bg-fg/30"
 
 function AutoPipToggleRow() {
   const [enabled, setEnabled] = useState<boolean | null>(null)
