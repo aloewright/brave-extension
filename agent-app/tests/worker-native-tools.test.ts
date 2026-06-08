@@ -31,4 +31,11 @@ describe("workerNativeSource", () => {
     const tool = (await src.listTools()).find((t) => t.name === "getMessages")!
     await expect(tool.server({ sessionId: sess.id })).rejects.toThrow(/not found|forbidden/i)
   })
+  it("webFetch rejects internal/private/metadata hosts", async () => {
+    const env = makeEnv()
+    const src = workerNativeSource(env, "user-1")
+    const tool = (await src.listTools()).find((t) => t.name === "webFetch")!
+    await expect(tool.server({ url: "http://169.254.169.254/" })).rejects.toThrow(/internal|private/i)
+    await expect(tool.server({ url: "http://127.0.0.1/" })).rejects.toThrow(/internal|private/i)
+  })
 })

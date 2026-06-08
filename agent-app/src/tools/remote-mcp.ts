@@ -2,6 +2,7 @@
 import { z } from "zod"
 import type { McpServerCfg } from "./mcp-config"
 import type { ServerTool, ToolSource, ToolSourceStatus } from "./types"
+import { log } from "../log"
 
 /** Best-effort JSON-Schema → zod v4 converter for MCP tool inputSchemas. */
 export function jsonSchemaToZod(s: any): z.ZodType<any> {
@@ -27,6 +28,11 @@ export function jsonSchemaToZod(s: any): z.ZodType<any> {
       return z.object(shape)
     }
     default:
+      // Warn only when a type/composite is present but unhandled; the
+      // legitimately-empty (no `type`) schema case stays silent.
+      if (s.type !== undefined || s.allOf || s.anyOf || s.oneOf) {
+        log.warn("mcp.schema.unhandled", { type: s?.type })
+      }
       return z.any()
   }
 }
@@ -59,11 +65,17 @@ export function remoteMcpSource(cfg: McpServerCfg, fetchFn: typeof fetch = fetch
     return body.result
   }
 
-  async function listTools(): Promise<ServerTool[]> {
+  async function fetchTools(): Promise<ServerTool[]> {
     await rpc("initialize", { protocolVersion: "2024-11-05", capabilities: {} })
-    const result = await rpc("tools/list", {})
-    const tools = (result?.tools ?? []) as Array<{ name: string; description?: string; inputSchema?: any }>
-    return tools.map((tool) => ({
+    const collected: Array<{ name: string; description?: string; inputSchema?: any }> = []
+    let cursor: string | undefined
+    do {
+      const result = await rpc("tools/list", cursor ? { cursor } : {})
+      const page = (result?.tools ?? []) as Array<{ name: string; description?: string; inputSchema?: any }>
+      collected.push(...page)
+      cursor = result?.nextCursor || undefined
+    } while (cursor)
+    return collected.map((tool) => ({
       name: `${cfg.name}__${tool.name}`,
       description: tool.description ?? "",
       inputSchema: jsonSchemaToZod(tool.inputSchema),
@@ -83,6 +95,19 @@ export function remoteMcpSource(cfg: McpServerCfg, fetchFn: typeof fetch = fetch
         return callResult
       },
     }))
+  }
+
+  // Short-lived in-memory cache so a registry build and a concurrent status
+  // poll don't each trigger a full initialize+tools/list handshake. Date.now()
+  // is allowed inside a normal Worker request, which this is.
+  const CACHE_TTL_MS = 30_000
+  let cache: { value: ServerTool[]; at: number } | null = null
+
+  async function listTools(): Promise<ServerTool[]> {
+    if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.value
+    const value = await fetchTools()
+    cache = { value, at: Date.now() }
+    return value
   }
 
   async function status(): Promise<ToolSourceStatus> {

@@ -67,6 +67,10 @@ export function workerNativeSource(env: Env, userId: string): ToolSource {
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
           throw new Error("only http(s) URLs are allowed")
         }
+        const BLOCKED_HOST = /^(localhost|0\.0\.0\.0|127\.|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/
+        if (BLOCKED_HOST.test(parsed.hostname)) {
+          throw new Error("internal/private addresses are not allowed")
+        }
         const res = await fetch(input.url, { redirect: "follow" })
         const buf = new Uint8Array(await res.arrayBuffer())
         const capped = buf.subarray(0, MAX_BODY_BYTES)

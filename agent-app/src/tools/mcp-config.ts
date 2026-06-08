@@ -26,6 +26,9 @@ export async function listMcpServers(env: Env, userId: string): Promise<McpServe
   return def && !names.has(def.name) ? [def, ...user] : user
 }
 
+// NOTE: this read-modify-write is not atomic — KV has no compare-and-swap, so a
+// concurrent put could clobber an interleaved edit. Acceptable here because
+// MCP-server config edits are a low-frequency, single-user action.
 export async function putMcpServer(env: Env, userId: string, cfg: McpServerCfg): Promise<void> {
   const raw = await env.AGENT_KV.get(key(userId))
   const user = raw ? (JSON.parse(raw) as McpServerCfg[]) : []

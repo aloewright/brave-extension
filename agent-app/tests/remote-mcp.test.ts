@@ -29,6 +29,15 @@ describe("remoteMcpSource", () => {
     const out = (await tool.server({ msg: "hi" })) as any
     expect(out.said).toBe("hi")
   })
+  it("caches the handshake so listTools()+status() do one initialize", async () => {
+    const f = mcpFetch([{ name: "echo", description: "", inputSchema: { type: "object", properties: {} } }])
+    const src = remoteMcpSource({ name: "ex", url: "https://x/mcp", transport: "http" }, f as any)
+    await src.listTools()
+    await src.status()
+    const methods = f.mock.calls.map((c: any) => JSON.parse(c[1].body).method)
+    expect(methods.filter((m: string) => m === "initialize")).toHaveLength(1)
+    expect(methods.filter((m: string) => m === "tools/list")).toHaveLength(1)
+  })
   it("reports needs-auth on 401", async () => {
     const f = vi.fn(async () => new Response("no", { status: 401 }))
     const src = remoteMcpSource({ name: "ex", url: "https://x/mcp", transport: "http" }, f as any)
