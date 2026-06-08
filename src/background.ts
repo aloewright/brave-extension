@@ -2205,6 +2205,27 @@ chrome.commands.onCommand.addListener(async (command) => {
       currentWindow: true,
     });
     toggleSidePanel(tab?.windowId);
+  } else if (command === "save-link") {
+    // Global Shift+Cmd+L (Ctrl+Shift+L) — save the active tab's link from any
+    // page, even when the sidebar is closed. Reuses the same library save path
+    // as the in-sidebar "Save link" quick action.
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    if (tab?.url && tab?.title) {
+      await saveLinkToLibrary(tab.url, tab.title);
+      // Best-effort visual confirmation on the toolbar icon.
+      try {
+        await chrome.action.setBadgeBackgroundColor({ color: "#2c50cd" });
+        await chrome.action.setBadgeText({ text: "✓" });
+        setTimeout(() => {
+          void chrome.action.setBadgeText({ text: "" });
+        }, 2000);
+      } catch {
+        /* badge feedback is optional */
+      }
+    }
   }
 });
 
