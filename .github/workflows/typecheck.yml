@@ -23,7 +23,7 @@ jobs:
           version: 9
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       # --ignore-scripts skips Plasmo's post-install hooks; the typecheck
       # only needs the TS toolchain + types, not the built extension.
