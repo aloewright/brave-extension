@@ -9,7 +9,7 @@ import { syncHighlight, syncStoredHighlights } from "./background/highlight-sync
 import { syncLink, changedLinks } from "./background/link-sync";
 import { triggerBackgroundSyncReconcile } from "./background/sync-reconcile-runner";
 import { getSettings } from "./storage";
-import { createSidebarApiClient } from "./lib/sidebar-api";
+import { ApiError, createSidebarApiClient } from "./lib/sidebar-api";
 import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
 import {
   addSessionSnippet,
@@ -92,6 +92,17 @@ import type {
 
 const HOST_NAME = "com.aidev.sidebar";
 const HEARTBEAT_ALARM = "native-heartbeat";
+const TTS_LAST_ERROR_KEY = "tts.lastError";
+const TTS_CONTEXT_MENU_ID = "tts-speak-selection";
+const SCREENSHOT_CONTEXT_MENU_ID = "screenshot-download-page";
+const pendingTtsPlayback = new Map<
+  string,
+  {
+    resolve: () => void;
+    reject: (err: TtsCommandError) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
 
 // ─── Joplin clipper integration ──────────────────────────────────────────────
 
@@ -1025,6 +1036,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleRecorderError(message.error || "Recording failed");
     notifyRecorderFinalized(null);
     broadcastRecordingState();
+  }
+
+  if (message.type === "TTS_PLAYBACK_STARTED") {
+    const id = typeof message.id === "string" ? message.id : "";
+    const pending = pendingTtsPlayback.get(id);
+    if (pending) {
+      pendingTtsPlayback.delete(id);
+      clearTimeout(pending.timeout);
+      pending.resolve();
+    }
+  }
+
+  if (
+    message.type === "TTS_PLAYBACK_ENDED" ||
+    message.type === "TTS_PLAYBACK_ERROR"
+  ) {
+    const id = typeof message.id === "string" ? message.id : "";
+    const pending = pendingTtsPlayback.get(id);
+    if (pending) {
+      pendingTtsPlayback.delete(id);
+      clearTimeout(pending.timeout);
+      pending.reject(
+        new TtsCommandError(
+          "playback_failed",
+          "PLY",
+          "TTS audio playback failed",
+          message.error,
+        ),
+      );
+    }
+    void chrome.action.setBadgeText({ text: "" });
+    void releaseOffscreenDocument("tts");
+    if (message.type === "TTS_PLAYBACK_ERROR") {
+      const err = new TtsCommandError(
+        "playback_failed",
+        "PLY",
+        "TTS audio playback failed",
+        message.error,
+      );
+      void recordTtsError(err);
+      void showTtsBadge(err.badge);
+      safeRuntimeWarning("tts playback failed", message.error);
+    }
   }
 
   // ─── Quick-actions bar (lifted from lean-extensions) ────────────────
@@ -2108,6 +2162,16 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
+      id: SCREENSHOT_CONTEXT_MENU_ID,
+      title: "Download screenshot",
+      contexts: ["page"],
+    });
+    chrome.contextMenus.create({
+      id: TTS_CONTEXT_MENU_ID,
+      title: "Speak selection",
+      contexts: ["selection"],
+    });
+    chrome.contextMenus.create({
       id: RSS_FEED_MENU_ID,
       title: "Save RSS feed...",
       contexts: ["page"],
@@ -2169,6 +2233,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
+  if (info.menuItemId === SCREENSHOT_CONTEXT_MENU_ID) {
+    await downloadVisibleTabScreenshot().catch((err) => {
+      safeRuntimeWarning("screenshot context menu failed", err);
+    });
+  }
+
   if (info.menuItemId === "save-highlight" && info.selectionText) {
     try {
       const selection = info.selectionText;
@@ -2209,6 +2279,20 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
+  if (info.menuItemId === TTS_CONTEXT_MENU_ID) {
+    try {
+      await speakTextWithTts((info.selectionText || "").trim());
+    } catch (err) {
+      console.warn("tts context menu failed:", err);
+      const ttsErr =
+        err instanceof TtsCommandError
+          ? err
+          : new TtsCommandError("unknown", "ERR", unknownErrorMessage(err), err);
+      await recordTtsError(ttsErr);
+      await showTtsBadge(ttsErr.badge);
+    }
+  }
+
   if (typeof info.menuItemId === "string" && info.menuItemId.startsWith(RSS_FEED_MENU_PREFIX)) {
     try {
       const feedIndex = Number.parseInt(
@@ -2231,6 +2315,172 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 });
+
+async function getActiveTabSelectionText(tabId: number): Promise<string> {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => window.getSelection()?.toString() ?? "",
+  });
+  return typeof result?.result === "string" ? result.result.trim() : "";
+}
+
+async function downloadVisibleTabScreenshot() {
+  const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+  let dataUrl = "";
+  try {
+    dataUrl = await chrome.tabs.captureVisibleTab(win?.id, { format: "png" });
+  } catch (err) {
+    await showTtsBadge("CAP");
+    throw err;
+  }
+
+  const filename = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+  try {
+    await chrome.downloads.download({
+      url: dataUrl,
+      filename,
+      saveAs: false
+    });
+  } catch (err) {
+    await showTtsBadge("DL");
+    throw err;
+  }
+
+  await showTtsBadge("SC", "#2c50cd", 1200);
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode.apply(null, Array.from(chunk) as number[]);
+  }
+  return `data:${blob.type || "audio/mpeg"};base64,${btoa(binary)}`;
+}
+
+function clampTtsPlaybackRate(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(5, Math.max(0.1, parsed));
+}
+
+class TtsCommandError extends Error {
+  constructor(
+    public code: string,
+    public badge: string,
+    message: string,
+    public cause?: unknown,
+  ) {
+    super(message);
+    this.name = "TtsCommandError";
+  }
+}
+
+function unknownErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function showTtsBadge(text: string, color = "#ef4444", ttlMs = 2200) {
+  void chrome.action.setBadgeBackgroundColor({ color });
+  await chrome.action.setBadgeText({ text });
+  setTimeout(() => {
+    void chrome.action.setBadgeText({ text: "" });
+  }, ttlMs);
+}
+
+async function recordTtsError(err: TtsCommandError) {
+  await chrome.storage.local.set({
+    [TTS_LAST_ERROR_KEY]: {
+      code: err.code,
+      badge: err.badge,
+      message: err.message,
+      cause: err.cause ? unknownErrorMessage(err.cause) : null,
+      at: new Date().toISOString(),
+    },
+  });
+}
+
+function classifyTtsApiError(err: unknown): TtsCommandError {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) {
+      return new TtsCommandError("auth_failed", "AUTH", err.message, err);
+    }
+    if (err.status === 404) {
+      return new TtsCommandError("route_missing", "404", "TTS endpoint is missing; deploy the Worker", err);
+    }
+    return new TtsCommandError("api_error", "API", err.message, err);
+  }
+  return new TtsCommandError("api_error", "API", unknownErrorMessage(err), err);
+}
+
+function waitForTtsPlaybackStarted(id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingTtsPlayback.delete(id);
+      reject(new TtsCommandError("playback_timeout", "PLY", "TTS playback did not start"));
+    }, 5000);
+    pendingTtsPlayback.set(id, { resolve, reject, timeout });
+  });
+}
+
+async function playTtsDataUrl(dataUrl: string, playbackRate: number): Promise<void> {
+  const id = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const started = waitForTtsPlaybackStarted(id);
+  await retainOffscreenDocument("tts");
+  await chrome.runtime.sendMessage({
+    type: "TTS_PLAY",
+    id,
+    dataUrl,
+    playbackRate,
+  });
+  await started;
+}
+
+async function speakTextWithTts(text: string) {
+  if (!text) {
+    throw new TtsCommandError("no_selection", "TXT", "No selected text found");
+  }
+
+  const settings = await getSettings();
+  const apiUrl = settings.sidebarApiUrl?.trim();
+  const apiToken = settings.sidebarApiToken?.trim();
+  if (!apiUrl || !apiToken) {
+    throw new TtsCommandError("missing_config", "CFG", "Sidebar API URL/token required for TTS");
+  }
+
+  const client = createSidebarApiClient(apiToken, apiUrl);
+  let audio: Blob;
+  try {
+    audio = await client.tts.speak({ text, speaker: settings.ttsVoice });
+  } catch (err) {
+    throw classifyTtsApiError(err);
+  }
+  const dataUrl = await blobToDataUrl(audio);
+  try {
+    await playTtsDataUrl(dataUrl, clampTtsPlaybackRate(settings.ttsPlaybackRate));
+  } catch (err) {
+    if (err instanceof TtsCommandError) throw err;
+    throw new TtsCommandError("playback_dispatch_failed", "PLY", "Could not start TTS playback", err);
+  }
+  await showTtsBadge("TTS", "#2c50cd", 1200);
+}
+
+async function speakSelectedText() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    throw new TtsCommandError("no_active_tab", "TAB", "No active tab");
+  }
+
+  let text = "";
+  try {
+    text = await getActiveTabSelectionText(tab.id);
+  } catch (err) {
+    throw new TtsCommandError("selection_unavailable", "SEL", "Could not read selected text on this page", err);
+  }
+  await speakTextWithTts(text);
+}
 
 // Keyboard shortcut
 chrome.commands.onCommand.addListener(async (command) => {
@@ -2260,6 +2510,30 @@ chrome.commands.onCommand.addListener(async (command) => {
       } catch {
         /* badge feedback is optional */
       }
+    }
+  } else if (command === "screenshot-page") {
+    try {
+      await downloadVisibleTabScreenshot();
+    } catch (err) {
+      console.warn("screenshot-page command failed:", err);
+    }
+  } else if (command === "reload-extension") {
+    try {
+      chrome.runtime.reload();
+    } catch (err) {
+      console.warn("reload-extension command failed:", err);
+    }
+  } else if (command === "speak-selection") {
+    try {
+      await speakSelectedText();
+    } catch (err) {
+      console.warn("speak-selection command failed:", err);
+      const ttsErr =
+        err instanceof TtsCommandError
+          ? err
+          : new TtsCommandError("unknown", "ERR", unknownErrorMessage(err), err);
+      await recordTtsError(ttsErr);
+      await showTtsBadge(ttsErr.badge);
     }
   }
 });

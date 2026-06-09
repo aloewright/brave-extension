@@ -139,6 +139,9 @@ export class ApiError extends Error {
 
 export interface SidebarApiClient {
   health: () => Promise<{ ok: boolean; version: string; deployedAt: string }>
+  tts: {
+    speak: (payload: { text: string; speaker?: string }) => Promise<Blob>
+  }
   search: (query: string, opts?: { types?: ResourceType[]; limit?: number }) => Promise<{ results: SearchHit[] }>
   conversations: {
     upsert: (payload: ConversationUpsertPayload) => Promise<{ id: string; chunkCount: number }>
@@ -220,8 +223,31 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
     return (await res.json()) as T
   }
 
+  async function blobRequest(path: string, init: RequestInit = {}): Promise<Blob> {
+    const headers = new Headers(init.headers)
+    if (token) headers.set("x-sidebar-token", token)
+    if (init.body && typeof init.body === "string" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json")
+    }
+    const res = await fetch(`${cleanBase}${path}`, { ...init, headers })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null
+      const code = body?.error?.code ?? "http_error"
+      const message = body?.error?.message ?? `request failed: ${res.status}`
+      throw new ApiError(res.status, code, message)
+    }
+    return await res.blob()
+  }
+
   return {
     health: () => jsonRequest("/api/health"),
+    tts: {
+      speak: (payload) =>
+        blobRequest("/api/tts", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        })
+    },
     search: (query, opts = {}) =>
       jsonRequest("/api/search", {
         method: "POST",

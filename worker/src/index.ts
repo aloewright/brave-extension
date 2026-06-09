@@ -11,6 +11,7 @@ import videos from "./routes/videos"
 import pdfs from "./routes/pdfs"
 import highlights from "./routes/highlights"
 import search from "./routes/search"
+import tts from "./routes/tts"
 import type { Env } from "./env"
 
 // Re-exported so the [[workflows]] binding can resolve the class.
@@ -35,6 +36,7 @@ app.route("/api/videos", videos)
 app.route("/api/pdfs", pdfs)
 app.route("/api/highlights", highlights)
 app.route("/api/search", search)
+app.route("/api/tts", tts)
 
 app.notFound((c) => {
   // For /api/* paths, return the JSON 404. For everything else, hand off to

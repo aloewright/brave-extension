@@ -104,18 +104,33 @@
       "newtab": "newtab.html"
     },
     "commands": {
-      "toggle-sidebar": {
-        "suggested_key": {
-          "default": "Alt+Shift+A"
-        },
-        "description": "Toggle Brave Dev Extension"
-      },
       "save-link": {
         "suggested_key": {
           "default": "Ctrl+Shift+L",
           "mac": "Command+Shift+L"
         },
         "description": "Save the current page link to your library"
+      },
+      "screenshot-page": {
+        "suggested_key": {
+          "default": "Alt+Shift+H",
+          "mac": "Alt+Shift+H"
+        },
+        "description": "Take and download a screenshot of the current tab"
+      },
+      "reload-extension": {
+        "suggested_key": {
+          "default": "Alt+Shift+R",
+          "mac": "Alt+Shift+R"
+        },
+        "description": "Reload the extension"
+      },
+      "speak-selection": {
+        "suggested_key": {
+          "default": "Alt+Shift+T",
+          "mac": "Alt+Shift+T"
+        },
+        "description": "Speak the selected text"
       }
     }
   }
