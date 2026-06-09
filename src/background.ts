@@ -2456,6 +2456,7 @@ async function playTtsStream(input: {
     ...input,
   });
   await started;
+  await chrome.storage.local.remove(TTS_LAST_ERROR_KEY);
 }
 
 function broadcastTtsState(state: Record<string, unknown>) {
