@@ -76,6 +76,7 @@ let ttsActiveId: string | undefined;
 
 const TERMINAL_KEEPALIVE_INTERVAL_MS = 15_000;
 const TERMINAL_KEEPALIVE_PORT_NAME = "terminal-keepalive";
+const TTS_CHUNK_MAX_CHARS = 3_800;
 
 function connectTerminalKeepAlivePort() {
   if (!terminalKeepAliveEnabled || terminalKeepAlivePort) return;
@@ -166,7 +167,40 @@ function stopTtsAudio(status: "idle" | "ended" | "error" = "idle") {
   broadcastTtsState({ status });
 }
 
-async function fetchTtsAudio(msg: TtsPlayMsg): Promise<Blob> {
+function splitTtsText(text: string, maxChars = TTS_CHUNK_MAX_CHARS): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  const chunks: string[] = [];
+  let current = "";
+  const parts = normalized.match(/[^.!?;:]+[.!?;:]?\s*|\S+/g) || [normalized];
+  const pushCurrent = () => {
+    const next = current.trim();
+    if (next) chunks.push(next);
+    current = "";
+  };
+  for (const part of parts) {
+    const sentence = part.trim();
+    if (!sentence) continue;
+    if (sentence.length > maxChars) {
+      pushCurrent();
+      for (let i = 0; i < sentence.length; i += maxChars) {
+        chunks.push(sentence.slice(i, i + maxChars).trim());
+      }
+      continue;
+    }
+    const next = current ? current + " " + sentence : sentence;
+    if (next.length > maxChars) {
+      pushCurrent();
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+  pushCurrent();
+  return chunks;
+}
+
+async function fetchTtsAudioChunk(msg: TtsPlayMsg, text: string): Promise<Blob> {
   const base = msg.apiUrl.replace(/\/+$/, "");
   const res = await fetch(base + "/api/tts", {
     method: "POST",
@@ -174,13 +208,26 @@ async function fetchTtsAudio(msg: TtsPlayMsg): Promise<Blob> {
       "content-type": "application/json",
       "x-sidebar-token": msg.apiToken,
     },
-    body: JSON.stringify({ text: msg.text, speaker: msg.speaker }),
+    body: JSON.stringify({ text, speaker: msg.speaker }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
     throw new Error(body?.error?.message || "TTS request failed: " + res.status);
   }
   return await res.blob();
+}
+
+async function fetchTtsAudio(msg: TtsPlayMsg, onProgress: (done: number, total: number) => void): Promise<Blob> {
+  const chunks = splitTtsText(msg.text);
+  if (chunks.length === 0) throw new Error("No TTS text to speak");
+  const audioParts: Blob[] = [];
+  for (let i = 0; i < chunks.length; i += 1) {
+    onProgress(i, chunks.length);
+    audioParts.push(await fetchTtsAudioChunk(msg, chunks[i]));
+  }
+  onProgress(chunks.length, chunks.length);
+  if (audioParts.length === 1) return audioParts[0];
+  return new Blob(audioParts, { type: audioParts[0]?.type || "audio/mpeg" });
 }
 
 async function playTtsAudio(msg: TtsPlayMsg) {
@@ -191,7 +238,10 @@ async function playTtsAudio(msg: TtsPlayMsg) {
     const playbackRate = clampTtsPlaybackRate(msg.playbackRate);
     broadcastTtsState({ status: "loading", title, message: "Preparing audio...", playbackRate });
     chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ACCEPTED", id: msg.id }).catch(() => {});
-    const blob = await fetchTtsAudio(msg);
+    const blob = await fetchTtsAudio(msg, (done, total) => {
+      const message = total > 1 ? `Preparing audio ${Math.min(done + 1, total)}/${total}...` : "Preparing audio...";
+      broadcastTtsState({ status: "loading", title, message, playbackRate });
+    });
     ttsObjectUrl = URL.createObjectURL(blob);
     ttsAudio = new Audio(ttsObjectUrl);
     ttsAudio.playbackRate = playbackRate;

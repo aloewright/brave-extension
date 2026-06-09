@@ -70,7 +70,18 @@ function mount() {
         display: none;
       }
       .root[data-visible="true"] { display: block; }
+      .root[data-status="loading"] .card::before {
+        opacity: 1;
+        animation: tts-sweep 1.45s ease-in-out infinite;
+      }
+      .root[data-status="loading"] .loader {
+        display: inline-flex;
+      }
+      .root[data-status="loading"] .controls {
+        opacity: .66;
+      }
       .card {
+        position: relative;
         border: 1px solid rgba(252, 230, 178, .22);
         border-radius: 14px;
         background:
@@ -79,6 +90,15 @@ function mount() {
         box-shadow: 0 22px 60px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.08);
         backdrop-filter: blur(14px);
         overflow: hidden;
+      }
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background: linear-gradient(110deg, transparent 0%, rgba(249, 200, 106, .13) 42%, transparent 72%);
+        transform: translateX(-100%);
       }
       .head {
         display: flex;
@@ -154,6 +174,31 @@ function mount() {
         line-height: 1.35;
       }
       .message[data-error="true"] { color: #ffb4a8; }
+      .loader {
+        display: none;
+        align-items: center;
+        gap: 3px;
+        margin-right: 7px;
+        vertical-align: -1px;
+      }
+      .loader span {
+        width: 4px;
+        height: 4px;
+        border-radius: 999px;
+        background: #f9c86a;
+        box-shadow: 0 0 10px rgba(249, 200, 106, .35);
+        animation: tts-breathe .9s ease-in-out infinite;
+      }
+      .loader span:nth-child(2) { animation-delay: .12s; }
+      .loader span:nth-child(3) { animation-delay: .24s; }
+      @keyframes tts-breathe {
+        0%, 100% { transform: translateY(0); opacity: .42; }
+        50% { transform: translateY(-3px); opacity: 1; }
+      }
+      @keyframes tts-sweep {
+        0% { transform: translateX(-100%); }
+        70%, 100% { transform: translateX(100%); }
+      }
     </style>
     <div class="root">
       <section class="card" aria-label="Text to speech player">
@@ -173,7 +218,7 @@ function mount() {
           </div>
           <button class="round ghost stop" type="button" title="Stop">■</button>
         </div>
-        <div class="message"></div>
+        <div class="message"><span class="loader" aria-hidden="true"><span></span><span></span><span></span></span><span class="message-text"></span></div>
       </section>
     </div>
   `
@@ -182,6 +227,7 @@ function mount() {
   const root = shadow.querySelector<HTMLElement>(".root")!
   const title = shadow.querySelector<HTMLElement>(".title")!
   const message = shadow.querySelector<HTMLElement>(".message")!
+  const messageText = shadow.querySelector<HTMLElement>(".message-text")!
   const play = shadow.querySelector<HTMLButtonElement>(".play")!
   const back = shadow.querySelector<HTMLButtonElement>(".back")!
   const stop = shadow.querySelector<HTMLButtonElement>(".stop")!
@@ -193,8 +239,9 @@ function mount() {
   const render = () => {
     visible = state.status !== "idle"
     root.dataset.visible = visible ? "true" : "false"
+    root.dataset.status = state.status
     title.textContent = state.title || "Highlighted text"
-    message.textContent = state.message || (state.status === "loading" ? "Preparing audio..." : `${state.playbackRate || 1}x playback`)
+    messageText.textContent = state.message || (state.status === "loading" ? "Loading speech..." : `${state.playbackRate || 1}x playback`)
     message.dataset.error = state.status === "error" ? "true" : "false"
     play.textContent = state.status === "playing" ? "Ⅱ" : "▶"
     play.disabled = state.status === "loading" || state.status === "error" || state.status === "ended"
