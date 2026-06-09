@@ -803,8 +803,9 @@ function TtsSettingsSection({
       const value = changes[TTS_LAST_ERROR_KEY].newValue
       setLastError(value && typeof value === "object" ? value as TtsLastError : null)
     }
+    if (!chrome.storage.onChanged) return
     chrome.storage.onChanged.addListener(listener)
-    return () => chrome.storage.onChanged.removeListener(listener)
+    return () => chrome.storage.onChanged?.removeListener(listener)
   }, [])
 
   return (
