@@ -190,6 +190,7 @@ async function playTtsAudio(msg: TtsPlayMsg) {
     const title = msg.text.slice(0, 80);
     const playbackRate = clampTtsPlaybackRate(msg.playbackRate);
     broadcastTtsState({ status: "loading", title, message: "Preparing audio...", playbackRate });
+    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ACCEPTED", id: msg.id }).catch(() => {});
     const blob = await fetchTtsAudio(msg);
     ttsObjectUrl = URL.createObjectURL(blob);
     ttsAudio = new Audio(ttsObjectUrl);

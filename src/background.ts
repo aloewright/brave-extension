@@ -1059,7 +1059,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     broadcastRecordingState();
   }
 
-  if (message.type === "TTS_PLAYBACK_STARTED") {
+  if (
+    message.type === "TTS_PLAYBACK_ACCEPTED" ||
+    message.type === "TTS_PLAYBACK_STARTED"
+  ) {
     const id = typeof message.id === "string" ? message.id : "";
     const pending = pendingTtsPlayback.get(id);
     if (pending) {
