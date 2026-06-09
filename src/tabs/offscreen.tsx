@@ -45,6 +45,7 @@ type ControlMsg = StopMsg | PauseMsg | ResumeMsg;
 type TerminalKeepAliveMsg =
   | { type: "TERMINAL_KEEPALIVE_START" }
   | { type: "TERMINAL_KEEPALIVE_STOP" };
+type TtsPlayMsg = { type: "TTS_PLAY"; id?: string; dataUrl: string; playbackRate?: number };
 
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
@@ -59,6 +60,7 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 let terminalKeepAliveEnabled = false;
 let terminalKeepAlivePort: chrome.runtime.Port | null = null;
 let terminalKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+let ttsAudio: HTMLAudioElement | null = null;
 
 const TERMINAL_KEEPALIVE_INTERVAL_MS = 15_000;
 const TERMINAL_KEEPALIVE_PORT_NAME = "terminal-keepalive";
@@ -115,6 +117,42 @@ function stopTerminalKeepAlive() {
     // ignore
   }
   terminalKeepAlivePort = null;
+}
+
+function clampTtsPlaybackRate(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(5, Math.max(0.1, parsed));
+}
+
+async function playTtsAudio(id: string | undefined, dataUrl: string, playbackRate: number) {
+  try {
+    ttsAudio?.pause();
+    ttsAudio = new Audio(dataUrl);
+    ttsAudio.playbackRate = playbackRate;
+    ttsAudio.onended = () => {
+      chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id }).catch(() => {});
+    };
+    ttsAudio.onerror = () => {
+      chrome.runtime
+        .sendMessage({
+          type: "TTS_PLAYBACK_ERROR",
+          id,
+          error: "Audio element failed to load or play TTS data",
+        })
+        .catch(() => {});
+    };
+    await ttsAudio.play();
+    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_STARTED", id }).catch(() => {});
+  } catch (err) {
+    chrome.runtime
+      .sendMessage({
+        type: "TTS_PLAYBACK_ERROR",
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      .catch(() => {});
+  }
 }
 
 export function chooseRecorderMimeType(
@@ -418,13 +456,16 @@ function resumeRecording() {
 
 export default function Offscreen() {
   useEffect(() => {
-    const handler = (msg: StartMsg | ControlMsg | TerminalKeepAliveMsg) => {
+    const handler = (msg: StartMsg | ControlMsg | TerminalKeepAliveMsg | TtsPlayMsg) => {
       if (msg.type === "RECORDER_START") void startRecording(msg);
       if (msg.type === "RECORDER_STOP") stopRecording();
       if (msg.type === "RECORDER_PAUSE") pauseRecording();
       if (msg.type === "RECORDER_RESUME") resumeRecording();
       if (msg.type === "TERMINAL_KEEPALIVE_START") startTerminalKeepAlive();
       if (msg.type === "TERMINAL_KEEPALIVE_STOP") stopTerminalKeepAlive();
+      if (msg.type === "TTS_PLAY") {
+        void playTtsAudio(msg.id, msg.dataUrl, clampTtsPlaybackRate(msg.playbackRate));
+      }
     };
     chrome.runtime.onMessage.addListener(handler);
     chrome.runtime.sendMessage({ type: "RECORDER_READY" });

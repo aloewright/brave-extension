@@ -20,6 +20,7 @@ export const EMBED_DIMS = 768 as const
 export const TRANSCRIBE_MODEL = "@cf/openai/whisper" as const
 export const OCR_MODEL = "@cf/llava-hf/llava-1.5-7b-hf" as const
 export const AGENT_PLAN_MODEL = "@cf/openai/gpt-oss-120b" as const
+export const TTS_MODEL = "@cf/deepgram/aura-2-en" as const
 
 // AI Gateway id from the account's existing config. Per CLAUDE.md, dynamic/*
 // routes are broken inside a Worker; we route specific @cf/* models through

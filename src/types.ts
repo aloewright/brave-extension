@@ -108,6 +108,8 @@ export interface Settings {
   // Falls back to sidebarApiToken when empty.
   tasksApiToken: string
   sidebarPruneAfterSync: boolean
+  ttsVoice: TtsVoice
+  ttsPlaybackRate: number
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosSyncEnabled: boolean
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
@@ -140,6 +142,8 @@ export interface Settings {
   hindsightAccessClientSecret: string
   github: GitHubFeatureSettings
 }
+
+export type TtsVoice = "hyperion" | "thalia" | "andromeda" | "helena" | "apollo"
 
 /** Status reported by the native host's mcp.status RPC. */
 export interface MCPStatus {
@@ -195,6 +199,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarApiToken: "",
   tasksApiToken: "",
   sidebarPruneAfterSync: false,
+  ttsVoice: "hyperion",
+  ttsPlaybackRate: 1,
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",
   cloudosServiceToken: "",

@@ -1,4 +1,4 @@
-import { AI_GATEWAY_ID, EMBED_MODEL, OCR_MODEL, TRANSCRIBE_MODEL, type Env } from "./env"
+import { AI_GATEWAY_ID, EMBED_MODEL, OCR_MODEL, TRANSCRIBE_MODEL, TTS_MODEL, type Env } from "./env"
 
 /**
  * Embed one or many strings via Workers AI through AI Gateway "x".
@@ -52,4 +52,30 @@ export async function ocrImage(env: Env, imageBytes: Uint8Array): Promise<string
     { gateway: { id: AI_GATEWAY_ID } }
   )) as { description?: string; response?: string }
   return ((res?.description ?? res?.response) ?? "").trim()
+}
+
+/**
+ * Synthesize speech with Deepgram Aura 2 through AI Gateway "x".
+ * Worker-side dynamic routes are currently broken, so this intentionally uses
+ * the sanctioned env.AI.run("@cf/...", ..., { gateway: { id: "x" } }) path.
+ */
+export async function synthesizeSpeech(
+  env: Env,
+  input: { text: string; speaker?: string }
+): Promise<Response> {
+  const raw = await (env.AI.run as any)(
+    TTS_MODEL,
+    {
+      text: input.text,
+      speaker: input.speaker || "hyperion",
+      encoding: "mp3"
+    },
+    { gateway: { id: AI_GATEWAY_ID }, returnRawResponse: true }
+  )
+
+  if (raw instanceof Response) return raw
+  if (raw instanceof ReadableStream) {
+    return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
+  }
+  throw new Error("tts: unexpected AI response shape")
 }

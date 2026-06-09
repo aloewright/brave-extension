@@ -1,6 +1,6 @@
 const OFFSCREEN_URL = "tabs/offscreen.html";
 
-type OffscreenUse = "recorder" | "terminal-keepalive";
+type OffscreenUse = "recorder" | "terminal-keepalive" | "tts";
 
 const activeUses = new Set<OffscreenUse>();
 let createPromise: Promise<void> | null = null;
@@ -23,9 +23,9 @@ export async function retainOffscreenDocument(use: OffscreenUse): Promise<void> 
       createPromise = (chrome.offscreen as any)
         .createDocument({
           url: OFFSCREEN_URL,
-          reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS"],
+          reasons: ["USER_MEDIA", "DISPLAY_MEDIA", "BLOBS", "AUDIO_PLAYBACK"],
           justification:
-            "Record media and keep terminal native messaging sessions connected while the sidebar is closed.",
+            "Record media, play generated speech, and keep terminal native messaging sessions connected while the sidebar is closed.",
         })
         .finally(() => {
           createPromise = null;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus } from "../types"
+import type { Settings, CLIBackend, DopplerStatus, MCPServer, MCPStatus, TtsVoice } from "../types"
 import type { ToolSourceState } from "../lib/agent-api"
 import { ping } from "../lib/joplin"
 import { BACKEND_INFO } from "../types"
@@ -678,6 +678,8 @@ export function SettingsPanel({
           </div>
         </div>
 
+        <TtsSettingsSection settings={settings} onUpdate={onUpdate} />
+
         {/* Captures (ALO-467) — destination for screenshot/full-page PDF saves */}
         <CapturesSection settings={settings} onUpdate={onUpdate} />
 
@@ -754,6 +756,100 @@ function AutoPipToggleRow() {
             await setAutoPipEnabled(v)
           }}
         />
+      </div>
+    </div>
+  )
+}
+
+const TTS_VOICE_OPTIONS: { value: TtsVoice; label: string }[] = [
+  { value: "hyperion", label: "Hyperion" },
+  { value: "thalia", label: "Thalia" },
+  { value: "andromeda", label: "Andromeda" },
+  { value: "helena", label: "Helena" },
+  { value: "apollo", label: "Apollo" }
+]
+const TTS_LAST_ERROR_KEY = "tts.lastError"
+
+interface TtsLastError {
+  code?: string
+  badge?: string
+  message?: string
+  cause?: string | null
+  at?: string
+}
+
+function clampTtsPlaybackRate(value: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 1
+  return Math.min(5, Math.max(0.1, parsed))
+}
+
+function TtsSettingsSection({
+  settings,
+  onUpdate
+}: {
+  settings: Settings
+  onUpdate: (partial: Partial<Settings>) => void
+}) {
+  const [lastError, setLastError] = useState<TtsLastError | null>(null)
+
+  useEffect(() => {
+    void chrome.storage.local.get(TTS_LAST_ERROR_KEY).then((result) => {
+      const value = result[TTS_LAST_ERROR_KEY]
+      setLastError(value && typeof value === "object" ? value as TtsLastError : null)
+    })
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== "local" || !changes[TTS_LAST_ERROR_KEY]) return
+      const value = changes[TTS_LAST_ERROR_KEY].newValue
+      setLastError(value && typeof value === "object" ? value as TtsLastError : null)
+    }
+    if (!chrome.storage.onChanged) return
+    chrome.storage.onChanged.addListener(listener)
+    return () => chrome.storage.onChanged?.removeListener(listener)
+  }, [])
+
+  return (
+    <div>
+      <label className="text-[11px] text-fg/50 uppercase tracking-wider mb-2 block">
+        TTS
+      </label>
+      <div className="bg-card/20 rounded p-2 space-y-2">
+        <div>
+          <label className="text-[10px] text-fg/50 mb-1 block">Voice</label>
+          <select
+            value={settings.ttsVoice}
+            onChange={(e) => onUpdate({ ttsVoice: e.target.value as TtsVoice })}
+            className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg outline-none focus:border-primary/50"
+          >
+            {TTS_VOICE_OPTIONS.map((voice) => (
+              <option key={voice.value} value={voice.value}>
+                {voice.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-fg/50 mb-1 block">Playback speed</label>
+          <input
+            type="number"
+            min="0.1"
+            max="5"
+            step="0.1"
+            value={settings.ttsPlaybackRate}
+            onChange={(e) => {
+              const parsed = Number(e.target.value)
+              if (Number.isFinite(parsed)) onUpdate({ ttsPlaybackRate: parsed })
+            }}
+            onBlur={(e) => onUpdate({ ttsPlaybackRate: clampTtsPlaybackRate(e.target.value) })}
+            className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none focus:border-primary/50"
+          />
+        </div>
+        {lastError && (
+          <div className="text-[9px] text-error/90 leading-snug break-words">
+            Last TTS error: {lastError.badge || lastError.code || "ERR"} — {lastError.message || "Unknown error"}
+            {lastError.cause ? ` (${lastError.cause})` : ""}
+          </div>
+        )}
       </div>
     </div>
   )
