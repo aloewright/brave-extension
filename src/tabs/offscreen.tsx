@@ -45,7 +45,16 @@ type ControlMsg = StopMsg | PauseMsg | ResumeMsg;
 type TerminalKeepAliveMsg =
   | { type: "TERMINAL_KEEPALIVE_START" }
   | { type: "TERMINAL_KEEPALIVE_STOP" };
-type TtsPlayMsg = { type: "TTS_PLAY"; id?: string; dataUrl: string; playbackRate?: number };
+type TtsPlayMsg = {
+  type: "TTS_PLAY_STREAM";
+  id?: string;
+  text: string;
+  speaker?: string;
+  playbackRate?: number;
+  apiUrl: string;
+  apiToken: string;
+};
+type TtsControlMsg = { type: "TTS_CONTROL"; action: string; value?: number };
 
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
@@ -61,6 +70,9 @@ let terminalKeepAliveEnabled = false;
 let terminalKeepAlivePort: chrome.runtime.Port | null = null;
 let terminalKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
 let ttsAudio: HTMLAudioElement | null = null;
+let ttsObjectUrl: string | null = null;
+let ttsTickTimer: ReturnType<typeof setInterval> | null = null;
+let ttsActiveId: string | undefined;
 
 const TERMINAL_KEEPALIVE_INTERVAL_MS = 15_000;
 const TERMINAL_KEEPALIVE_PORT_NAME = "terminal-keepalive";
@@ -125,34 +137,113 @@ function clampTtsPlaybackRate(value: unknown): number {
   return Math.min(5, Math.max(0.1, parsed));
 }
 
-async function playTtsAudio(id: string | undefined, dataUrl: string, playbackRate: number) {
+function broadcastTtsState(extra: Record<string, unknown> = {}) {
+  const state = {
+    status: ttsAudio ? (ttsAudio.paused ? "paused" : "playing") : "idle",
+    currentTime: ttsAudio?.currentTime ?? 0,
+    duration: Number.isFinite(ttsAudio?.duration || NaN) ? ttsAudio?.duration : null,
+    playbackRate: ttsAudio?.playbackRate ?? 1,
+    ...extra,
+  };
+  chrome.runtime.sendMessage({ type: "TTS_STATE", state }).catch(() => {});
+}
+
+function stopTtsAudio(status: "idle" | "ended" | "error" = "idle") {
+  if (ttsTickTimer) {
+    clearInterval(ttsTickTimer);
+    ttsTickTimer = null;
+  }
+  if (ttsAudio) {
+    ttsAudio.pause();
+    ttsAudio.removeAttribute("src");
+    ttsAudio.load();
+    ttsAudio = null;
+  }
+  if (ttsObjectUrl) {
+    URL.revokeObjectURL(ttsObjectUrl);
+    ttsObjectUrl = null;
+  }
+  broadcastTtsState({ status });
+}
+
+async function fetchTtsAudio(msg: TtsPlayMsg): Promise<Blob> {
+  const base = msg.apiUrl.replace(/\/+$/, "");
+  const res = await fetch(base + "/api/tts", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-sidebar-token": msg.apiToken,
+    },
+    body: JSON.stringify({ text: msg.text, speaker: msg.speaker }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw new Error(body?.error?.message || "TTS request failed: " + res.status);
+  }
+  return await res.blob();
+}
+
+async function playTtsAudio(msg: TtsPlayMsg) {
+  ttsActiveId = msg.id;
   try {
-    ttsAudio?.pause();
-    ttsAudio = new Audio(dataUrl);
+    stopTtsAudio("idle");
+    const title = msg.text.slice(0, 80);
+    const playbackRate = clampTtsPlaybackRate(msg.playbackRate);
+    broadcastTtsState({ status: "loading", title, message: "Preparing audio...", playbackRate });
+    const blob = await fetchTtsAudio(msg);
+    ttsObjectUrl = URL.createObjectURL(blob);
+    ttsAudio = new Audio(ttsObjectUrl);
     ttsAudio.playbackRate = playbackRate;
+    ttsAudio.onloadedmetadata = () => broadcastTtsState({ status: "playing", title });
+    ttsAudio.ontimeupdate = () => broadcastTtsState({ title });
+    ttsAudio.onpause = () => broadcastTtsState({ status: "paused", title });
+    ttsAudio.onplay = () => broadcastTtsState({ status: "playing", title });
     ttsAudio.onended = () => {
-      chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id }).catch(() => {});
+      chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id: msg.id }).catch(() => {});
+      stopTtsAudio("ended");
     };
     ttsAudio.onerror = () => {
       chrome.runtime
         .sendMessage({
           type: "TTS_PLAYBACK_ERROR",
-          id,
+          id: msg.id,
           error: "Audio element failed to load or play TTS data",
         })
         .catch(() => {});
+      stopTtsAudio("error");
     };
     await ttsAudio.play();
-    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_STARTED", id }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_STARTED", id: msg.id }).catch(() => {});
+    ttsTickTimer = setInterval(() => broadcastTtsState({ title }), 500);
   } catch (err) {
     chrome.runtime
       .sendMessage({
         type: "TTS_PLAYBACK_ERROR",
-        id,
+        id: msg.id,
         error: err instanceof Error ? err.message : String(err),
       })
       .catch(() => {});
+    stopTtsAudio("error");
   }
+}
+
+function controlTtsAudio(msg: TtsControlMsg) {
+  if (msg.action === "stop") {
+    const id = ttsActiveId;
+    stopTtsAudio("idle");
+    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id }).catch(() => {});
+    return;
+  }
+  if (!ttsAudio) return;
+  if (msg.action === "pause") void ttsAudio.pause();
+  if (msg.action === "play") void ttsAudio.play().catch(() => {});
+  if (msg.action === "seekBy") {
+    ttsAudio.currentTime = Math.max(0, ttsAudio.currentTime + Number(msg.value || 0));
+  }
+  if (msg.action === "seekTo") {
+    ttsAudio.currentTime = Math.max(0, Number(msg.value || 0));
+  }
+  broadcastTtsState();
 }
 
 export function chooseRecorderMimeType(
@@ -456,16 +547,15 @@ function resumeRecording() {
 
 export default function Offscreen() {
   useEffect(() => {
-    const handler = (msg: StartMsg | ControlMsg | TerminalKeepAliveMsg | TtsPlayMsg) => {
+    const handler = (msg: StartMsg | ControlMsg | TerminalKeepAliveMsg | TtsPlayMsg | TtsControlMsg) => {
       if (msg.type === "RECORDER_START") void startRecording(msg);
       if (msg.type === "RECORDER_STOP") stopRecording();
       if (msg.type === "RECORDER_PAUSE") pauseRecording();
       if (msg.type === "RECORDER_RESUME") resumeRecording();
       if (msg.type === "TERMINAL_KEEPALIVE_START") startTerminalKeepAlive();
       if (msg.type === "TERMINAL_KEEPALIVE_STOP") stopTerminalKeepAlive();
-      if (msg.type === "TTS_PLAY") {
-        void playTtsAudio(msg.id, msg.dataUrl, clampTtsPlaybackRate(msg.playbackRate));
-      }
+      if (msg.type === "TTS_PLAY_STREAM") void playTtsAudio(msg);
+      if (msg.type === "TTS_CONTROL") controlTtsAudio(msg);
     };
     chrome.runtime.onMessage.addListener(handler);
     chrome.runtime.sendMessage({ type: "RECORDER_READY" });

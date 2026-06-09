@@ -960,6 +960,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (shouldKeepNativeHostAlive()) void startTerminalKeepAlive();
   }
 
+  if (message.type === "GET_TTS_STATE") {
+    sendResponse({ ok: true, state: { status: "idle" } });
+    return;
+  }
+
+  if (message.type === "TTS_STATE") {
+    broadcastTtsState(message.state || {});
+  }
+
+  if (message.type === "TTS_CONTROL") {
+    retainOffscreenDocument("tts")
+      .then(() => chrome.runtime.sendMessage({
+        type: "TTS_CONTROL",
+        action: message.action,
+        value: message.value,
+      }))
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: unknownErrorMessage(err) }));
+    return true;
+  }
+
   if (message.type === "RECORDER_STARTED") {
     notifyRecorderStarted(message.id);
     broadcastRecordingState();
@@ -1057,14 +1078,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (pending) {
       pendingTtsPlayback.delete(id);
       clearTimeout(pending.timeout);
-      pending.reject(
-        new TtsCommandError(
-          "playback_failed",
-          "PLY",
-          "TTS audio playback failed",
-          message.error,
-        ),
-      );
+      if (message.type === "TTS_PLAYBACK_ERROR") {
+        pending.reject(
+          new TtsCommandError(
+            "playback_failed",
+            "PLY",
+            "TTS audio playback failed",
+            message.error,
+          ),
+        );
+      }
     }
     void chrome.action.setBadgeText({ text: "" });
     void releaseOffscreenDocument("tts");
@@ -2349,17 +2372,6 @@ async function downloadVisibleTabScreenshot() {
   await showTtsBadge("SC", "#2c50cd", 1200);
 }
 
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
-    binary += String.fromCharCode.apply(null, Array.from(chunk) as number[]);
-  }
-  return `data:${blob.type || "audio/mpeg"};base64,${btoa(binary)}`;
-}
-
 function clampTtsPlaybackRate(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return 1;
@@ -2425,17 +2437,32 @@ function waitForTtsPlaybackStarted(id: string): Promise<void> {
   });
 }
 
-async function playTtsDataUrl(dataUrl: string, playbackRate: number): Promise<void> {
+async function playTtsStream(input: {
+  text: string;
+  speaker?: string;
+  playbackRate: number;
+  apiUrl: string;
+  apiToken: string;
+}): Promise<void> {
   const id = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const started = waitForTtsPlaybackStarted(id);
   await retainOffscreenDocument("tts");
   await chrome.runtime.sendMessage({
-    type: "TTS_PLAY",
+    type: "TTS_PLAY_STREAM",
     id,
-    dataUrl,
-    playbackRate,
+    ...input,
   });
   await started;
+}
+
+function broadcastTtsState(state: Record<string, unknown>) {
+  chrome.runtime.sendMessage({ type: "TTS_STATE", state }).catch(() => {});
+  chrome.tabs.query({}).then((tabs) => {
+    for (const tab of tabs) {
+      if (typeof tab.id !== "number") continue;
+      chrome.tabs.sendMessage(tab.id, { type: "TTS_STATE", state }).catch(() => {});
+    }
+  }).catch(() => {});
 }
 
 async function speakTextWithTts(text: string) {
@@ -2450,19 +2477,17 @@ async function speakTextWithTts(text: string) {
     throw new TtsCommandError("missing_config", "CFG", "Sidebar API URL/token required for TTS");
   }
 
-  const client = createSidebarApiClient(apiToken, apiUrl);
-  let audio: Blob;
   try {
-    audio = await client.tts.speak({ text, speaker: settings.ttsVoice });
-  } catch (err) {
-    throw classifyTtsApiError(err);
-  }
-  const dataUrl = await blobToDataUrl(audio);
-  try {
-    await playTtsDataUrl(dataUrl, clampTtsPlaybackRate(settings.ttsPlaybackRate));
+    await playTtsStream({
+      text,
+      speaker: settings.ttsVoice,
+      playbackRate: clampTtsPlaybackRate(settings.ttsPlaybackRate),
+      apiUrl,
+      apiToken,
+    });
   } catch (err) {
     if (err instanceof TtsCommandError) throw err;
-    throw new TtsCommandError("playback_dispatch_failed", "PLY", "Could not start TTS playback", err);
+    throw classifyTtsApiError(err);
   }
   await showTtsBadge("TTS", "#2c50cd", 1200);
 }
