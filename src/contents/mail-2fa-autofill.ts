@@ -283,6 +283,43 @@ document.addEventListener("visibilitychange", () => {
 })
 
 ensureTwoFactorObserver()
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "MAIL_2FA_FILL_CODE") {
+    const code = String(message.code || "").replace(/\D/g, "")
+    if (code.length < 4 || code.length > 8) {
+      sendResponse({ ok: false, error: "invalid code" })
+      return
+    }
+
+    const target = findTwoFactorTarget()
+    if (!target) {
+      sendResponse({ ok: false, error: "no code field found" })
+      return
+    }
+    if (target.mode === "split" && code.length > target.inputs.length) {
+      sendResponse({ ok: false, error: "code is too long for split fields" })
+      return
+    }
+
+    lastFilledSignature = `${location.origin}:${target.signature}:${code}`
+    fillTarget(target, code)
+    stopPolling()
+    sendResponse({ ok: true })
+  }
+
+  if (message?.type === "MAIL_2FA_FORCE_AUTOFILL") {
+    attemptTwoFactorAutofill(true)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : "autofill failed"
+        })
+      )
+    return true
+  }
+})
 document.addEventListener("DOMContentLoaded", ensureTwoFactorObserver, {
   once: true
 })

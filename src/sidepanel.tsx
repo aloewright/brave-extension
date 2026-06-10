@@ -6,6 +6,7 @@ import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
+import { EmailSection } from "./sections/email/EmailSection";
 import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
 import { PasswordsSection } from "./sections/passwords/PasswordsSection";
 import { TechSection } from "./sections/tech/TechSection";
@@ -98,6 +99,7 @@ function SidePanel() {
           >
             <SessionSection />
           </div>
+          {active === "email" && <EmailSection />}
           {active === "quickInfo" && <QuickInfoSection />}
           {active === "tasks" && <TasksSection />}
           {active === "bookmarks" && <BookmarksSection />}
