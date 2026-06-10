@@ -326,7 +326,7 @@ export function AgentChatSection({ active = true }: { active?: boolean }) {
           <button
             type="button"
             onClick={() => void onClear()}
-            disabled={sending && streaming === null}
+            disabled={sending}
             className="grid h-7 w-7 shrink-0 place-items-center rounded text-fg/45 transition-colors hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-35"
             title="Clear conversation"
             aria-label="Clear conversation"

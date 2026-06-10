@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 type ListItem = {
   text: string
   depth: number
+  ordered: boolean
 }
 
 const INLINE_PATTERN = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<]+|`[^`]+`|\*\*[^*]+\*\*)/g
@@ -89,15 +90,26 @@ function renderInline(text: string): ReactNode[] {
 }
 
 function renderList(items: ListItem[], key: string) {
+  const ordered = items[0]?.ordered ?? false
+  const children = items.map((item, index) => (
+    <li
+      key={`${key}-${index}`}
+      className={item.depth > 0 ? "ml-4" : undefined}>
+      {renderInline(item.text)}
+    </li>
+  ))
+
+  if (ordered) {
+    return (
+      <ol key={key} className="my-1 list-decimal space-y-1 pl-5">
+        {children}
+      </ol>
+    )
+  }
+
   return (
     <ul key={key} className="my-1 list-disc space-y-1 pl-5">
-      {items.map((item, index) => (
-        <li
-          key={`${key}-${index}`}
-          className={item.depth > 0 ? "ml-4" : undefined}>
-          {renderInline(item.text)}
-        </li>
-      ))}
+      {children}
     </ul>
   )
 }
@@ -182,9 +194,12 @@ export function MarkdownText({
     if (listItem) {
       flushParagraph()
       const indent = listItem[1].replace(/\t/g, "  ").length
+      const ordered = /^\d/.test(listItem[2])
+      if (list.length > 0 && list[0].ordered !== ordered) flushList()
       list.push({
         text: listItem[3],
-        depth: Math.min(3, Math.floor(indent / 2))
+        depth: Math.min(3, Math.floor(indent / 2)),
+        ordered
       })
       continue
     }

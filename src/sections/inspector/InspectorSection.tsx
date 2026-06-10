@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { InspectorPanel } from "../../components/InspectorPanel"
 import type { ConsoleError } from "../../types"
 import { NetworkPanel, useInfoPanels } from "../_lx/components/InfoPanels"
@@ -112,13 +112,33 @@ function ReverseImageSearchPanel() {
   const [images, setImages] = useState<PageImageCandidate[]>([])
   const [selectedImageUrl, setSelectedImageUrl] = useState("")
   const [manualUrl, setManualUrl] = useState("")
+  const mountedRef = useRef(true)
   const [enabledEngines, setEnabledEngines] = useState<ReverseImageEngineId[]>(
     REVERSE_IMAGE_ENGINES.map((engine) => engine.id)
   )
   const [status, setStatus] = useState<string | null>("Scanning page images...")
 
+  const scanPageImages = () => {
+    setStatus("Scanning page images...")
+    void loadPageImages(
+      (nextImages) => {
+        if (mountedRef.current) setImages(nextImages)
+      },
+      (nextUrl) => {
+        if (mountedRef.current) setSelectedImageUrl(nextUrl)
+      },
+      (nextStatus) => {
+        if (mountedRef.current) setStatus(nextStatus)
+      }
+    )
+  }
+
   useEffect(() => {
-    void loadPageImages(setImages, setSelectedImageUrl, setStatus)
+    mountedRef.current = true
+    scanPageImages()
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
 
   const searchUrl = manualUrl.trim() || selectedImageUrl
@@ -148,6 +168,8 @@ function ReverseImageSearchPanel() {
       void chrome.tabs.create({
         active: false,
         url: engine.buildUrl(searchUrl)
+      }).catch(() => {
+        setStatus(`Could not open ${engine.label}`)
       })
     })
     setStatus(`Opened ${selectedEngines.length} reverse image search tab${selectedEngines.length === 1 ? "" : "s"}`)
@@ -166,7 +188,7 @@ function ReverseImageSearchPanel() {
         </div>
         <button
           className="rounded border border-border bg-card/60 px-2 py-1 text-[10px] text-fg/60 hover:text-fg hover:bg-card"
-          onClick={() => void loadPageImages(setImages, setSelectedImageUrl, setStatus)}
+          onClick={scanPageImages}
           type="button">
           Rescan
         </button>
