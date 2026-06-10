@@ -7,6 +7,16 @@ type ListItem = {
 
 const INLINE_PATTERN = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<]+|`[^`]+`|\*\*[^*]+\*\*)/g
 
+function toSafeHttpHref(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    return parsed.href
+  } catch {
+    return null
+  }
+}
+
 function renderInline(text: string): ReactNode[] {
   const nodes: ReactNode[] = []
   let lastIndex = 0
@@ -23,28 +33,38 @@ function renderInline(text: string): ReactNode[] {
     const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/)
 
     if (markdownLink) {
+      const href = toSafeHttpHref(markdownLink[2])
       nodes.push(
-        <a
-          key={key}
-          href={markdownLink[2]}
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80">
-          {markdownLink[1]}
-        </a>
+        href ? (
+          <a
+            key={key}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80">
+            {markdownLink[1]}
+          </a>
+        ) : (
+          token
+        )
       )
     } else if (token.startsWith("http")) {
       const url = token.replace(/[),.;:!?]+$/, "")
       const suffix = token.slice(url.length)
+      const href = toSafeHttpHref(url)
       nodes.push(
-        <a
-          key={key}
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80">
-          {url}
-        </a>
+        href ? (
+          <a
+            key={key}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80">
+            {href}
+          </a>
+        ) : (
+          url
+        )
       )
       if (suffix) nodes.push(suffix)
     } else if (token.startsWith("`")) {
