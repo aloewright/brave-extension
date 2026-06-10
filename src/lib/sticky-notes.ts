@@ -8,6 +8,7 @@ export interface StickyNote {
 }
 
 export const STICKY_NOTES_STORAGE_KEY = "lx_stickyNotes"
+export const STICKY_NOTES_LIMIT = 50
 
 const syncTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -108,7 +109,7 @@ export async function getStickyNotes(): Promise<StickyNote[]> {
 }
 
 export async function setStickyNotes(notes: StickyNote[]): Promise<void> {
-  await chrome.storage.local.set({ [STICKY_NOTES_STORAGE_KEY]: notes })
+  await chrome.storage.local.set({ [STICKY_NOTES_STORAGE_KEY]: notes.slice(0, STICKY_NOTES_LIMIT) })
 }
 
 export async function addStickyNote(text = ""): Promise<StickyNote> {
