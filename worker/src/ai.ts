@@ -132,29 +132,11 @@ export async function synthesizeSpeech(
   }
 
   if (input.ttsModel === "dynamic-audio-gen") {
-    // User-selectable dynamic route. AGENTS.md notes Worker-side dynamic/*
-    // routing has been flaky in this account; keep it isolated so the direct
-    // Aura path remains the default and this can be swapped when upstream fixes.
-    const raw = await (env.AI as any).gateway(AI_GATEWAY_ID).run({
-      provider: "compat",
-      endpoint: "audio/speech",
-      headers: {},
-      query: {
-        model: TTS_DYNAMIC_MODEL,
-        input: input.text,
-        voice: speaker,
-        response_format: "mp3"
-      },
-    })
-
-    if (raw instanceof Response) return assertSuccessfulAudioResponse(raw, "tts dynamic route")
-    if (raw instanceof ReadableStream) {
-      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
-    }
-    if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
-    }
-    throw new Error("tts dynamic route: unexpected AI response shape")
+    // Cloudflare AI Gateway currently rejects compat/audio/speech with code
+    // 2019 ("audio/speech is not supported"). Keep the user-facing option
+    // non-fatal by falling back to the sanctioned Worker-side Aura path below.
+    // Swap this back to TTS_DYNAMIC_MODEL when Gateway supports audio/speech
+    // or exposes dynamic/audio_gen through a supported Worker endpoint.
   }
 
   const raw = await (env.AI.run as any)(
