@@ -1,4 +1,15 @@
-import { AI_GATEWAY_ID, EMBED_MODEL, OCR_MODEL, TRANSCRIBE_MODEL, TTS_MODEL, type Env } from "./env"
+import {
+  AI_GATEWAY_ID,
+  CARTESIA_TTS_MODEL,
+  CARTESIA_TTS_VOICE_ID,
+  EMBED_MODEL,
+  OCR_MODEL,
+  TRANSCRIBE_MODEL,
+  TTS_DYNAMIC_MODEL,
+  TTS_MODEL,
+  type Env,
+  type TtsModelMode
+} from "./env"
 
 /**
  * Embed one or many strings via Workers AI through AI Gateway "x".
@@ -61,13 +72,75 @@ export async function ocrImage(env: Env, imageBytes: Uint8Array): Promise<string
  */
 export async function synthesizeSpeech(
   env: Env,
-  input: { text: string; speaker?: string }
+  input: { text: string; speaker?: string; ttsModel?: TtsModelMode }
 ): Promise<Response> {
+  const speaker = input.speaker || "hyperion"
+  if (input.ttsModel === "cartesia-sonic") {
+    // Provider-native Cartesia through AI Gateway. The gateway owns the
+    // Cartesia key, so the Worker sends the Cartesia request shape but does
+    // not carry a provider secret of its own.
+    const raw = await (env.AI as any).gateway(AI_GATEWAY_ID).run({
+      provider: "cartesia",
+      endpoint: "tts/bytes",
+      headers: {
+        "Cartesia-Version": "2024-06-10",
+      },
+      query: {
+        transcript: input.text,
+        model_id: CARTESIA_TTS_MODEL,
+        voice: {
+          mode: "id",
+          id: CARTESIA_TTS_VOICE_ID,
+        },
+        output_format: {
+          container: "wav",
+          encoding: "pcm_f32le",
+          sample_rate: 44100,
+        },
+      },
+    })
+
+    if (raw instanceof Response) return raw
+    if (raw instanceof ReadableStream) {
+      return new Response(raw, { headers: { "content-type": "audio/wav" } })
+    }
+    if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
+      return new Response(raw, { headers: { "content-type": "audio/wav" } })
+    }
+    throw new Error("tts cartesia: unexpected AI response shape")
+  }
+
+  if (input.ttsModel === "dynamic-audio-gen") {
+    // User-selectable dynamic route. AGENTS.md notes Worker-side dynamic/*
+    // routing has been flaky in this account; keep it isolated so the direct
+    // Aura path remains the default and this can be swapped when upstream fixes.
+    const raw = await (env.AI as any).gateway(AI_GATEWAY_ID).run({
+      provider: "compat",
+      endpoint: "audio/speech",
+      headers: {},
+      query: {
+        model: TTS_DYNAMIC_MODEL,
+        input: input.text,
+        voice: speaker,
+        response_format: "mp3"
+      },
+    })
+
+    if (raw instanceof Response) return raw
+    if (raw instanceof ReadableStream) {
+      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
+    }
+    if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
+      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
+    }
+    throw new Error("tts dynamic route: unexpected AI response shape")
+  }
+
   const raw = await (env.AI.run as any)(
     TTS_MODEL,
     {
       text: input.text,
-      speaker: input.speaker || "hyperion",
+      speaker,
       encoding: "mp3"
     },
     { gateway: { id: AI_GATEWAY_ID }, returnRawResponse: true }

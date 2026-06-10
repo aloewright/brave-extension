@@ -2442,6 +2442,7 @@ function waitForTtsPlaybackStarted(id: string): Promise<void> {
 
 async function playTtsStream(input: {
   text: string;
+  ttsModel?: string;
   speaker?: string;
   playbackRate: number;
   apiUrl: string;
@@ -2484,6 +2485,7 @@ async function speakTextWithTts(text: string) {
   try {
     await playTtsStream({
       text,
+      ttsModel: settings.ttsModel,
       speaker: settings.ttsVoice,
       playbackRate: clampTtsPlaybackRate(settings.ttsPlaybackRate),
       apiUrl,

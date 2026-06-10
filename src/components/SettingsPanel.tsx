@@ -768,6 +768,23 @@ const TTS_VOICE_OPTIONS: { value: TtsVoice; label: string }[] = [
   { value: "helena", label: "Helena" },
   { value: "apollo", label: "Apollo" }
 ]
+const TTS_MODEL_OPTIONS: { value: Settings["ttsModel"]; label: string; hint: string }[] = [
+  {
+    value: "frontier-aura",
+    label: "Fast Aura 2",
+    hint: "Direct Workers AI TTS through AI Gateway; fastest and safest default."
+  },
+  {
+    value: "dynamic-audio-gen",
+    label: "Dynamic audio route",
+    hint: "Use Cloudflare AI Gateway dynamic/audio_gen routing when you want gateway-side model selection."
+  },
+  {
+    value: "cartesia-sonic",
+    label: "Cartesia Sonic",
+    hint: "Use Cartesia's low-latency native TTS endpoint through AI Gateway."
+  }
+]
 const TTS_LAST_ERROR_KEY = "tts.lastError"
 
 interface TtsLastError {
@@ -814,6 +831,23 @@ function TtsSettingsSection({
         TTS
       </label>
       <div className="bg-card/20 rounded p-2 space-y-2">
+        <div>
+          <label className="text-[10px] text-fg/50 mb-1 block">TTS model</label>
+          <select
+            value={settings.ttsModel}
+            onChange={(e) => onUpdate({ ttsModel: e.target.value as Settings["ttsModel"] })}
+            className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg outline-none focus:border-primary/50"
+          >
+            {TTS_MODEL_OPTIONS.map((model) => (
+              <option key={model.value} value={model.value}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[9px] text-fg/45 leading-snug">
+            {TTS_MODEL_OPTIONS.find((model) => model.value === settings.ttsModel)?.hint}
+          </p>
+        </div>
         <div>
           <label className="text-[10px] text-fg/50 mb-1 block">Voice</label>
           <select

@@ -140,7 +140,7 @@ export class ApiError extends Error {
 export interface SidebarApiClient {
   health: () => Promise<{ ok: boolean; version: string; deployedAt: string }>
   tts: {
-    speak: (payload: { text: string; speaker?: string }) => Promise<Blob>
+    speak: (payload: { text: string; speaker?: string; ttsModel?: string }) => Promise<Blob>
   }
   search: (query: string, opts?: { types?: ResourceType[]; limit?: number }) => Promise<{ results: SearchHit[] }>
   conversations: {

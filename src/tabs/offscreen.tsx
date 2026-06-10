@@ -49,6 +49,7 @@ type TtsPlayMsg = {
   type: "TTS_PLAY_STREAM";
   id?: string;
   text: string;
+  ttsModel?: string;
   speaker?: string;
   playbackRate?: number;
   apiUrl: string;
@@ -73,6 +74,7 @@ let ttsAudio: HTMLAudioElement | null = null;
 let ttsObjectUrl: string | null = null;
 let ttsTickTimer: ReturnType<typeof setInterval> | null = null;
 let ttsActiveId: string | undefined;
+let finishCurrentTtsChunk: (() => void) | null = null;
 
 const TERMINAL_KEEPALIVE_INTERVAL_MS = 15_000;
 const TERMINAL_KEEPALIVE_PORT_NAME = "terminal-keepalive";
@@ -154,6 +156,11 @@ function stopTtsAudio(status: "idle" | "ended" | "error" = "idle") {
     clearInterval(ttsTickTimer);
     ttsTickTimer = null;
   }
+  clearCurrentTtsAudio();
+  broadcastTtsState({ status });
+}
+
+function clearCurrentTtsAudio() {
   if (ttsAudio) {
     ttsAudio.pause();
     ttsAudio.removeAttribute("src");
@@ -164,7 +171,9 @@ function stopTtsAudio(status: "idle" | "ended" | "error" = "idle") {
     URL.revokeObjectURL(ttsObjectUrl);
     ttsObjectUrl = null;
   }
-  broadcastTtsState({ status });
+  const finish = finishCurrentTtsChunk;
+  finishCurrentTtsChunk = null;
+  finish?.();
 }
 
 function splitTtsText(text: string, maxChars = TTS_CHUNK_MAX_CHARS): string[] {
@@ -208,7 +217,7 @@ async function fetchTtsAudioChunk(msg: TtsPlayMsg, text: string): Promise<Blob> 
       "content-type": "application/json",
       "x-sidebar-token": msg.apiToken,
     },
-    body: JSON.stringify({ text, speaker: msg.speaker }),
+    body: JSON.stringify({ text, speaker: msg.speaker, ttsModel: msg.ttsModel }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
@@ -217,17 +226,60 @@ async function fetchTtsAudioChunk(msg: TtsPlayMsg, text: string): Promise<Blob> 
   return await res.blob();
 }
 
-async function fetchTtsAudio(msg: TtsPlayMsg, onProgress: (done: number, total: number) => void): Promise<Blob> {
-  const chunks = splitTtsText(msg.text);
-  if (chunks.length === 0) throw new Error("No TTS text to speak");
-  const audioParts: Blob[] = [];
-  for (let i = 0; i < chunks.length; i += 1) {
-    onProgress(i, chunks.length);
-    audioParts.push(await fetchTtsAudioChunk(msg, chunks[i]));
-  }
-  onProgress(chunks.length, chunks.length);
-  if (audioParts.length === 1) return audioParts[0];
-  return new Blob(audioParts, { type: audioParts[0]?.type || "audio/mpeg" });
+function queueTtsAudioChunk(msg: TtsPlayMsg, text: string): Promise<Blob> {
+  const request = fetchTtsAudioChunk(msg, text);
+  request.catch(() => undefined);
+  return request;
+}
+
+function playTtsBlob(input: {
+  blob: Blob;
+  id?: string;
+  title: string;
+  playbackRate: number;
+  chunkIndex: number;
+  totalChunks: number;
+  onStarted: () => void;
+}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (input.id && ttsActiveId !== input.id) {
+      resolve();
+      return;
+    }
+
+    clearCurrentTtsAudio();
+    ttsObjectUrl = URL.createObjectURL(input.blob);
+    ttsAudio = new Audio(ttsObjectUrl);
+    ttsAudio.playbackRate = input.playbackRate;
+    finishCurrentTtsChunk = resolve;
+
+    const chunkMessage =
+      input.totalChunks > 1
+        ? `Playing speech ${input.chunkIndex + 1}/${input.totalChunks}...`
+        : undefined;
+
+    ttsAudio.onloadedmetadata = () => broadcastTtsState({ status: "playing", title: input.title, message: chunkMessage });
+    ttsAudio.ontimeupdate = () => broadcastTtsState({ title: input.title, message: chunkMessage });
+    ttsAudio.onpause = () => broadcastTtsState({ status: "paused", title: input.title, message: chunkMessage });
+    ttsAudio.onplay = () => {
+      input.onStarted();
+      broadcastTtsState({ status: "playing", title: input.title, message: chunkMessage });
+    };
+    ttsAudio.onended = () => {
+      clearCurrentTtsAudio();
+    };
+    ttsAudio.onerror = () => {
+      finishCurrentTtsChunk = null;
+      clearCurrentTtsAudio();
+      reject(new Error("Audio element failed to load or play TTS data"));
+    };
+
+    void ttsAudio.play().catch((err) => {
+      finishCurrentTtsChunk = null;
+      clearCurrentTtsAudio();
+      reject(err);
+    });
+  });
 }
 
 async function playTtsAudio(msg: TtsPlayMsg) {
@@ -236,36 +288,39 @@ async function playTtsAudio(msg: TtsPlayMsg) {
     stopTtsAudio("idle");
     const title = msg.text.slice(0, 80);
     const playbackRate = clampTtsPlaybackRate(msg.playbackRate);
+    const chunks = splitTtsText(msg.text);
+    if (chunks.length === 0) throw new Error("No TTS text to speak");
+    let playbackStarted = false;
+    const notifyStarted = () => {
+      if (playbackStarted) return;
+      playbackStarted = true;
+      chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_STARTED", id: msg.id }).catch(() => {});
+      if (!ttsTickTimer) ttsTickTimer = setInterval(() => broadcastTtsState({ title }), 500);
+    };
+
     broadcastTtsState({ status: "loading", title, message: "Preparing audio...", playbackRate });
     chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ACCEPTED", id: msg.id }).catch(() => {});
-    const blob = await fetchTtsAudio(msg, (done, total) => {
-      const message = total > 1 ? `Preparing audio ${Math.min(done + 1, total)}/${total}...` : "Preparing audio...";
+    let nextBlob = queueTtsAudioChunk(msg, chunks[0]);
+    for (let i = 0; i < chunks.length; i += 1) {
+      if (msg.id && ttsActiveId !== msg.id) return;
+      const message = chunks.length > 1 ? `Preparing audio ${i + 1}/${chunks.length}...` : "Preparing audio...";
       broadcastTtsState({ status: "loading", title, message, playbackRate });
-    });
-    ttsObjectUrl = URL.createObjectURL(blob);
-    ttsAudio = new Audio(ttsObjectUrl);
-    ttsAudio.playbackRate = playbackRate;
-    ttsAudio.onloadedmetadata = () => broadcastTtsState({ status: "playing", title });
-    ttsAudio.ontimeupdate = () => broadcastTtsState({ title });
-    ttsAudio.onpause = () => broadcastTtsState({ status: "paused", title });
-    ttsAudio.onplay = () => broadcastTtsState({ status: "playing", title });
-    ttsAudio.onended = () => {
-      chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id: msg.id }).catch(() => {});
-      stopTtsAudio("ended");
-    };
-    ttsAudio.onerror = () => {
-      chrome.runtime
-        .sendMessage({
-          type: "TTS_PLAYBACK_ERROR",
-          id: msg.id,
-          error: "Audio element failed to load or play TTS data",
-        })
-        .catch(() => {});
-      stopTtsAudio("error");
-    };
-    await ttsAudio.play();
-    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_STARTED", id: msg.id }).catch(() => {});
-    ttsTickTimer = setInterval(() => broadcastTtsState({ title }), 500);
+      const blob = await nextBlob;
+      if (i + 1 < chunks.length) {
+        nextBlob = queueTtsAudioChunk(msg, chunks[i + 1]);
+      }
+      await playTtsBlob({
+        blob,
+        id: msg.id,
+        title,
+        playbackRate,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+        onStarted: notifyStarted,
+      });
+    }
+    chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id: msg.id }).catch(() => {});
+    stopTtsAudio("ended");
   } catch (err) {
     chrome.runtime
       .sendMessage({
@@ -281,6 +336,7 @@ async function playTtsAudio(msg: TtsPlayMsg) {
 function controlTtsAudio(msg: TtsControlMsg) {
   if (msg.action === "stop") {
     const id = ttsActiveId;
+    ttsActiveId = undefined;
     stopTtsAudio("idle");
     chrome.runtime.sendMessage({ type: "TTS_PLAYBACK_ENDED", id }).catch(() => {});
     return;

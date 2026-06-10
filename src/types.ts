@@ -108,6 +108,7 @@ export interface Settings {
   // Falls back to sidebarApiToken when empty.
   tasksApiToken: string
   sidebarPruneAfterSync: boolean
+  ttsModel: TtsModel
   ttsVoice: TtsVoice
   ttsPlaybackRate: number
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
@@ -144,6 +145,7 @@ export interface Settings {
 }
 
 export type TtsVoice = "hyperion" | "thalia" | "andromeda" | "helena" | "apollo"
+export type TtsModel = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
 
 /** Status reported by the native host's mcp.status RPC. */
 export interface MCPStatus {
@@ -199,6 +201,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarApiToken: "",
   tasksApiToken: "",
   sidebarPruneAfterSync: false,
+  ttsModel: "frontier-aura",
   ttsVoice: "hyperion",
   ttsPlaybackRate: 1,
   cloudosSyncEnabled: false,

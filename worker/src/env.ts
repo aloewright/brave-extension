@@ -21,6 +21,10 @@ export const TRANSCRIBE_MODEL = "@cf/openai/whisper" as const
 export const OCR_MODEL = "@cf/llava-hf/llava-1.5-7b-hf" as const
 export const AGENT_PLAN_MODEL = "@cf/openai/gpt-oss-120b" as const
 export const TTS_MODEL = "@cf/deepgram/aura-2-en" as const
+export const TTS_DYNAMIC_MODEL = "dynamic/audio_gen" as const
+export const CARTESIA_TTS_MODEL = "sonic-english" as const
+export const CARTESIA_TTS_VOICE_ID = "694f9389-aac1-45b6-b726-9d9369183238" as const
+export type TtsModelMode = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
 
 // AI Gateway id from the account's existing config. Per CLAUDE.md, dynamic/*
 // routes are broken inside a Worker; we route specific @cf/* models through
