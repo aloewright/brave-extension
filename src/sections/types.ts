@@ -30,6 +30,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "terminal", label: "Terminal" },
   { id: "inspector", label: "Inspector" },
   { id: "extensions", label: "Extensions" },
+  { id: "tech", label: "Tech" },
   { id: "session", label: "Session" },
   { id: "quickInfo", label: "Contact Enrichment" },
   { id: "tasks", label: "Tasks" },

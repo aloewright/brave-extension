@@ -10,6 +10,7 @@ import recordings from "./routes/recordings"
 import videos from "./routes/videos"
 import pdfs from "./routes/pdfs"
 import highlights from "./routes/highlights"
+import notes from "./routes/notes"
 import search from "./routes/search"
 import tts from "./routes/tts"
 import type { Env } from "./env"
@@ -35,6 +36,7 @@ app.route("/api/recordings", recordings)
 app.route("/api/videos", videos)
 app.route("/api/pdfs", pdfs)
 app.route("/api/highlights", highlights)
+app.route("/api/notes", notes)
 app.route("/api/search", search)
 app.route("/api/tts", tts)
 

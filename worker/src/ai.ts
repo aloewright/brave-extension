@@ -185,7 +185,7 @@ function normalizeCartesiaVoices(raw: unknown): CartesiaVoiceOption[] {
       const description = typeof voice.description === "string" ? voice.description : null
       return id ? { id, name, description } : null
     })
-    .filter((voice): voice is CartesiaVoiceOption => Boolean(voice))
+    .filter((voice): voice is { id: string; name: string; description: string | null } => voice !== null)
 }
 
 async function assertSuccessfulJsonResponse(response: Response, label: string): Promise<unknown> {
