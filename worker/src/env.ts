@@ -14,6 +14,9 @@ export interface Env {
   COBALT_ACCESS_CLIENT_SECRET?: string
   /** Optional direct Cartesia token fallback for provider-native metadata endpoints. */
   CARTESIA_API_KEY?: string
+  /** AI Gateway auth token for protected provider-native Gateway fetches. */
+  AI_GATEWAY_TOKEN?: string
+  CF_AIG_TOKEN?: string
 }
 
 // Workers AI model ids used by the Worker.

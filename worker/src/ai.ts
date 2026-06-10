@@ -76,8 +76,10 @@ async function assertSuccessfulAudioResponse(response: Response, label: string):
 }
 
 function cartesiaHeaders(env: Env): Record<string, string> {
+  const gatewayToken = env.AI_GATEWAY_TOKEN || env.CF_AIG_TOKEN
   return {
     "Cartesia-Version": CARTESIA_API_VERSION,
+    ...(gatewayToken ? { "cf-aig-authorization": `Bearer ${gatewayToken}` } : {}),
     ...(env.CARTESIA_API_KEY
       ? {
           "X-API-Key": env.CARTESIA_API_KEY,
