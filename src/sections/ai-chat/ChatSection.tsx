@@ -3,7 +3,8 @@
 // Sidebar UI for the AI chat. Passive view over chrome.runtime
 // broadcasts — all chat logic lives in src/background/chat-orchestrator.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { MarkdownText } from "../../components/MarkdownText"
 import { ulid } from "../../lib/ulid"
 import {
   getConversation,
@@ -27,7 +28,9 @@ export function ChatSection() {
   const [turnInFlight, setTurnInFlight] = useState<string | null>(null)
   const lastUpdateAtRef = useRef<number>(0)
   const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null)
+  const shouldPinToBottomRef = useRef(true)
+  const hasPositionedInitialScrollRef = useRef(false)
 
   // Initial load
   useEffect(() => {
@@ -106,9 +109,16 @@ export function ChatSection() {
     }
   }, [turnInFlight])
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  // Keep bottom-pinned chats pinned without replaying a long smooth scroll
+  // through history when the section mounts.
+  useLayoutEffect(() => {
+    const el = messagesScrollRef.current
+    if (!el) return
+    if (!hasPositionedInitialScrollRef.current || shouldPinToBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      hasPositionedInitialScrollRef.current = true
+      shouldPinToBottomRef.current = true
+    }
   }, [messages.length])
 
   const onSend = async () => {
@@ -162,11 +172,16 @@ export function ChatSection() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+      <div
+        ref={messagesScrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          shouldPinToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+        }}
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
         {messages.map((m) => (
           <MessageRow key={m.id} message={m} />
         ))}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}
@@ -237,8 +252,8 @@ function MessageRow({ message }: { message: ChatMessage }) {
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm whitespace-pre-wrap">
-        {message.content}
+      <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm">
+        <MarkdownText content={message.content} />
       </div>
     </div>
   )

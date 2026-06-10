@@ -28,6 +28,7 @@ export interface ToolCall {
 export interface AmbientContext {
   activeTab?: { url: string; title: string }
   mostRecentClip?: { title: string; mode: string; createdAt: string; joplinUrl: string }
+  recentScrape?: { url: string; title: string; text: string; timestamp: number }
 }
 
 export interface Conversation {

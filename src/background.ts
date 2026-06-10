@@ -88,6 +88,7 @@ import type {
   PickerMessage,
   Reference,
   RecorderSource,
+  ScrapeResult,
 } from "./types";
 
 const HOST_NAME = "com.aidev.sidebar";
@@ -1908,6 +1909,62 @@ async function removeContextMenuItem(id: string) {
 
 // Console error tracking per tab
 const consoleErrors = new Map<number, any[]>();
+const AUTO_SCRAPE_STORAGE_KEY = "ai-dev-scrapes";
+const AUTO_SCRAPE_MAX_ITEMS = 50;
+const AUTO_SCRAPE_DELAY_MS = 600;
+const AUTO_SCRAPE_DEDUPE_MS = 5_000;
+const autoScrapeTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const autoScrapeRecent = new Map<number, { url: string; at: number }>();
+
+function canScrapeUrl(url?: string | null): url is string {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function scrapeStorageKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url.split("#")[0] || url;
+  }
+}
+
+function isScrapeResult(value: unknown): value is ScrapeResult {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as ScrapeResult).url === "string" &&
+      typeof (value as ScrapeResult).title === "string" &&
+      typeof (value as ScrapeResult).text === "string",
+  );
+}
+
+async function storeScrapeResult(result: unknown) {
+  if (!isScrapeResult(result)) return;
+  const existing = await chrome.storage.local.get(AUTO_SCRAPE_STORAGE_KEY);
+  const list = Array.isArray(existing[AUTO_SCRAPE_STORAGE_KEY])
+    ? (existing[AUTO_SCRAPE_STORAGE_KEY] as unknown[]).filter(isScrapeResult)
+    : [];
+  const key = scrapeStorageKey(result.url);
+  const next = [
+    result,
+    ...list.filter((item) => scrapeStorageKey(item.url) !== key),
+  ].slice(0, AUTO_SCRAPE_MAX_ITEMS);
+  await chrome.storage.local.set({ [AUTO_SCRAPE_STORAGE_KEY]: next });
+}
+
+function broadcastScrapeResult(result: unknown, source: "manual" | "auto") {
+  for (const [, port] of sidebarPorts) {
+    postToSidebar(port, { type: "scrape-result", payload: result, source });
+  }
+}
 
 // Scrape page content
 async function scrapeTab(tabId: number) {
@@ -1963,6 +2020,35 @@ async function scrapeTab(tabId: number) {
   } catch (err) {
     return { error: (err as Error).message };
   }
+}
+
+function scheduleAutoScrape(tabId: number, url?: string | null) {
+  if (!canScrapeUrl(url)) return;
+  const existing = autoScrapeTimers.get(tabId);
+  if (existing) clearTimeout(existing);
+  autoScrapeTimers.set(
+    tabId,
+    setTimeout(() => {
+      autoScrapeTimers.delete(tabId);
+      void autoScrapeTab(tabId, url);
+    }, AUTO_SCRAPE_DELAY_MS),
+  );
+}
+
+async function autoScrapeTab(tabId: number, url: string) {
+  if (!canScrapeUrl(url)) return;
+  const settings = await getSettings().catch(() => null);
+  if (!settings?.autoScrape) return;
+
+  const key = scrapeStorageKey(url);
+  const recent = autoScrapeRecent.get(tabId);
+  const now = Date.now();
+  if (recent?.url === key && now - recent.at < AUTO_SCRAPE_DEDUPE_MS) return;
+  autoScrapeRecent.set(tabId, { url: key, at: now });
+
+  const result = await scrapeTab(tabId);
+  if (isScrapeResult(result)) await storeScrapeResult(result);
+  broadcastScrapeResult(result, "auto");
 }
 
 // ─── Element picker (Reference capture, ALO-243) ────────────────────────
@@ -2058,14 +2144,31 @@ async function finalizeCapture(tabId: number, capture: PickerCapture) {
 }
 
 // Auto-cancel picker if the user navigates the tab away.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "loading" && pendingPickers.has(tabId)) {
     rejectPending(tabId, "navigation");
+  }
+  if (changeInfo.status === "complete") {
+    scheduleAutoScrape(tabId, tab.url);
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   rejectPending(tabId, "tab-closed");
+  const timer = autoScrapeTimers.get(tabId);
+  if (timer) clearTimeout(timer);
+  autoScrapeTimers.delete(tabId);
+  autoScrapeRecent.delete(tabId);
+});
+
+chrome.webNavigation?.onCompleted?.addListener((details) => {
+  if (details.frameId !== 0) return;
+  scheduleAutoScrape(details.tabId, details.url);
+});
+
+chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
+  if (details.frameId !== 0) return;
+  scheduleAutoScrape(details.tabId, details.url);
 });
 
 // Side panel behavior — toolbar/shortcut clicks toggle the panel for the
@@ -2254,9 +2357,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "scrape-page") {
     const result = await scrapeTab(tab.id);
-    for (const [, port] of sidebarPorts) {
-      postToSidebar(port, { type: "scrape-result", payload: result });
-    }
+    if (isScrapeResult(result)) await storeScrapeResult(result);
+    broadcastScrapeResult(result, "manual");
   }
 
   if (info.menuItemId === SCREENSHOT_CONTEXT_MENU_ID) {

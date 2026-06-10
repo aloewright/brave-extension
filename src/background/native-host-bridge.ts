@@ -100,6 +100,14 @@ export function buildSystemPrompt(
       `Most recent Joplin clip: "${ambient.mostRecentClip.title}" (${ambient.mostRecentClip.mode}) at ${ambient.mostRecentClip.createdAt}`
     )
   }
+  if (ambient.recentScrape) {
+    ambientLines.push(
+      [
+        `Recent page scrape: ${ambient.recentScrape.title || "(untitled)"} — ${ambient.recentScrape.url}`,
+        ambient.recentScrape.text.slice(0, 4_000)
+      ].join("\n")
+    )
+  }
   const ambientBlock = ambientLines.length
     ? `CURRENT STATE:\n${ambientLines.join("\n")}`
     : ""

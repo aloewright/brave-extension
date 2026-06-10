@@ -5,7 +5,9 @@
 // the LLM work + memory, so this section talks to it directly via the
 // typed client in src/lib/agent-api.ts, streaming replies over SSE.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { LeoIcon } from "../../components/leo"
+import { MarkdownText } from "../../components/MarkdownText"
 import { ulid } from "../../lib/ulid"
 import { getSettings } from "../../storage"
 import {
@@ -42,7 +44,66 @@ function isConfigured(s: {
   return Boolean(s.agentApiUrl && s.agentAccessClientId && s.agentAccessClientSecret)
 }
 
-export function AgentChatSection() {
+function isPinnedToBottom(el: HTMLDivElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 32
+}
+
+function formatAgentChatMarkdown(input: {
+  messages: AgentMessage[]
+  streaming: string | null
+  sessionId: string | null
+  modelId: string
+}): string {
+  const rows = [...input.messages]
+  if (input.streaming?.trim()) {
+    rows.push({
+      id: "streaming",
+      session_id: input.sessionId ?? "",
+      role: "assistant",
+      content: input.streaming,
+      model: input.modelId || null,
+      created_at: Date.now()
+    })
+  }
+  const header = [
+    "# Agent conversation",
+    "",
+    `Exported: ${new Date().toLocaleString()}`,
+    input.sessionId ? `Session: ${input.sessionId}` : "",
+    input.modelId ? `Model: ${input.modelId}` : ""
+  ].filter(Boolean)
+  const body = rows.map((message) => {
+    const when = message.created_at ? new Date(message.created_at).toLocaleString() : ""
+    const model = message.model ? ` · ${message.model}` : ""
+    return [
+      `## ${message.role}${when ? ` · ${when}` : ""}${model}`,
+      "",
+      message.content.trim() || "_Empty message_"
+    ].join("\n")
+  })
+  return [...header, "", ...body].join("\n\n")
+}
+
+function downloadAgentConversation(input: {
+  messages: AgentMessage[]
+  streaming: string | null
+  sessionId: string | null
+  modelId: string
+}) {
+  if (input.messages.length === 0 && !input.streaming?.trim()) return
+  const markdown = formatAgentChatMarkdown(input)
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const objectUrl = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }))
+  const a = document.createElement("a")
+  a.href = objectUrl
+  a.download = `agent-conversation-${stamp}.md`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+export function AgentChatSection({ active = true }: { active?: boolean }) {
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [draft, setDraft] = useState("")
@@ -53,8 +114,10 @@ export function AgentChatSection() {
 
   const clientRef = useRef<AgentApiClient | null>(null)
   const sessionIdRef = useRef<string | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const shouldPinToBottomRef = useRef(true)
+  const hasPositionedInitialScrollRef = useRef(false)
 
   // Abort any in-flight stream when the section unmounts (tab switch).
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -102,10 +165,17 @@ export function AgentChatSection() {
     })()
   }, [])
 
-  // Auto-scroll on new content.
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [messages.length, streaming])
+  // Keep bottom-pinned chats pinned without replaying a long smooth scroll
+  // through history when the section mounts or becomes visible.
+  useLayoutEffect(() => {
+    const el = messagesScrollRef.current
+    if (!active || !el) return
+    if (!hasPositionedInitialScrollRef.current || shouldPinToBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      hasPositionedInitialScrollRef.current = true
+      shouldPinToBottomRef.current = true
+    }
+  }, [active, messages.length, streaming])
 
   const onModelChange = async (id: string) => {
     setModelId(id)
@@ -114,6 +184,47 @@ export function AgentChatSection() {
     } catch {
       /* non-fatal: keep the local selection */
     }
+  }
+
+  const onClear = async () => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStreaming(null)
+    setSending(false)
+    setDraft("")
+    const client = clientRef.current
+    if (!client) {
+      sessionIdRef.current = null
+      setMessages([])
+      return
+    }
+    try {
+      const next = await client.createSession("New chat")
+      sessionIdRef.current = next.id
+      setMessages([])
+      shouldPinToBottomRef.current = true
+      hasPositionedInitialScrollRef.current = false
+    } catch (err) {
+      setMessages([
+        {
+          id: ulid(),
+          session_id: sessionIdRef.current ?? "",
+          role: "assistant",
+          content: `✗ ${err instanceof Error ? err.message : String(err)}`,
+          model: null,
+          created_at: Date.now()
+        }
+      ])
+    }
+  }
+
+  const onSave = () => {
+    downloadAgentConversation({
+      messages,
+      streaming,
+      sessionId: sessionIdRef.current,
+      modelId
+    })
   }
 
   const onSend = async () => {
@@ -201,32 +312,58 @@ export function AgentChatSection() {
       {/* Header + model picker */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-default gap-2">
         <h2 className="font-semibold text-sm">Agent</h2>
-        <select
-          value={modelId}
-          onChange={(e) => void onModelChange(e.target.value)}
-          className="text-xs bg-bg text-fg border border-default rounded px-1 py-0.5 max-w-[60%]">
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-              {m.experimental ? " (experimental)" : ""}
-            </option>
-          ))}
-        </select>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={messages.length === 0 && !streaming?.trim()}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded text-fg/45 transition-colors hover:bg-accent/50 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
+            title="Save conversation"
+            aria-label="Save conversation"
+          >
+            <LeoIcon name="save" size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void onClear()}
+            disabled={sending && streaming === null}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded text-fg/45 transition-colors hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-35"
+            title="Clear conversation"
+            aria-label="Clear conversation"
+          >
+            <LeoIcon name="trash" size={15} />
+          </button>
+          <select
+            value={modelId}
+            onChange={(e) => void onModelChange(e.target.value)}
+            className="min-w-0 max-w-[12rem] text-xs bg-bg text-fg border border-default rounded px-1 py-0.5">
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+                {m.experimental ? " (experimental)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+      <div
+        ref={messagesScrollRef}
+        onScroll={(e) => {
+          shouldPinToBottomRef.current = isPinnedToBottom(e.currentTarget)
+        }}
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
         {messages.map((m) => (
           <AgentMessageRow key={m.id} message={m} />
         ))}
         {streaming !== null && (
           <div className="flex justify-start">
-            <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm whitespace-pre-wrap">
-              {streaming || "…"}
+            <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm">
+              {streaming ? <MarkdownText content={streaming} /> : "…"}
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}
@@ -269,8 +406,8 @@ function AgentMessageRow({ message }: { message: AgentMessage }) {
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm whitespace-pre-wrap">
-        {message.content}
+      <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm">
+        <MarkdownText content={message.content} />
       </div>
     </div>
   )

@@ -24,6 +24,19 @@ import type {
   ToolDefinition,
   ToolExecutionResult
 } from "./ai-chat-types"
+import type { ScrapeResult } from "../types"
+
+const SCRAPES_KEY = "ai-dev-scrapes"
+
+function scrapeKey(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ""
+    return parsed.toString()
+  } catch {
+    return url.split("#")[0] || url
+  }
+}
 
 export function buildTools(
   getToken: () => Promise<string>
@@ -305,6 +318,26 @@ export async function captureAmbient(): Promise<AmbientContext> {
     })
     const tab = tabs[0]
     if (tab?.url) ctx.activeTab = { url: tab.url, title: tab.title ?? "" }
+  } catch {
+    /* swallow */
+  }
+  try {
+    const storage = new Storage()
+    const activeUrl = ctx.activeTab?.url
+    const scrapes = await storage.get<ScrapeResult[]>(SCRAPES_KEY)
+    const scrape = Array.isArray(scrapes)
+      ? activeUrl
+        ? scrapes.find((item) => scrapeKey(item.url) === scrapeKey(activeUrl))
+        : scrapes[0]
+      : null
+    if (scrape) {
+      ctx.recentScrape = {
+        url: scrape.url,
+        title: scrape.title,
+        text: scrape.text.slice(0, 6_000),
+        timestamp: scrape.timestamp
+      }
+    }
   } catch {
     /* swallow */
   }
