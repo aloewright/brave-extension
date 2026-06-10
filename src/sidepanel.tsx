@@ -12,12 +12,12 @@ import { TechSection } from "./sections/tech/TechSection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
 import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
-import { RecorderSection } from "./sections/recorder/RecorderSection";
+// import { RecorderSection } from "./sections/recorder/RecorderSection";
 import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
 import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
-import { JoplinSection } from "./sections/joplin/JoplinSection";
+// import { JoplinSection } from "./sections/joplin/JoplinSection";
 import { AgentChatSection } from "./sections/agent-chat/AgentChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 
@@ -25,14 +25,18 @@ const ACTIVE_KEY = "ui.activeSection";
 
 function SidePanel() {
   const [active, setActive] = useState<SectionId>("terminal");
+  const [agentChatMounted, setAgentChatMounted] = useState(false);
 
   useEffect(() => {
     chrome.storage.local.get(ACTIVE_KEY).then((res) => {
       const stored = res[ACTIVE_KEY] as SectionId | undefined;
-      // "aiChat" was folded into the Joplin section; redirect anyone whose
-      // last-active section was the now-removed AI Chat tab so they don't
-      // land on a blank panel.
-      const resolved = (stored as string) === "aiChat" ? "joplin" : stored;
+      // Redirect removed/hidden sections so users do not land on a blank panel.
+      const resolved =
+        (stored as string) === "aiChat" || (stored as string) === "joplin"
+          ? "session"
+          : (stored as string) === "recorder"
+          ? "captures"
+          : stored;
       if (resolved) setActive(resolved);
     });
     // React to programmatic navigation (e.g. QuickActionsBar → Library/Recorder).
@@ -42,8 +46,13 @@ function SidePanel() {
     ) => {
       if (area !== "local" || !changes[ACTIVE_KEY]) return;
       const next = changes[ACTIVE_KEY].newValue as string | undefined;
-      // Mirror the initial-load redirect: aiChat folded into Joplin.
-      const resolved = next === "aiChat" ? "joplin" : (next as SectionId | undefined);
+      // Mirror the initial-load redirect for removed/hidden sections.
+      const resolved =
+        next === "aiChat" || next === "joplin"
+          ? "session"
+          : next === "recorder"
+          ? "captures"
+          : (next as SectionId | undefined);
       if (resolved) setActive(resolved);
     };
     chrome.storage.onChanged.addListener(onChanged);
@@ -54,6 +63,10 @@ function SidePanel() {
     setActive(id);
     void chrome.storage.local.set({ [ACTIVE_KEY]: id });
   };
+
+  useEffect(() => {
+    if (active === "agentChat") setAgentChatMounted(true);
+  }, [active]);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-x-hidden bg-bg font-sans text-fg">
@@ -90,10 +103,16 @@ function SidePanel() {
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}
-          {active === "recorder" && <RecorderSection />}
+          {/* {active === "recorder" && <RecorderSection />} */}
           {active === "eyedropper" && <EyedropperSection />}
-          {active === "joplin" && <JoplinSection />}
-          {active === "agentChat" && <AgentChatSection />}
+          {/* {active === "joplin" && <JoplinSection />} */}
+          {agentChatMounted && (
+            <div
+              className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${active === "agentChat" ? "" : "hidden"}`}
+            >
+              <AgentChatSection active={active === "agentChat"} />
+            </div>
+          )}
           {active === "github" && <GitHubSection />}
           {active === "settings" && <SettingsSection />}
         </main>

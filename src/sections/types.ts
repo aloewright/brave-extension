@@ -30,7 +30,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "terminal", label: "Terminal" },
   { id: "inspector", label: "Inspector" },
   { id: "extensions", label: "Extensions" },
-  { id: "tech", label: "Tech" },
   { id: "session", label: "Session" },
   { id: "quickInfo", label: "Contact Enrichment" },
   { id: "tasks", label: "Tasks" },
@@ -38,11 +37,11 @@ export const SECTIONS: SectionDef[] = [
   { id: "bookmarks", label: "Bookmarks" },
   { id: "captures", label: "Page Captures" },
   { id: "cookies", label: "Cookies" },
-  { id: "recorder", label: "Recorder" },
+  // Recorder now lives inside Page Captures to free rail space.
+  // { id: "recorder", label: "Recorder" },
   { id: "eyedropper", label: "Eyedropper" },
-  // AI Chat is now stacked inside the Joplin section (clipper on top, chat
-  // below) rather than carrying its own rail entry.
-  { id: "joplin", label: "Joplin" },
+  // Temporarily hidden from the sidebar rail.
+  // { id: "joplin", label: "Joplin" },
   { id: "agentChat", label: "Agent" },
   { id: "github", label: "GitHub" },
   { id: "settings", label: "Settings" },
