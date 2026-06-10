@@ -24,7 +24,8 @@ export const OCR_MODEL = "@cf/llava-hf/llava-1.5-7b-hf" as const
 export const AGENT_PLAN_MODEL = "@cf/openai/gpt-oss-120b" as const
 export const TTS_MODEL = "@cf/deepgram/aura-2-en" as const
 export const TTS_DYNAMIC_MODEL = "dynamic/audio_gen" as const
-export const CARTESIA_TTS_MODEL = "sonic-english" as const
+export const CARTESIA_TTS_MODEL = "sonic-3.5" as const
+export const CARTESIA_API_VERSION = "2026-03-01" as const
 export const CARTESIA_TTS_VOICE_ID = "694f9389-aac1-45b6-b726-9d9369183238" as const
 export type TtsModelMode = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
 

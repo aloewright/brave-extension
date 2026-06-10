@@ -1,5 +1,6 @@
 import {
   AI_GATEWAY_ID,
+  CARTESIA_API_VERSION,
   CARTESIA_TTS_MODEL,
   CARTESIA_TTS_VOICE_ID,
   EMBED_MODEL,
@@ -74,6 +75,24 @@ async function assertSuccessfulAudioResponse(response: Response, label: string):
   throw new Error(`${label}: provider returned ${response.status}${body ? ` (${body.slice(0, 500)})` : ""}`)
 }
 
+function cartesiaHeaders(env: Env): Record<string, string> {
+  return {
+    "Cartesia-Version": CARTESIA_API_VERSION,
+    ...(env.CARTESIA_API_KEY
+      ? {
+          "X-API-Key": env.CARTESIA_API_KEY,
+          Authorization: `Bearer ${env.CARTESIA_API_KEY}`,
+        }
+      : {}),
+  }
+}
+
+async function cartesiaGatewayUrl(env: Env, path: string): Promise<string> {
+  const gateway = (env.AI as any).gateway(AI_GATEWAY_ID)
+  const baseUrl = await gateway.getUrl("cartesia")
+  return `${String(baseUrl).replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+}
+
 /**
  * Synthesize speech with Deepgram Aura 2 through AI Gateway "x".
  * Worker-side dynamic routes are currently broken, so this intentionally uses
@@ -86,19 +105,19 @@ export async function synthesizeSpeech(
   const speaker = input.speaker || "hyperion"
   if (input.ttsModel === "cartesia-sonic") {
     // Provider-native Cartesia through AI Gateway. The gateway owns the
-    // Cartesia key, so the Worker sends the Cartesia request shape but does
-    // not carry a provider secret of its own.
-    const raw = await (env.AI as any).gateway(AI_GATEWAY_ID).run({
-      provider: "cartesia",
-      endpoint: "tts/bytes",
+    // Cartesia key in production, so the Worker sends the current Cartesia
+    // request shape through the gateway URL. If CARTESIA_API_KEY is configured
+    // locally, include it as a fallback for metadata/local testing.
+    const raw = await fetch(await cartesiaGatewayUrl(env, "tts/bytes"), {
+      method: "POST",
       headers: {
-        "Cartesia-Version": "2024-06-10",
+        "content-type": "application/json",
+        ...cartesiaHeaders(env),
       },
-      query: {
+      body: JSON.stringify({
         transcript: input.text,
         model_id: CARTESIA_TTS_MODEL,
         voice: {
-          mode: "id",
           id: input.speaker || CARTESIA_TTS_VOICE_ID,
         },
         output_format: {
@@ -106,17 +125,10 @@ export async function synthesizeSpeech(
           encoding: "mp3",
           sample_rate: 44100,
         },
-      },
+      }),
     })
 
-    if (raw instanceof Response) return assertSuccessfulAudioResponse(raw, "tts cartesia")
-    if (raw instanceof ReadableStream) {
-      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
-    }
-    if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
-    }
-    throw new Error("tts cartesia: unexpected AI response shape")
+    return assertSuccessfulAudioResponse(raw, "tts cartesia")
   }
 
   if (input.ttsModel === "dynamic-audio-gen") {
@@ -202,31 +214,9 @@ async function assertSuccessfulJsonResponse(response: Response, label: string): 
 }
 
 export async function listCartesiaVoices(env: Env): Promise<CartesiaVoiceOption[]> {
-  const gateway = (env.AI as any).gateway(AI_GATEWAY_ID)
-  const headers = {
-    "Cartesia-Version": "2024-06-10",
-    ...(env.CARTESIA_API_KEY ? { "X-API-Key": env.CARTESIA_API_KEY } : {}),
-  }
-
-  try {
-    const raw = await gateway.run({
-      provider: "cartesia",
-      endpoint: "voices",
-      method: "GET",
-      headers,
-      query: {},
-    })
-    const body = raw instanceof Response
-      ? await assertSuccessfulJsonResponse(raw, "cartesia voices")
-      : raw
-    return normalizeCartesiaVoices(body)
-  } catch (err) {
-    if (!env.CARTESIA_API_KEY) throw err
-    const baseUrl = await gateway.getUrl("cartesia")
-    const response = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/voices`, {
-      headers,
-    })
-    const body = await assertSuccessfulJsonResponse(response, "cartesia voices")
-    return normalizeCartesiaVoices(body)
-  }
+  const response = await fetch(await cartesiaGatewayUrl(env, "voices"), {
+    headers: cartesiaHeaders(env),
+  })
+  const body = await assertSuccessfulJsonResponse(response, "cartesia voices")
+  return normalizeCartesiaVoices(body)
 }
