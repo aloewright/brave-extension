@@ -23,8 +23,8 @@ function responseModelHeader(ttsModel: TtsModelMode): string {
   return TTS_MODEL
 }
 
-function defaultAudioContentType(ttsModel: TtsModelMode): string {
-  return ttsModel === "cartesia-sonic" ? "audio/wav" : "audio/mpeg"
+function defaultAudioContentType(): string {
+  return "audio/mpeg"
 }
 
 const tts = new Hono<{ Bindings: Env }>()
@@ -57,7 +57,7 @@ tts.post("/", async (c) => {
   try {
     const audio = await synthesizeSpeech(c.env, { text, speaker, ttsModel })
     const headers = new Headers(audio.headers)
-    headers.set("content-type", headers.get("content-type") || defaultAudioContentType(ttsModel))
+    headers.set("content-type", headers.get("content-type") || defaultAudioContentType())
     headers.set("x-ai-model", responseModelHeader(ttsModel))
     headers.set("x-ai-gateway", AI_GATEWAY_ID)
     return new Response(audio.body, { status: audio.status, headers })

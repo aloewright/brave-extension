@@ -65,6 +65,15 @@ export async function ocrImage(env: Env, imageBytes: Uint8Array): Promise<string
   return ((res?.description ?? res?.response) ?? "").trim()
 }
 
+async function assertSuccessfulAudioResponse(response: Response, label: string): Promise<Response> {
+  if (response.ok) return response
+  const contentType = response.headers.get("content-type") || ""
+  const body = contentType.includes("application/json")
+    ? JSON.stringify(await response.clone().json().catch(() => null))
+    : await response.clone().text().catch(() => "")
+  throw new Error(`${label}: provider returned ${response.status}${body ? ` (${body.slice(0, 500)})` : ""}`)
+}
+
 /**
  * Synthesize speech with Deepgram Aura 2 through AI Gateway "x".
  * Worker-side dynamic routes are currently broken, so this intentionally uses
@@ -93,19 +102,19 @@ export async function synthesizeSpeech(
           id: CARTESIA_TTS_VOICE_ID,
         },
         output_format: {
-          container: "wav",
-          encoding: "pcm_f32le",
+          container: "mp3",
+          encoding: "mp3",
           sample_rate: 44100,
         },
       },
     })
 
-    if (raw instanceof Response) return raw
+    if (raw instanceof Response) return assertSuccessfulAudioResponse(raw, "tts cartesia")
     if (raw instanceof ReadableStream) {
-      return new Response(raw, { headers: { "content-type": "audio/wav" } })
+      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
     }
     if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-      return new Response(raw, { headers: { "content-type": "audio/wav" } })
+      return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
     }
     throw new Error("tts cartesia: unexpected AI response shape")
   }
@@ -126,7 +135,7 @@ export async function synthesizeSpeech(
       },
     })
 
-    if (raw instanceof Response) return raw
+    if (raw instanceof Response) return assertSuccessfulAudioResponse(raw, "tts dynamic route")
     if (raw instanceof ReadableStream) {
       return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
     }
@@ -146,7 +155,7 @@ export async function synthesizeSpeech(
     { gateway: { id: AI_GATEWAY_ID }, returnRawResponse: true }
   )
 
-  if (raw instanceof Response) return raw
+  if (raw instanceof Response) return assertSuccessfulAudioResponse(raw, "tts aura")
   if (raw instanceof ReadableStream) {
     return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
   }
