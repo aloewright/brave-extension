@@ -23,6 +23,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   extensions: "puzzle-piece",
   tech: "cpu-chip",
   session: "inbox",
+  email: "inbox",
   quickInfo: "avatar",
   tasks: "list-checks",
   passwords: "lock",

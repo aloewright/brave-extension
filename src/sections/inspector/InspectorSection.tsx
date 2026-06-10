@@ -71,6 +71,12 @@ type PageImageCandidate = {
   height: number
 }
 
+type UploadedReverseImage = {
+  name: string
+  size: number
+  dataUrl: string
+}
+
 const REVERSE_IMAGE_ENGINES: ReverseImageEngine[] = [
   {
     id: "google",
@@ -79,26 +85,10 @@ const REVERSE_IMAGE_ENGINES: ReverseImageEngine[] = [
       `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}`
   },
   {
-    id: "bing",
-    label: "Bing",
-    buildUrl: (imageUrl) =>
-      `https://www.bing.com/images/search?view=detailv2&iss=sbiupload&FORM=SBIHMP&sbisrc=UrlPaste&q=${encodeURIComponent(
-        `imgurl:${imageUrl}`
-      )}`
-  },
-  {
     id: "yandex",
     label: "Yandex",
     buildUrl: (imageUrl) =>
       `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`
-  },
-  {
-    id: "baidu",
-    label: "Baidu",
-    buildUrl: (imageUrl) =>
-      `https://graph.baidu.com/details?isfromtusoupc=1&tn=pc&carousel=0&image=${encodeURIComponent(
-        imageUrl
-      )}`
   },
   {
     id: "tineye",
@@ -108,11 +98,57 @@ const REVERSE_IMAGE_ENGINES: ReverseImageEngine[] = [
   }
 ]
 
+const REVERSE_IMAGE_UPLOAD_TARGETS = [
+  { label: "Google Lens", url: "https://lens.google.com/" },
+  { label: "Bing Visual Search", url: "https://www.bing.com/images/search?view=detailv2&iss=sbiupload" },
+  { label: "Yandex Images", url: "https://yandex.com/images/" },
+  { label: "TinEye", url: "https://tineye.com/" },
+  { label: "Baidu Image Search", url: "https://graph.baidu.com/" }
+] as const
+
+const FRAGILE_IMAGE_URL_PATTERNS = [
+  /googlevideo\.com/i,
+  /blob:/i,
+  /data:/i,
+  /signature=/i,
+  /expires?=/i,
+  /x-amz-/i,
+  /token=/i,
+  /auth/i,
+  /cdn-cgi/i
+]
+
+function describeReverseImageUrlRisk(imageUrl: string): string | null {
+  if (FRAGILE_IMAGE_URL_PATTERNS.some((pattern) => pattern.test(imageUrl))) {
+    return "This image URL looks signed, private, or short-lived. Search engines may reject it; use capture fallback if providers show an error."
+  }
+
+  try {
+    const parsed = new URL(imageUrl)
+    const extension = parsed.pathname.split(".").pop()?.toLowerCase()
+    if (extension && !["avif", "gif", "jpeg", "jpg", "png", "webp"].includes(extension)) {
+      return "This URL does not look like a direct image file. If providers fail, use capture fallback."
+    }
+  } catch {
+    return "This is not a valid image URL. Use capture fallback or paste a public image URL."
+  }
+
+  return null
+}
+
+function formatUploadedImageSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function ReverseImageSearchPanel() {
   const [images, setImages] = useState<PageImageCandidate[]>([])
   const [selectedImageUrl, setSelectedImageUrl] = useState("")
   const [manualUrl, setManualUrl] = useState("")
+  const [uploadedImage, setUploadedImage] = useState<UploadedReverseImage | null>(null)
   const mountedRef = useRef(true)
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [enabledEngines, setEnabledEngines] = useState<ReverseImageEngineId[]>(
     REVERSE_IMAGE_ENGINES.map((engine) => engine.id)
   )
@@ -142,6 +178,7 @@ function ReverseImageSearchPanel() {
   }, [])
 
   const searchUrl = manualUrl.trim() || selectedImageUrl
+  const urlWarning = searchUrl ? describeReverseImageUrlRisk(searchUrl) : null
   const selectedEngines = REVERSE_IMAGE_ENGINES.filter((engine) =>
     enabledEngines.includes(engine.id)
   )
@@ -152,6 +189,96 @@ function ReverseImageSearchPanel() {
         ? current.filter((id) => id !== engineId)
         : [...current, engineId]
     )
+  }
+
+  const openReverseImageUploadPages = async (sourceLabel: string) => {
+    const results = await Promise.allSettled(
+      REVERSE_IMAGE_UPLOAD_TARGETS.map((target) =>
+        chrome.tabs.create({ active: false, url: target.url })
+      )
+    )
+    const opened = results.filter((result) => result.status === "fulfilled").length
+    setStatus(
+      `Opened ${opened} upload page${opened === 1 ? "" : "s"}. Upload ${sourceLabel} in the provider page.`
+    )
+  }
+
+  const handleUploadedImageFile = (file: File | null) => {
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setStatus("Choose an image file")
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        setStatus("Could not read the image file")
+        return
+      }
+      setUploadedImage({
+        dataUrl: reader.result,
+        name: file.name,
+        size: file.size
+      })
+      setStatus(`Ready to search uploaded image: ${file.name}`)
+    }
+    reader.onerror = () => setStatus("Could not read the image file")
+    reader.readAsDataURL(file)
+  }
+
+  const saveVisibleCaptureAndOpenUploadPages = async () => {
+    setStatus("Capturing the visible page for upload fallback...")
+
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.windowId) {
+        setStatus("Could not find the active tab to capture")
+        return
+      }
+
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" }, (dataUrl) => {
+        const captureError = chrome.runtime.lastError
+        if (captureError || !dataUrl) {
+          setStatus(`Capture failed: ${captureError?.message || "no image data returned"}`)
+          return
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+        chrome.downloads.download(
+          {
+            filename: `reverse-image-capture-${timestamp}.png`,
+            saveAs: false,
+            url: dataUrl
+          },
+          () => {
+            const downloadError = chrome.runtime.lastError
+            if (downloadError) {
+              setStatus(`Capture save failed: ${downloadError.message}`)
+              return
+            }
+
+            void openReverseImageUploadPages("the downloaded PNG")
+          }
+        )
+      })
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Capture fallback failed")
+    }
+  }
+
+  const copySelectedImageUrl = async () => {
+    if (!searchUrl) {
+      setStatus("Choose an image or paste a URL first")
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(searchUrl)
+      setStatus("Copied the selected image URL")
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not copy the selected image URL")
+    }
   }
 
   const openReverseSearches = () => {
@@ -183,7 +310,7 @@ function ReverseImageSearchPanel() {
             Reverse image search
           </p>
           <p className="text-[11px] text-fg/40 mt-0.5">
-            Verify a page image across major image engines.
+            URL search needs a public direct image. If providers fail, use capture fallback.
           </p>
         </div>
         <button
@@ -194,13 +321,63 @@ function ReverseImageSearchPanel() {
         </button>
       </div>
 
+      <div className="flex items-center gap-1.5">
+        <input
+          className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1.5 text-[11px] text-fg outline-none placeholder:text-fg/25 focus:border-chart-1/70"
+          onChange={(event) => setManualUrl(event.target.value)}
+          placeholder="Paste image URL, or choose a detected image below"
+          type="url"
+          value={manualUrl}
+        />
+        <button
+          className="shrink-0 rounded border border-border bg-card/60 px-2 py-1 text-[10px] text-fg/65 hover:bg-card hover:text-fg"
+          onClick={() => uploadInputRef.current?.click()}
+          type="button">
+          Upload
+        </button>
+      </div>
+
       <input
-        className="w-full rounded border border-border bg-bg px-2 py-1.5 text-[11px] text-fg outline-none placeholder:text-fg/25 focus:border-chart-1/70"
-        onChange={(event) => setManualUrl(event.target.value)}
-        placeholder="Paste image URL, or choose a detected image below"
-        type="url"
-        value={manualUrl}
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          handleUploadedImageFile(event.currentTarget.files?.[0] ?? null)
+          event.currentTarget.value = ""
+        }}
+        ref={uploadInputRef}
+        type="file"
       />
+
+      {uploadedImage && (
+        <button
+          className="rounded bg-chart-1 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-chart-1/90"
+          onClick={() => void openReverseImageUploadPages(uploadedImage.name)}
+          type="button">
+          Search uploaded image
+        </button>
+      )}
+
+      {uploadedImage && (
+        <div className="flex items-center gap-2 rounded border border-border/70 bg-card/35 p-2">
+          <img
+            alt=""
+            className="h-10 w-10 rounded object-cover"
+            src={uploadedImage.dataUrl}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[11px] text-fg/80">{uploadedImage.name}</div>
+            <div className="text-[10px] text-fg/35">
+              {formatUploadedImageSize(uploadedImage.size)}
+            </div>
+          </div>
+          <button
+            className="text-[10px] text-fg/35 hover:text-fg/70"
+            onClick={() => setUploadedImage(null)}
+            type="button">
+            Clear
+          </button>
+        </div>
+      )}
 
       {images.length > 0 ? (
         <select
@@ -239,13 +416,32 @@ function ReverseImageSearchPanel() {
         })}
       </div>
 
+      {urlWarning && (
+        <div className="rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-[10px] text-warning">
+          {urlWarning}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <button
-          className="rounded bg-chart-1 px-2.5 py-1.5 text-[11px] font-medium text-bg hover:bg-chart-1/90 disabled:cursor-not-allowed disabled:opacity-45"
+          className="rounded bg-chart-1 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-chart-1/90 disabled:cursor-not-allowed disabled:opacity-45"
           disabled={!searchUrl}
           onClick={openReverseSearches}
           type="button">
           Search selected engines
+        </button>
+        <button
+          className="rounded border border-border bg-card/60 px-2.5 py-1.5 text-[11px] text-fg/60 hover:bg-card hover:text-fg disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={!searchUrl}
+          onClick={() => void copySelectedImageUrl()}
+          type="button">
+          Copy URL
+        </button>
+        <button
+          className="rounded border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning hover:bg-warning/15"
+          onClick={() => void saveVisibleCaptureAndOpenUploadPages()}
+          type="button">
+          Capture fallback
         </button>
         {status && <span className="min-w-0 flex-1 truncate text-[10px] text-fg/35">{status}</span>}
       </div>

@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { LeoIcon } from "../../components/leo"
 import { MarkdownText } from "../../components/MarkdownText"
+import { addSessionSnippet } from "../../lib/session-snippets"
 import { ulid } from "../../lib/ulid"
 import { getSettings } from "../../storage"
 import {
@@ -358,11 +359,16 @@ export function AgentChatSection({ active = true }: { active?: boolean }) {
           <AgentMessageRow key={m.id} message={m} />
         ))}
         {streaming !== null && (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm">
-              {streaming ? <MarkdownText content={streaming} /> : "…"}
-            </div>
-          </div>
+          <AgentMessageRow
+            message={{
+              id: "streaming",
+              session_id: sessionIdRef.current ?? "",
+              role: "assistant",
+              content: streaming || "…",
+              model: modelId || null,
+              created_at: Date.now()
+            }}
+          />
         )}
       </div>
 
@@ -395,19 +401,87 @@ export function AgentChatSection({ active = true }: { active?: boolean }) {
 }
 
 function AgentMessageRow({ message }: { message: AgentMessage }) {
+  const [actionStatus, setActionStatus] = useState("")
+  const isUser = message.role === "user"
+  const content = message.content || ""
+  const canAct = content.trim().length > 0 && content !== "…"
+
+  const flashStatus = (next: string) => {
+    setActionStatus(next)
+    window.setTimeout(() => setActionStatus(""), 1200)
+  }
+
+  const copyMessage = async () => {
+    if (!canAct) return
+    try {
+      await navigator.clipboard.writeText(content)
+      flashStatus("Copied")
+    } catch {
+      flashStatus("Copy failed")
+    }
+  }
+
+  const saveMessageSnippet = async () => {
+    if (!canAct) return
+    try {
+      await addSessionSnippet({
+        text: content,
+        sourceUrl: `agent-chat://${message.session_id || "session"}/${message.id}`,
+        sourceTitle: `Agent chat ${message.role} message`
+      })
+      flashStatus("Saved")
+    } catch {
+      flashStatus("Save failed")
+    }
+  }
+
+  const actions = (
+    <div className={`mt-1 flex items-center gap-1 ${isUser ? "justify-end" : "justify-start"}`}>
+      <button
+        type="button"
+        disabled={!canAct}
+        onClick={() => void copyMessage()}
+        className="inline-flex h-5 items-center gap-1 rounded border border-default/70 bg-bg/70 px-1.5 text-[10px] text-fg/45 transition hover:bg-accent/40 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
+        title="Copy message"
+        aria-label="Copy message">
+        <LeoIcon name="copy" size={11} />
+        Copy
+      </button>
+      <button
+        type="button"
+        disabled={!canAct}
+        onClick={() => void saveMessageSnippet()}
+        className="inline-flex h-5 items-center gap-1 rounded border border-default/70 bg-bg/70 px-1.5 text-[10px] text-fg/45 transition hover:bg-accent/40 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
+        title="Save message as session snippet"
+        aria-label="Save message as session snippet">
+        <LeoIcon name="save" size={11} />
+        Snip
+      </button>
+      {actionStatus && (
+        <span className="text-[10px] text-fg/35">{actionStatus}</span>
+      )}
+    </div>
+  )
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] px-3 py-2 rounded bg-primary/20 text-fg text-sm whitespace-pre-wrap">
-          {message.content}
+        <div className="max-w-[80%]">
+          <div className="px-3 py-2 rounded bg-primary/20 text-fg text-sm whitespace-pre-wrap">
+            {message.content}
+          </div>
+          {actions}
         </div>
       </div>
     )
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] px-3 py-2 rounded bg-card/30 text-fg text-sm">
-        <MarkdownText content={message.content} />
+      <div className="max-w-[80%]">
+        <div className="px-3 py-2 rounded bg-card/30 text-fg text-sm">
+          <MarkdownText content={message.content} />
+        </div>
+        {actions}
       </div>
     </div>
   )

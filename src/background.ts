@@ -23,6 +23,7 @@ import {
 import {
   buildMailTwoFactorListUrl,
   buildMailTwoFactorThreadUrl,
+  extractMailTwoFactorCodesFromText,
   findBestMailTwoFactorCode,
   MAIL_TWO_FACTOR_API_BASE,
   type MailThreadDetail,
@@ -76,6 +77,7 @@ import {
   fetchCalTasksViaPageContext,
   type CalTasksTabFetchResult,
 } from "./background/cal-tasks-proxy";
+import { fetchMailViaPageContext } from "./background/mail-proxy";
 import { importVideoUrl } from "./background/video-import";
 import {
   parseProgram,
@@ -166,13 +168,11 @@ async function getMailFlyPmCookieHeader(): Promise<string | null> {
 // fetch) is permitted to set the Cookie header. We add a temporary session rule
 // scoped to mail.fly.pm/api for the duration of the fetch, then remove it.
 const MAIL_TWO_FACTOR_DNR_RULE_ID = 920_417;
-async function withMailFlyPmCookieHeader<T>(
-  cookieHeader: string,
-  run: () => Promise<T>,
-): Promise<T> {
-  const dnr = chrome.declarativeNetRequest;
-  if (!dnr?.updateSessionRules) return run();
-  const rule: chrome.declarativeNetRequest.Rule = {
+let mailFlyPmCookieRuleUsers = 0;
+let mailFlyPmCookieRuleMutation: Promise<void> = Promise.resolve();
+
+function createMailFlyPmCookieRule(cookieHeader: string): chrome.declarativeNetRequest.Rule {
+  return {
     id: MAIL_TWO_FACTOR_DNR_RULE_ID,
     priority: 1,
     action: {
@@ -189,24 +189,68 @@ async function withMailFlyPmCookieHeader<T>(
       urlFilter: "||mail.fly.pm/api/",
       resourceTypes: [
         "xmlhttprequest" as chrome.declarativeNetRequest.ResourceType,
+        "other" as chrome.declarativeNetRequest.ResourceType,
       ],
     },
   };
+}
+
+function mutateMailFlyPmCookieRule<T>(action: () => Promise<T>): Promise<T> {
+  const run = mailFlyPmCookieRuleMutation.then(action, action);
+  mailFlyPmCookieRuleMutation = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function installMailFlyPmCookieRule(cookieHeader: string): Promise<boolean> {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) return false;
+
   try {
-    await dnr.updateSessionRules({
-      removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
-      addRules: [rule],
+    await mutateMailFlyPmCookieRule(async () => {
+      if (mailFlyPmCookieRuleUsers === 0) {
+        await dnr.updateSessionRules({
+          removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
+          addRules: [createMailFlyPmCookieRule(cookieHeader)],
+        });
+      }
+      mailFlyPmCookieRuleUsers += 1;
     });
+    return true;
   } catch (err) {
     safeRuntimeWarning("failed to register mail.fly.pm cookie rule", err);
+    return false;
+  }
+}
+
+async function releaseMailFlyPmCookieRule() {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) return;
+
+  await mutateMailFlyPmCookieRule(async () => {
+    mailFlyPmCookieRuleUsers = Math.max(0, mailFlyPmCookieRuleUsers - 1);
+    if (mailFlyPmCookieRuleUsers === 0) {
+      await dnr.updateSessionRules({
+        removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
+      });
+    }
+  }).catch((err) => {
+    safeRuntimeWarning("failed to remove mail.fly.pm cookie rule", err);
+  });
+}
+
+async function withMailFlyPmCookieHeader<T>(
+  cookieHeader: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const installed = await installMailFlyPmCookieRule(cookieHeader);
+  if (!installed) {
     return run();
   }
+
   try {
     return await run();
   } finally {
-    await dnr
-      .updateSessionRules({ removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID] })
-      .catch(() => {});
+    await releaseMailFlyPmCookieRule();
   }
 }
 let nativePort: chrome.runtime.Port | null = null;
@@ -229,6 +273,22 @@ type MailTwoFactorResponse = {
   source?: "mail.fly.pm";
   threadId?: string;
   error?: string;
+};
+type MailInboxSidebarItem = {
+  id: string;
+  subject: string;
+  participants: string;
+  snippet: string;
+  receivedAt?: number;
+  codes: string[];
+};
+type MailActivitySidebarItem = {
+  id: string;
+  type: "open" | "click" | "event";
+  email: string;
+  subject: string;
+  url?: string;
+  at?: number;
 };
 const mailTwoFactorCache = new Map<
   string,
@@ -1183,6 +1243,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "MAIL_INBOX_LIST_REQUEST") {
+    getMailInboxSidebarItems()
+      .then((items) => sendResponse({ ok: true, items }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          items: [],
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
+  if (message.type === "MAIL_ACTIVITY_LIST_REQUEST") {
+    getMailActivitySidebarItems()
+      .then((items) => sendResponse({ ok: true, items }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          items: [],
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
   if (message.type === "TECH_DETECTED") {
     cachedTech.set(message.hostname, { techs: message.techs, ts: Date.now() });
     sendResponse({ ok: true });
@@ -1752,6 +1838,106 @@ async function getMailTwoFactorCode(pageUrl: string): Promise<MailTwoFactorRespo
   return response;
 }
 
+async function getMailInboxSidebarItems(): Promise<MailInboxSidebarItem[]> {
+  const cookieHeader = await getMailFlyPmCookieHeader();
+  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
+  const headers = { accept: "application/json" };
+  return withMailFlyPmCookieHeader(cookieHeader, () =>
+    fetchMailInboxSidebarItemsAuthed(headers),
+  );
+}
+
+async function fetchMailInboxSidebarItemsAuthed(
+  headers: { accept: string },
+): Promise<MailInboxSidebarItem[]> {
+  const list = await fetchMailJson<unknown>(buildMailThreadsListUrl("inbox", 14), headers);
+  const summaries = normalizeMailThreadSummaries(list).slice(0, 14);
+  if (!summaries.length) return [];
+
+  const details = await Promise.all(
+    summaries.map((summary) =>
+      fetchMailJson<MailThreadDetail>(buildMailTwoFactorThreadUrl(summary.id), headers)
+        .catch(() => null),
+    ),
+  );
+
+  return summaries.map((summary, index) => {
+    const detail = details[index];
+    const messages = Array.isArray(detail?.messages) ? detail.messages : [];
+    const threadSubject =
+      mailStringValue(detail?.thread?.subject) || mailStringValue(summary.subject);
+    const text = [
+      threadSubject,
+      stringifyMailParticipants(detail?.thread?.participants ?? summary.participants),
+      summary.snippet,
+      ...messages.flatMap((message) => [
+        message.subject,
+        message.fromName,
+        message.fromAddr,
+        message.textBody,
+      ]),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const newestMessage = messages
+      .slice()
+      .sort((a, b) => timestampMs(b.sentAt) - timestampMs(a.sentAt))[0];
+    const snippet =
+      mailStringValue(summary.snippet) ||
+      truncateMailSnippet(mailStringValue(newestMessage?.textBody));
+    const receivedAt =
+      timestampMs(summary.lastMessageAt) ||
+      timestampMs(newestMessage?.sentAt) ||
+      undefined;
+
+    return {
+      id: summary.id,
+      subject: threadSubject,
+      participants: stringifyMailParticipants(summary.participants),
+      snippet,
+      receivedAt,
+      codes: extractMailTwoFactorCodesFromText(text),
+    };
+  });
+}
+
+async function getMailActivitySidebarItems(): Promise<MailActivitySidebarItem[]> {
+  const cookieHeader = await getMailFlyPmCookieHeader();
+  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
+  const headers = { accept: "application/json" };
+  return withMailFlyPmCookieHeader(cookieHeader, () =>
+    fetchMailActivitySidebarItemsAuthed(headers),
+  );
+}
+
+async function fetchMailActivitySidebarItemsAuthed(
+  headers: { accept: string },
+): Promise<MailActivitySidebarItem[]> {
+  const endpoints = [
+    "/api/v1/activity",
+    "/api/v1/email-activity",
+    "/api/v1/tracking/activity",
+    "/api/v1/events",
+  ];
+  let lastError: Error | null = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const url = new URL(endpoint, MAIL_TWO_FACTOR_API_BASE);
+      url.searchParams.set("limit", "20");
+      const payload = await fetchMailJson<unknown>(url.toString(), headers);
+      const normalized = normalizeMailActivityItems(payload);
+      return normalized.slice(0, 20);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  if (lastError) throw new Error("mail activity endpoint unavailable");
+  return [];
+}
+
 function mailTwoFactorCacheKey(pageUrl: string) {
   try {
     return new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
@@ -1840,23 +2026,129 @@ async function fetchLatestMailTwoFactorCodeAuthed(
 
 const MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS = 30 * 60 * 1000;
 
+function buildMailThreadsListUrl(folder: string, limit: number) {
+  const url = new URL("/api/v1/threads", MAIL_TWO_FACTOR_API_BASE);
+  url.searchParams.set("folder", folder);
+  url.searchParams.set("limit", String(limit));
+  return url.toString();
+}
+
 async function fetchMailJson<T>(
   url: string,
   headers: { accept: string },
 ): Promise<T> {
+  const parsedUrl = new URL(url);
+  if (parsedUrl.origin === MAIL_TWO_FACTOR_API_BASE) {
+    const pageResult = await fetchMailViaPageContext({
+      path: `${parsedUrl.pathname}${parsedUrl.search}`,
+      method: "GET",
+      headers,
+    }).catch((err) => {
+      safeRuntimeWarning("failed to fetch mail.fly.pm via page context", err);
+      return null;
+    });
+
+    if (pageResult) {
+      if (!pageResult.ok) throw new Error(mailFlyPmStatusError(pageResult.status));
+      return parseMailJsonText<T>(pageResult.text);
+    }
+  }
+
   const response = await fetch(url, {
     method: "GET",
     headers,
     credentials: "include",
   });
-  if (!response.ok) throw new Error(`mail.fly.pm returned ${response.status}`);
+  if (!response.ok) throw new Error(mailFlyPmStatusError(response.status));
   return response.json() as Promise<T>;
+}
+
+function mailFlyPmStatusError(status: number) {
+  if (status === 401) {
+    return "mail.fly.pm returned 401; open mail.fly.pm, confirm you are signed in, then refresh Email"
+  }
+  return `mail.fly.pm returned ${status}`;
+}
+
+function parseMailJsonText<T>(text: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("mail.fly.pm returned a non-JSON response; confirm you are signed in to Fly Mail");
+  }
 }
 
 function isMailThreadSummary(value: unknown): value is MailThreadSummary {
   if (!value || typeof value !== "object") return false;
   const summary = value as MailThreadSummary;
   return typeof summary.id === "string" && summary.id.length > 0;
+}
+
+function normalizeMailThreadSummaries(value: unknown): MailThreadSummary[] {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const candidates = [
+    value,
+    record.items,
+    record.threads,
+    record.results,
+    record.data,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.filter(isMailThreadSummary);
+  }
+  return [];
+}
+
+function normalizeMailActivityItems(value: unknown): MailActivitySidebarItem[] {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const candidates = [
+    value,
+    record.items,
+    record.events,
+    record.activity,
+    record.results,
+    record.data,
+  ];
+  const list = candidates.find(Array.isArray);
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .map((item, index) => {
+      const event = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const rawType = mailStringValue(event.type || event.event || event.name).toLowerCase();
+      const type: MailActivitySidebarItem["type"] = rawType.includes("click")
+        ? "click"
+        : rawType.includes("open")
+        ? "open"
+        : "event";
+      const at =
+        timestampMs(event.at as string | number | null | undefined) ||
+        timestampMs(event.createdAt as string | number | null | undefined) ||
+        timestampMs(event.timestamp as string | number | null | undefined) ||
+        timestampMs(event.occurredAt as string | number | null | undefined) ||
+        undefined;
+      return {
+        id: mailStringValue(event.id) || `${type}-${index}-${at || "now"}`,
+        type,
+        email: mailStringValue(event.email || event.recipient || event.recipientEmail || event.to),
+        subject: mailStringValue(event.subject || event.messageSubject || event.campaign),
+        url: mailStringValue(event.url || event.link || event.linkUrl || event.href) || undefined,
+        at,
+      };
+    })
+    .filter((item) => item.email || item.subject || item.url);
+}
+
+function stringifyMailParticipants(value: string | string[] | null | undefined) {
+  return Array.isArray(value) ? value.join(", ") : mailStringValue(value);
+}
+
+function mailStringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function truncateMailSnippet(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 function timestampMs(value: string | number | null | undefined) {
