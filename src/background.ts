@@ -2444,6 +2444,7 @@ async function playTtsStream(input: {
   text: string;
   ttsModel?: string;
   speaker?: string;
+  cartesiaVoiceId?: string;
   playbackRate: number;
   apiUrl: string;
   apiToken: string;
@@ -2487,6 +2488,7 @@ async function speakTextWithTts(text: string) {
       text,
       ttsModel: settings.ttsModel,
       speaker: settings.ttsVoice,
+      cartesiaVoiceId: settings.ttsCartesiaVoiceId,
       playbackRate: clampTtsPlaybackRate(settings.ttsPlaybackRate),
       apiUrl,
       apiToken,

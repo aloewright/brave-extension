@@ -110,6 +110,7 @@ export interface Settings {
   sidebarPruneAfterSync: boolean
   ttsModel: TtsModel
   ttsVoice: TtsVoice
+  ttsCartesiaVoiceId: string
   ttsPlaybackRate: number
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosSyncEnabled: boolean
@@ -203,6 +204,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarPruneAfterSync: false,
   ttsModel: "frontier-aura",
   ttsVoice: "hyperion",
+  ttsCartesiaVoiceId: "694f9389-aac1-45b6-b726-9d9369183238",
   ttsPlaybackRate: 1,
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",

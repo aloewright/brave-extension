@@ -12,6 +12,8 @@ export interface Env {
   /** Cloudflare Access service token for sidebar-api → cobalt. */
   COBALT_ACCESS_CLIENT_ID?: string
   COBALT_ACCESS_CLIENT_SECRET?: string
+  /** Optional direct Cartesia token fallback for provider-native metadata endpoints. */
+  CARTESIA_API_KEY?: string
 }
 
 // Workers AI model ids used by the Worker.

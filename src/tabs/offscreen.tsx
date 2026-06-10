@@ -51,6 +51,7 @@ type TtsPlayMsg = {
   text: string;
   ttsModel?: string;
   speaker?: string;
+  cartesiaVoiceId?: string;
   playbackRate?: number;
   apiUrl: string;
   apiToken: string;
@@ -217,7 +218,12 @@ async function fetchTtsAudioChunk(msg: TtsPlayMsg, text: string): Promise<Blob> 
       "content-type": "application/json",
       "x-sidebar-token": msg.apiToken,
     },
-    body: JSON.stringify({ text, speaker: msg.speaker, ttsModel: msg.ttsModel }),
+    body: JSON.stringify({
+      text,
+      speaker: msg.speaker,
+      ttsModel: msg.ttsModel,
+      cartesiaVoiceId: msg.cartesiaVoiceId,
+    }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;

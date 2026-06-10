@@ -10,6 +10,12 @@ import {
 } from "../lib/capture-destination"
 import { getAutoPipEnabled, setAutoPipEnabled } from "../lib/pip/auto"
 
+interface CartesiaVoiceOption {
+  id: string
+  name: string
+  description?: string | null
+}
+
 export function SettingsPanel({
   settings,
   onUpdate,
@@ -809,6 +815,9 @@ function TtsSettingsSection({
   onUpdate: (partial: Partial<Settings>) => void
 }) {
   const [lastError, setLastError] = useState<TtsLastError | null>(null)
+  const [cartesiaVoices, setCartesiaVoices] = useState<CartesiaVoiceOption[]>([])
+  const [cartesiaVoicesLoading, setCartesiaVoicesLoading] = useState(false)
+  const [cartesiaVoicesError, setCartesiaVoicesError] = useState<string | null>(null)
 
   useEffect(() => {
     void chrome.storage.local.get(TTS_LAST_ERROR_KEY).then((result) => {
@@ -824,6 +833,47 @@ function TtsSettingsSection({
     chrome.storage.onChanged.addListener(listener)
     return () => chrome.storage.onChanged?.removeListener(listener)
   }, [])
+
+  useEffect(() => {
+    if (settings.ttsModel !== "cartesia-sonic") return
+    const apiUrl = settings.sidebarApiUrl?.trim()
+    const apiToken = settings.sidebarApiToken?.trim()
+    if (!apiUrl || !apiToken) {
+      setCartesiaVoices([])
+      setCartesiaVoicesError("Sidebar API URL/token required to load Cartesia voices.")
+      return
+    }
+    const controller = new AbortController()
+    setCartesiaVoicesLoading(true)
+    setCartesiaVoicesError(null)
+    void fetch(`${apiUrl.replace(/\/+$/, "")}/api/tts/voices`, {
+      headers: { "x-sidebar-token": apiToken },
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null) as { error?: { message?: string } } | null
+          throw new Error(body?.error?.message || `Cartesia voices request failed: ${res.status}`)
+        }
+        return res.json() as Promise<{ voices?: CartesiaVoiceOption[] }>
+      })
+      .then((body) => {
+        const voices = Array.isArray(body.voices) ? body.voices : []
+        setCartesiaVoices(voices)
+        if (voices.length > 0 && !voices.some((voice) => voice.id === settings.ttsCartesiaVoiceId)) {
+          onUpdate({ ttsCartesiaVoiceId: voices[0].id })
+        }
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        setCartesiaVoices([])
+        setCartesiaVoicesError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCartesiaVoicesLoading(false)
+      })
+    return () => controller.abort()
+  }, [settings.ttsModel, settings.sidebarApiUrl, settings.sidebarApiToken, settings.ttsCartesiaVoiceId, onUpdate])
 
   return (
     <div>
@@ -848,20 +898,53 @@ function TtsSettingsSection({
             {TTS_MODEL_OPTIONS.find((model) => model.value === settings.ttsModel)?.hint}
           </p>
         </div>
-        <div>
-          <label className="text-[10px] text-fg/50 mb-1 block">Voice</label>
-          <select
-            value={settings.ttsVoice}
-            onChange={(e) => onUpdate({ ttsVoice: e.target.value as TtsVoice })}
-            className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg outline-none focus:border-primary/50"
-          >
-            {TTS_VOICE_OPTIONS.map((voice) => (
-              <option key={voice.value} value={voice.value}>
-                {voice.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {settings.ttsModel === "cartesia-sonic" ? (
+          <div>
+            <label className="text-[10px] text-fg/50 mb-1 block">Cartesia voice</label>
+            <select
+              value={settings.ttsCartesiaVoiceId}
+              onChange={(e) => onUpdate({ ttsCartesiaVoiceId: e.target.value })}
+              disabled={cartesiaVoicesLoading || cartesiaVoices.length === 0}
+              className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg outline-none focus:border-primary/50 disabled:opacity-60"
+            >
+              {cartesiaVoices.length === 0 ? (
+                <option value={settings.ttsCartesiaVoiceId}>
+                  {cartesiaVoicesLoading ? "Loading Cartesia voices..." : "Default Cartesia voice"}
+                </option>
+              ) : (
+                cartesiaVoices.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.name || voice.id}
+                  </option>
+                ))
+              )}
+            </select>
+            {cartesiaVoicesError ? (
+              <p className="mt-1 text-[9px] text-error/90 leading-snug break-words">{cartesiaVoicesError}</p>
+            ) : (
+              <p className="mt-1 text-[9px] text-fg/45 leading-snug">
+                {cartesiaVoicesLoading
+                  ? "Loading available Cartesia voices..."
+                  : "Voices are loaded from Cartesia through the sidebar Worker."}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div>
+            <label className="text-[10px] text-fg/50 mb-1 block">Voice</label>
+            <select
+              value={settings.ttsVoice}
+              onChange={(e) => onUpdate({ ttsVoice: e.target.value as TtsVoice })}
+              className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg outline-none focus:border-primary/50"
+            >
+              {TTS_VOICE_OPTIONS.map((voice) => (
+                <option key={voice.value} value={voice.value}>
+                  {voice.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="text-[10px] text-fg/50 mb-1 block">Playback speed</label>
           <input

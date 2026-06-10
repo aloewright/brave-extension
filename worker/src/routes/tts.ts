@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { synthesizeSpeech } from "../ai"
+import { listCartesiaVoices, synthesizeSpeech } from "../ai"
 import { AI_GATEWAY_ID, CARTESIA_TTS_MODEL, TTS_DYNAMIC_MODEL, TTS_MODEL, type Env, type TtsModelMode } from "../env"
 
 const MAX_TTS_CHARS = 5_000
@@ -9,7 +9,10 @@ interface TtsBody {
   text?: string
   speaker?: string
   ttsModel?: string
+  cartesiaVoiceId?: string
 }
+
+const CARTESIA_VOICE_ID_RE = /^[a-zA-Z0-9_-]{2,}(-[a-zA-Z0-9_-]{2,})*$/
 
 function normalizeTtsModel(value: unknown): TtsModelMode {
   if (value === "dynamic-audio-gen") return "dynamic-audio-gen"
@@ -33,13 +36,17 @@ tts.post("/", async (c) => {
   const body = await c.req.json<TtsBody>().catch(() => null)
   const text = typeof body?.text === "string" ? body.text.trim() : ""
   const speaker = typeof body?.speaker === "string" ? body.speaker.trim() : undefined
+  const cartesiaVoiceId = typeof body?.cartesiaVoiceId === "string" ? body.cartesiaVoiceId.trim() : undefined
   const ttsModel = normalizeTtsModel(body?.ttsModel)
 
   if (!text) {
     return c.json({ error: { code: "bad_request", message: "text required" } }, 400)
   }
-  if (speaker && !ALLOWED_SPEAKERS.has(speaker)) {
+  if (ttsModel !== "cartesia-sonic" && speaker && !ALLOWED_SPEAKERS.has(speaker)) {
     return c.json({ error: { code: "bad_request", message: "unsupported speaker" } }, 400)
+  }
+  if (ttsModel === "cartesia-sonic" && cartesiaVoiceId && !CARTESIA_VOICE_ID_RE.test(cartesiaVoiceId)) {
+    return c.json({ error: { code: "bad_request", message: "unsupported Cartesia voice id" } }, 400)
   }
   if (text.length > MAX_TTS_CHARS) {
     return c.json(
@@ -55,7 +62,11 @@ tts.post("/", async (c) => {
   }
 
   try {
-    const audio = await synthesizeSpeech(c.env, { text, speaker, ttsModel })
+    const audio = await synthesizeSpeech(c.env, {
+      text,
+      speaker: ttsModel === "cartesia-sonic" ? cartesiaVoiceId : speaker,
+      ttsModel,
+    })
     const headers = new Headers(audio.headers)
     headers.set("content-type", headers.get("content-type") || defaultAudioContentType())
     headers.set("x-ai-model", responseModelHeader(ttsModel))
@@ -68,6 +79,24 @@ tts.post("/", async (c) => {
         error: {
           code: "gateway_error",
           message: `AI gateway TTS call failed: ${msg}`,
+        },
+      },
+      502,
+    )
+  }
+})
+
+tts.get("/voices", async (c) => {
+  try {
+    const voices = await listCartesiaVoices(c.env)
+    return c.json({ voices })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return c.json(
+      {
+        error: {
+          code: "gateway_error",
+          message: `Cartesia voices call failed: ${msg}`,
         },
       },
       502,

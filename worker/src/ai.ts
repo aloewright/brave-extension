@@ -99,7 +99,7 @@ export async function synthesizeSpeech(
         model_id: CARTESIA_TTS_MODEL,
         voice: {
           mode: "id",
-          id: CARTESIA_TTS_VOICE_ID,
+          id: input.speaker || CARTESIA_TTS_VOICE_ID,
         },
         output_format: {
           container: "mp3",
@@ -160,4 +160,73 @@ export async function synthesizeSpeech(
     return new Response(raw, { headers: { "content-type": "audio/mpeg" } })
   }
   throw new Error("tts: unexpected AI response shape")
+}
+
+export interface CartesiaVoiceOption {
+  id: string
+  name: string
+  description?: string | null
+}
+
+function normalizeCartesiaVoices(raw: unknown): CartesiaVoiceOption[] {
+  const root = raw && typeof raw === "object" ? raw as Record<string, unknown> : {}
+  const list = Array.isArray(root.voices)
+    ? root.voices
+    : Array.isArray(root.data)
+      ? root.data
+      : Array.isArray(raw)
+        ? raw
+        : []
+  return list
+    .map((item) => {
+      const voice = item && typeof item === "object" ? item as Record<string, unknown> : {}
+      const id = typeof voice.id === "string"
+        ? voice.id
+        : typeof voice.voice_id === "string"
+          ? voice.voice_id
+          : ""
+      const name = typeof voice.name === "string" ? voice.name : id
+      const description = typeof voice.description === "string" ? voice.description : null
+      return id ? { id, name, description } : null
+    })
+    .filter((voice): voice is CartesiaVoiceOption => Boolean(voice))
+}
+
+async function assertSuccessfulJsonResponse(response: Response, label: string): Promise<unknown> {
+  if (response.ok) return response.json()
+  const contentType = response.headers.get("content-type") || ""
+  const body = contentType.includes("application/json")
+    ? JSON.stringify(await response.clone().json().catch(() => null))
+    : await response.clone().text().catch(() => "")
+  throw new Error(`${label}: provider returned ${response.status}${body ? ` (${body.slice(0, 500)})` : ""}`)
+}
+
+export async function listCartesiaVoices(env: Env): Promise<CartesiaVoiceOption[]> {
+  const gateway = (env.AI as any).gateway(AI_GATEWAY_ID)
+  const headers = {
+    "Cartesia-Version": "2024-06-10",
+    ...(env.CARTESIA_API_KEY ? { "X-API-Key": env.CARTESIA_API_KEY } : {}),
+  }
+
+  try {
+    const raw = await gateway.run({
+      provider: "cartesia",
+      endpoint: "voices",
+      method: "GET",
+      headers,
+      query: {},
+    })
+    const body = raw instanceof Response
+      ? await assertSuccessfulJsonResponse(raw, "cartesia voices")
+      : raw
+    return normalizeCartesiaVoices(body)
+  } catch (err) {
+    if (!env.CARTESIA_API_KEY) throw err
+    const baseUrl = await gateway.getUrl("cartesia")
+    const response = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/voices`, {
+      headers,
+    })
+    const body = await assertSuccessfulJsonResponse(response, "cartesia voices")
+    return normalizeCartesiaVoices(body)
+  }
 }

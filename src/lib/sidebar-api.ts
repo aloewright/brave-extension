@@ -140,7 +140,8 @@ export class ApiError extends Error {
 export interface SidebarApiClient {
   health: () => Promise<{ ok: boolean; version: string; deployedAt: string }>
   tts: {
-    speak: (payload: { text: string; speaker?: string; ttsModel?: string }) => Promise<Blob>
+    speak: (payload: { text: string; speaker?: string; ttsModel?: string; cartesiaVoiceId?: string }) => Promise<Blob>
+    voices: () => Promise<{ voices: Array<{ id: string; name: string; description?: string | null }> }>
   }
   search: (query: string, opts?: { types?: ResourceType[]; limit?: number }) => Promise<{ results: SearchHit[] }>
   conversations: {
@@ -246,7 +247,8 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
         blobRequest("/api/tts", {
           method: "POST",
           body: JSON.stringify(payload)
-        })
+        }),
+      voices: () => jsonRequest("/api/tts/voices")
     },
     search: (query, opts = {}) =>
       jsonRequest("/api/search", {
