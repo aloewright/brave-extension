@@ -11,7 +11,7 @@ import { SECTIONS, type SectionId } from "../src/sections/types"
 //
 //   1. Tech is a dedicated section (not a sub-tab of Extensions).
 //   2. Session replaces Library as the snippets/links/feeds surface.
-//   3. The bottom quick-action group covers Screenshot / PiP / Save link / Page agent.
+//   3. The bottom quick-action group covers Screenshot / Full-page PDF / PiP / Save link / Resizable window.
 //
 // We verify (1) and (2) via SECTIONS, and (3) via the lib that backs the
 // rail's bottom group.
@@ -81,6 +81,7 @@ describe("Bottom quick-action group composition", () => {
   it("exports the quick-action handlers the rail wires up", async () => {
     const mod = await import("../src/lib/quick-actions")
     expect(typeof mod.runScreenshotQuickAction).toBe("function")
+    expect(typeof mod.runFullPagePdfQuickAction).toBe("function")
     expect(typeof mod.runPipQuickAction).toBe("function")
     expect(typeof mod.runSaveLinkQuickAction).toBe("function")
   })
