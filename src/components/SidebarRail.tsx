@@ -3,7 +3,6 @@ import type { SectionId } from "../sections/types"
 import { SECTIONS } from "../sections/types"
 import { LeoIcon, type LeoIconName } from "./leo"
 import {
-  runPageAgentQuickAction,
   runPipQuickAction,
   type QuickActionResult,
   runSaveLinkQuickAction,
@@ -56,7 +55,6 @@ const QUICK_ACTIONS: QuickActionDef[] = [
   { label: "Save full-page PDF", icon: "file-export", run: runFullPagePdfQuickAction },
   { label: "Picture-in-picture", icon: "picture-in-picture", run: runPipQuickAction },
   { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction },
-  { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction },
   {
     label: "Open resizable sidebar window",
     icon: "file-export",
