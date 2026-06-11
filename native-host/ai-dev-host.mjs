@@ -45,9 +45,9 @@ mcp.setToolRequestBridge((name, args) => {
     sendMessage({ type: "mcp.tool.call", id, name, args })
     setTimeout(() => {
       if (pendingToolCalls.delete(id)) {
-        reject(new Error(`tool ${name} timed out (15s)`))
+        reject(new Error(`tool ${name} timed out (30s)`))
       }
-    }, 15_000)
+    }, 30_000)
   }).catch((err) => ({
     isError: true,
     content: [{ type: "text", text: err.message }]
