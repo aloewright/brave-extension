@@ -41,13 +41,25 @@ let nextToolCallId = 1
 mcp.setToolRequestBridge((name, args) => {
   const id = nextToolCallId++
   return new Promise((resolve, reject) => {
-    pendingToolCalls.set(id, { resolve, reject })
-    sendMessage({ type: "mcp.tool.call", id, name, args })
-    setTimeout(() => {
+    // Budget: consent prompts in the extension may pend for up to 60s
+    // (CONSENT_TIMEOUT_MS in src/background/consent.ts) before the tool even
+    // runs, and navigate-style tools can take up to 30s after that.
+    const timer = setTimeout(() => {
       if (pendingToolCalls.delete(id)) {
-        reject(new Error(`tool ${name} timed out (30s)`))
+        reject(new Error(`tool ${name} timed out (90s)`))
       }
-    }, 30_000)
+    }, 90_000)
+    pendingToolCalls.set(id, {
+      resolve: (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      reject: (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    })
+    sendMessage({ type: "mcp.tool.call", id, name, args })
   }).catch((err) => ({
     isError: true,
     content: [{ type: "text", text: err.message }]

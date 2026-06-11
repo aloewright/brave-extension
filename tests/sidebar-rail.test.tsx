@@ -11,7 +11,9 @@ import { SECTIONS, type SectionId } from "../src/sections/types"
 //
 //   1. Tech is a dedicated section (not a sub-tab of Extensions).
 //   2. Session replaces Library as the snippets/links/feeds surface.
-//   3. The bottom quick-action group covers Screenshot / Full-page PDF / PiP / Save link / Resizable window.
+//   3. The bottom quick-action group covers four exported quick-action handlers
+//      (Screenshot / Full-page PDF / PiP / Save link) plus a Resizable window
+//      action backed by openResizableSidebarWindow, asserted separately.
 //
 // We verify (1) and (2) via SECTIONS, and (3) via the lib that backs the
 // rail's bottom group.
