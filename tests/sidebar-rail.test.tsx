@@ -11,7 +11,9 @@ import { SECTIONS, type SectionId } from "../src/sections/types"
 //
 //   1. Tech is a dedicated section (not a sub-tab of Extensions).
 //   2. Session replaces Library as the snippets/links/feeds surface.
-//   3. The bottom quick-action group covers Screenshot / PiP / Save link / Page agent.
+//   3. The bottom quick-action group covers four exported quick-action handlers
+//      (Screenshot / Full-page PDF / PiP / Save link) plus a Resizable window
+//      action backed by openResizableSidebarWindow, asserted separately.
 //
 // We verify (1) and (2) via SECTIONS, and (3) via the lib that backs the
 // rail's bottom group.
@@ -75,25 +77,15 @@ describe("SECTIONS reflects ALO-471 reorg", () => {
 })
 
 describe("Bottom quick-action group composition", () => {
-  // The rail imports these three handlers and exposes them as buttons in
+  // The rail imports these handlers and exposes them as buttons in
   // the bottom group. Asserting the module surface keeps the rail's UI
   // honest about what it can do.
-  it("exports the three quick-action handlers the rail wires up", async () => {
+  it("exports the quick-action handlers the rail wires up", async () => {
     const mod = await import("../src/lib/quick-actions")
     expect(typeof mod.runScreenshotQuickAction).toBe("function")
+    expect(typeof mod.runFullPagePdfQuickAction).toBe("function")
     expect(typeof mod.runPipQuickAction).toBe("function")
     expect(typeof mod.runSaveLinkQuickAction).toBe("function")
-    expect(typeof mod.runPageAgentQuickAction).toBe("function")
-  })
-
-  it("keeps the Page agent toggle at the bottom of the rail actions", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/components/SidebarRail.tsx"),
-      "utf8"
-    )
-    expect(source).toContain('label: "Page agent"')
-    expect(source).toContain('icon: "cloud"')
-    expect(source.indexOf('label: "Save link"')).toBeLessThan(source.indexOf('label: "Page agent"'))
   })
 
   it("renders quick-action loading and result feedback instead of swallowing clicks", () => {

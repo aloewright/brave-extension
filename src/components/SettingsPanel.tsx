@@ -610,7 +610,7 @@ export function SettingsPanel({
                 />
                 <Toggle
                   label="Cloud browser planning"
-                  description="Allow the page agent to send capped observations to sidebar-api / AI Gateway when local planning needs fallback"
+                  description="Allow cloud AI (sidebar-api / AI Gateway) for features like media renaming when local models need fallback"
                   checked={settings.browserAgentCloudPlanningEnabled}
                   onChange={(v) => onUpdate({ browserAgentCloudPlanningEnabled: v })}
                 />
