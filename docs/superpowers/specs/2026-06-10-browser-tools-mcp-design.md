@@ -81,6 +81,23 @@ The in-page agent is removed entirely:
 
 The Swift Foundation Models bridge in the native host (`foundation-models-bridge.swift`, `foundationModels.plan` handler in `ai-dev-host.mjs`) is left in place if anything else uses it; if implementation confirms it is orphaned, it is deleted in a follow-up, not in this change.
 
+## Implementation status correction (post-design code audit)
+
+A close read of the code shows the MCP exposure is **already implemented**, contrary to the assumption above that `tool-defs/dom-tools.mjs` was a stub:
+
+- `DOM_TOOL_DEFS` in `native-host/tool-defs/dom-tools.mjs` fully declares all 11 DOM tools with schemas and optional `tabId`, and `mcp-server.mjs` registers them (plus `tabs_list`) bridged to the extension.
+- `handleMcpToolCall` in `src/background.ts` (~line 3188) dispatches to `DOM_TOOL_HANDLERS` and already routes every call through the consent FSM (read tools auto-allow).
+- Truncation metadata already exists (`limits.nodesFound/nodesTruncated/textTruncated` in observations); `eval_js` gating exists; restricted-URL filtering exists in `resolveTabId`.
+- The native-host bridge already has a per-call timeout (15s in `ai-dev-host.mjs`).
+
+The tools therefore keep their **existing registered names** (`browser_observe`, `click`, `type`, `tabs_list`, …) rather than the `browser_*` renames proposed above — renaming working, tested tool names adds churn for no functional gain.
+
+Remaining scope reduces to:
+1. Delete the in-page agent (as specified in Deletions below).
+2. Bump the bridge timeout from 15s to 30s (`navigate` alone can legitimately take 10s+ before its post-load observation).
+3. Clarify the `NO_TAB_ERR` message in `dom-tools.ts` to mention that a restricted active page is a likely cause.
+4. Verify end-to-end from Claude Code.
+
 ## Testing
 
 - Unit tests (plain vitest, per the existing harness convention — no vitest-pool-workers) for:
