@@ -1,23 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import type { ChatMessage } from "../src/lib/ai-chat-types"
 
-// Mock @plasmohq/storage with an in-memory Map. Same shim shape as
-// tests/joplin-recents.test.ts.
-const mem = new Map<string, unknown>()
-vi.mock("@plasmohq/storage", () => ({
-  Storage: class {
-    async get<T>(key: string): Promise<T | undefined> {
-      return mem.get(key) as T | undefined
-    }
-    async set(key: string, value: unknown): Promise<void> {
-      mem.set(key, value)
-    }
-    async remove(key: string): Promise<void> {
-      mem.delete(key)
-    }
-  }
-}))
-
 import {
   getConversation,
   appendMessage,
@@ -38,7 +21,7 @@ function makeMsg(id: string, role: ChatMessage["role"] = "user"): ChatMessage {
 
 describe("ai-chat-store", () => {
   beforeEach(() => {
-    mem.clear()
+    vi.clearAllMocks()
   })
 
   it("getConversation returns empty on cold start", async () => {

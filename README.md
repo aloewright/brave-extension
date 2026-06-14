@@ -12,7 +12,8 @@ Brave Dev Extension turns Brave's side panel and new tab page into a compact
 developer console. It connects browser context to local AI CLI tools, page
 inspection, recording, bookmarks, history, cookies, and synced resource storage.
 
-Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
+Built as a custom Manifest V3 extension with React, TypeScript, and a
+Rolldown-Vite/Oxc build path for Brave and Chromium browsers.
 
 ## Extension Functionality
 
@@ -71,7 +72,7 @@ Built with [Plasmo](https://www.plasmo.com/) for Brave and Chromium browsers.
 ## Architecture
 
 - **Extension UI:** React + TypeScript side panel, popup, content scripts, and
-  new tab page packaged by Plasmo as a Manifest V3 extension.
+  new tab page packaged into `build` by `scripts/build-extension.mjs`.
 - **Native host:** a Node native-messaging host bridges Brave to local shells,
   the MCP HTTP/SSE server, recorder mirrors, and local config files.
 - **Worker backend:** the optional `worker/` service stores conversations,
@@ -114,8 +115,9 @@ be rearranged by drag-and-drop and is persisted in
 
 ```sh
 pnpm install
-pnpm dev            # starts plasmo dev (loads as unpacked extension from build/)
-pnpm build          # production build
+pnpm dev            # watch-builds build/ for unpacked extension reloads
+pnpm build          # production build into build/
+pnpm package        # build and zip build/
 pnpm install-host   # install the native messaging host
 pnpm diagnose-host  # print signing/quarantine state of native artifacts
 pnpm typecheck      # tsc --noEmit -p .
@@ -127,31 +129,21 @@ pnpm test:e2e       # playwright e2e suite
 ### macOS: "Apple could not verify '<name>' is free of malware" (ALO-472)
 
 `pnpm install`, `pnpm install-host`, `pnpm dev`, and `pnpm build` all strip
-`com.apple.quarantine` from native addons under every repo `node_modules` tree
+Gatekeeper/XProtect xattrs from native addons under every repo `node_modules` tree
 (root, `native-host/`, `worker/`): node-pty `.node` files, **esbuild**,
 **rollup.darwin-*.node**, **fsevents.node**, **swift-manifest** (Foundation Models /
 `swift` bridge), @swc/core, lightningcss, etc.
 The popup's hash-prefixed filename (e.g. `.99bfbbed9bcd5adb-00000000.node` or
 `.9db7f7fe3f8cd7ea-00000000.node`) is XProtect's internal scan-cache name for
-node-pty's `prebuilds/darwin-{arm64,x64}/pty.node` (plus `spawn-helper`).
-Quarantine scrubbing alone does not satisfy Gatekeeper for these linker-signed
-prebuilds — you must approve once per node-pty version.
+node-pty's `pty.node` or `spawn-helper`.
 
 If the popup still appears:
 
-1. Run `pnpm diagnose-host` — confirms which artifacts carry the
-   quarantine xattr and what their signing state is.
-2. Run `pnpm warm-pty` — pre-loads node-pty so macOS can show the approval
-   dialog now (click **Open**, not Cancel).
-3. Re-run with `pnpm diagnose-host --fix` or `pnpm scrub-native` to re-scrub.
-4. If Gatekeeper has already cached a denial decision, open **System
-   Settings → Privacy & Security** and click "Allow Anyway" once per
-   blocked binary (esbuild, rollup, fsevents, swift-manifest, node-pty). Ad-hoc-signed
-   prebuilds keep stable CDHashes per package version, so each grant
-   persists across reinstalls.
-
-The installer never re-signs the prebuilds (that would mint a new
-CDHash and invalidate any "Allow Anyway" the user has already granted).
+1. Run `pnpm rebuild-pty` — rebuilds node-pty locally, clears Gatekeeper xattrs,
+   and warm-loads the real Node import path.
+2. Run `pnpm diagnose-host --fix` or `pnpm scrub-native` to re-scrub all native
+   artifacts if another dependency triggers a warning.
+3. Reload the extension so Brave starts a fresh native host.
 
 ## Typechecking
 
@@ -198,7 +190,7 @@ npm run test:watch
 
 The `tests` GitHub Actions workflow (`.github/workflows/test.yml`) runs the
 same `npm test` on every pull request and on every push to `main`. CI installs
-deps with `--ignore-scripts` so Plasmo's post-install hooks don't fire — the
+deps with `--ignore-scripts` so native scrub hooks don't fire — the
 storage/types tests run in plain Node and don't need the built extension.
 
 ### Native-host integration tests
@@ -219,9 +211,9 @@ Run the full suite (unit + integration) with `npm test`.
 
 ## Joplin clipper — done-criteria checklist
 
-- [ ] `pnpm build` produces a clean Plasmo bundle with `readability-bundle.*.js` present under `build/chrome-mv3-prod/`.
+- [ ] `pnpm build` produces a clean custom bundle with `content/readability-bundle.js` present under `build/`.
 - [ ] `pnpm test` (vitest) is green, including the new Joplin test files.
-- [ ] Load `build/chrome-mv3-prod/` unpacked in Brave → sidebar shows the new "Joplin" section.
+- [ ] Load `build/` unpacked in Brave → sidebar shows the new "Joplin" section.
 - [ ] Settings → Joplin → paste token → Save → **Test connection** reports ✓ JoplinClipperServer.
 - [ ] Right-click any page → "Clip to Joplin → Simplified page" → toast shows "Clipped: \<title\>" within ~2s.
 - [ ] Open Joplin Desktop → the clipped note exists with the page's simplified Markdown body and `source_url` set.
@@ -233,10 +225,10 @@ Run the full suite (unit + integration) with `npm test`.
 
 ## AI Chat — done-criteria checklist
 
-- [ ] `pnpm build` produces a clean Plasmo bundle.
+- [ ] `pnpm build` produces a clean custom extension bundle.
 - [ ] `pnpm test` (vitest) is green, including the four new chat test files.
 - [ ] Native host installed (`pnpm install-host`); `pnpm diagnose-host` exits 0.
-- [ ] Load `build/chrome-mv3-prod/` unpacked in Brave → sidebar shows the new "AI Chat" section.
+- [ ] Load `build/` unpacked in Brave → sidebar shows the new "AI Chat" section.
 - [ ] On a Mac with Apple Intelligence enabled (macOS 26+, M-series), sending "hi" produces a streamed-feel response within ~5s.
 - [ ] Sending "what's the URL of my current tab?" → model emits a `context.activeTab` tool call, a tool-result row appears, then a final assistant message naming the URL.
 - [ ] Sending "create a Joplin note titled Hello with body World" (Joplin token configured, Web Clipper running) → model emits `joplin.createNote`, the tool result has the note id, final assistant message confirms; verify the note in Joplin Desktop.

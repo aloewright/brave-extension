@@ -7,13 +7,9 @@
 
 import type { Clip, ClipMode } from "./joplin-types"
 
-// Filename of the Plasmo-bundled content script that exposes
-// __JoplinReadability__ on the page's globalThis. The hash is content-derived
-// and will change if src/contents/readability-bundle.ts is edited. Future
-// enhancement: resolve dynamically via chrome.runtime.getManifest() by
-// scanning the content_scripts array for the readability-bundle entry.
-// For MVP, hardcoded is OK.
-export const READABILITY_BUNDLE_PATH = "readability-bundle.5d3bf0d4.js"
+// Filename emitted by scripts/build-extension.mjs for the content script that
+// exposes __JoplinReadability__ on the page's globalThis.
+export const READABILITY_BUNDLE_PATH = "content/readability-bundle.js"
 
 /** Drives executeScript: inject Readability if needed, then run the per-mode extractor in MAIN world. */
 export async function extractClip(tabId: number, mode: ClipMode): Promise<Clip> {

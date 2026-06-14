@@ -5,15 +5,17 @@
   "description": "Brave sidebar extension connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
   "author": "aloe",
   "scripts": {
-    "postinstall": "node scripts/scrub-quarantine.mjs",
-    "dev": "node scripts/scrub-quarantine.mjs && plasmo dev",
-    "build": "node scripts/scrub-quarantine.mjs && plasmo build",
-    "package": "node scripts/scrub-quarantine.mjs && plasmo package",
+    "postinstall": "bash scripts/scrub-native-xattrs.sh && node scripts/scrub-quarantine.mjs",
+    "dev": "node scripts/build-extension.mjs --watch",
+    "build": "node scripts/build-extension.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "package": "node scripts/build-extension.mjs && node scripts/package-extension.mjs",
     "install-host": "node scripts/install-native-host.mjs",
     "uninstall-host": "node scripts/uninstall-native-host.mjs",
     "diagnose-host": "node scripts/diagnose-native-host.mjs",
-    "scrub-native": "node scripts/scrub-quarantine.mjs",
-    "warm-pty": "node scripts/warm-node-pty.mjs",
+    "scrub-native": "bash scripts/scrub-native-xattrs.sh && node scripts/scrub-quarantine.mjs",
+    "rebuild-pty": "pnpm --dir native-host rebuild node-pty --config.build-from-source=true && bash scripts/scrub-native-xattrs.sh && node scripts/scrub-quarantine.mjs && node scripts/warm-node-pty.mjs && sleep 1 && bash scripts/scrub-native-xattrs.sh",
+    "warm-pty": "node scripts/warm-node-pty.mjs && sleep 1 && bash scripts/scrub-native-xattrs.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -24,7 +26,6 @@
   "dependencies": {
     "@chenglou/pretext": "^0.0.7",
     "@mozilla/readability": "^0.6.0",
-    "@plasmohq/storage": "^1.15.0",
     "@tanstack/react-virtual": "^3.14.2",
     "@vectorize-io/hindsight-client": "^0.7.2",
     "fflate": "^0.8.3",
@@ -35,7 +36,6 @@
     "xterm-addon-web-links": "^0.9.0"
   },
   "devDependencies": {
-    "@plasmohq/prettier-plugin-sort-imports": "4.0.1",
     "@playwright/test": "^1.60.0",
     "@types/chrome": "^0.1.43",
     "@types/node": "^22.19.17",
@@ -44,26 +44,19 @@
     "@vitest/coverage-v8": "^4.1.8",
     "autoprefixer": "^10.5.0",
     "happy-dom": "^20.10.2",
-    "plasmo": "0.90.5",
     "postcss": "^8.5.15",
     "prettier": "3.8.3",
     "tailwindcss": "^3.4.19",
     "typescript": "6.0.3",
-    "vite": "6.4.2",
+    "vite": "npm:rolldown-vite@7.3.1",
     "vitest": "^4.1.8"
   },
   "pnpm": {
     "overrides": {
       "@babel/traverse": "7.29.0",
-      "@plasmohq/parcel-resolver-post": "0.4.6",
-      "@plasmohq/parcel-transformer-manifest": "0.21.1",
-      "@plasmohq/parcel-transformer-svelte": "0.6.1",
       "content-security-policy-parser": "0.6.0",
-      "esbuild": "0.25.12",
       "msgpackr": "1.11.9",
-      "svelte": "5.55.9",
-      "tsup": "8.5.1",
-      "vite": "6.4.2"
+      "svelte": "5.55.9"
     }
   },
   "manifest": {
@@ -106,29 +99,29 @@
     "commands": {
       "save-link": {
         "suggested_key": {
-          "default": "Ctrl+Shift+L",
-          "mac": "Command+Shift+L"
+          "default": "Ctrl+Shift+H",
+          "mac": "Ctrl+Shift+H"
         },
-        "description": "Save the current page link to your library"
+        "description": "Save selected text as a highlight, or save the current page link"
       },
       "screenshot-page": {
         "suggested_key": {
-          "default": "Alt+Shift+H",
-          "mac": "Alt+Shift+H"
+          "default": "Ctrl+Shift+S",
+          "mac": "Ctrl+Shift+S"
         },
         "description": "Take and download a screenshot of the current tab"
       },
       "reload-extension": {
         "suggested_key": {
-          "default": "Alt+Shift+R",
-          "mac": "Alt+Shift+R"
+          "default": "Ctrl+Shift+E",
+          "mac": "Ctrl+Shift+E"
         },
         "description": "Reload the extension"
       },
       "speak-selection": {
         "suggested_key": {
-          "default": "Alt+Shift+T",
-          "mac": "Alt+Shift+T"
+          "default": "Alt+S",
+          "mac": "Alt+S"
         },
         "description": "Speak the selected text"
       }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { PretextTextBlock } from "./PretextTextBlock"
 import type { Highlight, Card, Grade } from "../review"
 import {
   getHighlights,
@@ -183,7 +184,7 @@ export function ReviewPanel({ onClose }: Props) {
                 <div className="text-fg/30 text-sm mb-2">No cards due</div>
                 <div className="text-fg/20 text-[11px] max-w-[260px]">
                   {highlights.length === 0
-                    ? "Add a highlight in the Add tab, or right-click selected text on any page → Save snippet."
+                    ? "Add a highlight in the Add tab, or right-click selected text on any page → Save highlight."
                     : "Nothing due right now. Come back later or add more highlights."}
                 </div>
               </div>
@@ -232,9 +233,12 @@ export function ReviewPanel({ onClose }: Props) {
                     label="Fill in the blanks"
                     footer="Tap to reveal"
                   >
-                    <span className="whitespace-pre-wrap">
+                    <PretextTextBlock
+                      text={current.front}
+                      className="whitespace-pre-wrap"
+                    >
                       {renderFront(current.front, current.answers, false)}
-                    </span>
+                    </PretextTextBlock>
                   </CardFace>
                   {/* Back */}
                   <CardFace
@@ -243,9 +247,12 @@ export function ReviewPanel({ onClose }: Props) {
                     footer="Swipe or pick how well you knew it"
                     back
                   >
-                    <span className="whitespace-pre-wrap">
+                    <PretextTextBlock
+                      text={current.front}
+                      className="whitespace-pre-wrap"
+                    >
                       {renderRevealed(current.front, current.answers)}
-                    </span>
+                    </PretextTextBlock>
                   </CardFace>
                 </div>
               </div>
@@ -296,14 +303,15 @@ export function ReviewPanel({ onClose }: Props) {
               No highlights yet. Add one in the{" "}
               <span className="font-medium">Add</span> tab, or right-click
               selected text on any page and choose{" "}
-              <span className="font-medium">Save snippet</span>.
+              <span className="font-medium">Save highlight</span>.
             </div>
           ) : (
             highlights.map((h) => {
               const hCards = allCards.filter((c) => c.highlightId === h.id)
               return (
                 <div key={h.id} className="rounded-lg border border-border bg-card p-3">
-                  <div
+                  <PretextTextBlock
+                    text={h.text}
                     className="text-[11px] text-fg leading-snug mb-2 whitespace-pre-wrap"
                     style={{
                       display: "-webkit-box",
@@ -313,7 +321,7 @@ export function ReviewPanel({ onClose }: Props) {
                     }}
                   >
                     {h.text}
-                  </div>
+                  </PretextTextBlock>
                   <div className="flex items-center justify-between text-[10px] text-fg/40 font-mono gap-2">
                     <div className="truncate flex-1">
                       {hCards.length} card{hCards.length === 1 ? "" : "s"}
@@ -486,11 +494,15 @@ function ClozePreview({ text }: { text: string }) {
     )
   }
   return (
-    <div className="rounded-lg border border-border bg-card/50 p-3 text-[11px] text-fg/70 leading-relaxed">
+    <PretextTextBlock
+      text={card.front}
+      verticalPadding={24}
+      className="rounded-lg border border-border bg-card/50 p-3 text-[11px] text-fg/70 leading-relaxed"
+    >
       <div className="text-[9px] text-fg/30 uppercase tracking-wider mb-1.5">
         Preview ({card.answers.length} blank{card.answers.length === 1 ? "" : "s"})
       </div>
       {renderFront(card.front, card.answers, false)}
-    </div>
+    </PretextTextBlock>
   )
 }

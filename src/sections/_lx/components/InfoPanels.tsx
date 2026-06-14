@@ -149,59 +149,84 @@ export function RssButton({ active, count, onClick }: { active: boolean; count: 
 // --- Panels ---
 
 export function NetworkPanel({ userIp, siteIp, onCopy }: { userIp: IpInfo | null; siteIp: SiteIpInfo | null; onCopy: (text: string, label: string) => void }) {
+  const [open, setOpen] = useState(false)
+
   return (
-    <div className="border-b border-border px-3 py-2.5 space-y-2">
-      <p className="text-[10px] text-fg/30 uppercase tracking-wider">Network</p>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-fg/40">Your IP</span>
-        {userIp ? (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-fg font-mono">{userIp.ip}</span>
-            <CopyBtn onClick={() => onCopy(userIp.ip, "IP copied")} />
+    <div className="border-b border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-card/35"
+      >
+        <LeoIcon
+          name={open ? "chevrons-up" : "chevrons-down"}
+          size={12}
+          className="shrink-0 text-fg/35"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] text-fg/30 uppercase tracking-wider">Network</div>
+          <div className="mt-0.5 truncate text-[11px] text-fg/45">
+            {userIp?.ip ? `Your IP ${userIp.ip}` : "Loading IP address..."}
+            {siteIp?.ip ? ` · Site ${siteIp.ip}` : ""}
           </div>
-        ) : (
-          <span className="text-[11px] text-fg/20">loading...</span>
-        )}
-      </div>
-      {userIp?.city && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-fg/40">Location</span>
-          <span className="text-xs text-fg/60">{[userIp.city, userIp.region, userIp.country].filter(Boolean).join(", ")}</span>
         </div>
-      )}
-      {userIp?.org && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-fg/40">ISP</span>
-          <span className="text-xs text-fg/60 truncate max-w-[200px]">{userIp.org}</span>
-        </div>
-      )}
-      {siteIp && (
-        <>
-          <div className="border-t border-border/50 my-1" />
+      </button>
+
+      {open && (
+        <div className="space-y-2 px-3 pb-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-fg/40">Site IP</span>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-fg font-mono">{siteIp.ip}</span>
-              <CopyBtn onClick={() => onCopy(siteIp.ip, "Site IP copied")} />
-            </div>
+            <span className="text-[11px] text-fg/40">Your IP</span>
+            {userIp ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-fg font-mono">{userIp.ip}</span>
+                <CopyBtn onClick={() => onCopy(userIp.ip, "IP copied")} />
+              </div>
+            ) : (
+              <span className="text-[11px] text-fg/20">loading...</span>
+            )}
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-fg/40">Host</span>
-            <span className="text-xs text-fg/60 font-mono">{siteIp.hostname}</span>
-          </div>
-          {siteIp.city && (
+          {userIp?.city && (
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-fg/40">Site Location</span>
-              <span className="text-xs text-fg/60">{[siteIp.city, siteIp.region, siteIp.country].filter(Boolean).join(", ")}</span>
+              <span className="text-[11px] text-fg/40">Location</span>
+              <span className="text-xs text-fg/60">{[userIp.city, userIp.region, userIp.country].filter(Boolean).join(", ")}</span>
             </div>
           )}
-          {siteIp.org && (
+          {userIp?.org && (
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-fg/40">Site ISP</span>
-              <span className="text-xs text-fg/60 truncate max-w-[200px]">{siteIp.org}</span>
+              <span className="text-[11px] text-fg/40">ISP</span>
+              <span className="text-xs text-fg/60 truncate max-w-[200px]">{userIp.org}</span>
             </div>
           )}
-        </>
+          {siteIp && (
+            <>
+              <div className="border-t border-border/50 my-1" />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-fg/40">Site IP</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-fg font-mono">{siteIp.ip}</span>
+                  <CopyBtn onClick={() => onCopy(siteIp.ip, "Site IP copied")} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-fg/40">Host</span>
+                <span className="text-xs text-fg/60 font-mono">{siteIp.hostname}</span>
+              </div>
+              {siteIp.city && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-fg/40">Site Location</span>
+                  <span className="text-xs text-fg/60">{[siteIp.city, siteIp.region, siteIp.country].filter(Boolean).join(", ")}</span>
+                </div>
+              )}
+              {siteIp.org && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-fg/40">Site ISP</span>
+                  <span className="text-xs text-fg/60 truncate max-w-[200px]">{siteIp.org}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   )

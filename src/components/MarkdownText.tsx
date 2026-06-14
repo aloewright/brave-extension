@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { PretextTextBlock } from "./PretextTextBlock"
 
 type ListItem = {
   text: string
@@ -218,5 +219,9 @@ export function MarkdownText({
   flushParagraph()
   flushList()
 
-  return <div className={`leading-relaxed ${className}`}>{nodes}</div>
+  return (
+    <PretextTextBlock text={content} markdown className={`leading-relaxed ${className}`}>
+      {nodes}
+    </PretextTextBlock>
+  )
 }

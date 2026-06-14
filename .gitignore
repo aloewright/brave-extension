@@ -4,6 +4,7 @@ build
 tsconfig.tsbuildinfo
 .DS_Store
 .omx/
+.cache/
 test-results/
 coverage/
 # Build outputs (Worker SPA in worker/dist/web/, future bundles).

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
-// Mock joplin-client and @plasmohq/storage.
+// Mock joplin-client.
 const {
   createNoteMock,
   pingMock,
@@ -39,23 +39,10 @@ vi.mock("../src/lib/joplin", () => ({
   }
 }))
 
-const mem = new Map<string, unknown>()
-vi.mock("@plasmohq/storage", () => ({
-  Storage: class {
-    async get<T>(key: string): Promise<T | undefined> {
-      return mem.get(key) as T | undefined
-    }
-    async set(key: string, value: unknown): Promise<void> {
-      mem.set(key, value)
-    }
-    async remove(key: string): Promise<void> {
-      mem.delete(key)
-    }
-  }
-}))
-
 // Stub chrome.tabs.query
+const baseChrome = (globalThis as { chrome?: unknown }).chrome as Record<string, unknown>
 ;(globalThis as { chrome?: unknown }).chrome = {
+  ...baseChrome,
   tabs: {
     query: vi.fn(async () => [
       { url: "http://example.test/page", title: "Example" }
@@ -78,7 +65,6 @@ describe("buildTools", () => {
     listTagsMock.mockReset()
     findOrCreateFolderMock.mockReset()
     addTagToNoteByNameMock.mockReset()
-    mem.clear()
   })
 
   it("returns the V1 tool catalog by name", () => {
@@ -185,11 +171,11 @@ describe("runTool", () => {
 })
 
 describe("captureAmbient", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     ;((globalThis as unknown) as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome.tabs.query.mockResolvedValue(
       [{ url: "http://a.test/", title: "A" }]
     )
-    mem.clear()
+    await chrome.storage.local.clear()
   })
 
   it("returns ambient with activeTab when tabs.query resolves", async () => {
@@ -206,15 +192,17 @@ describe("captureAmbient", () => {
   })
 
   it("attaches mostRecentClip when joplin recents storage has one", async () => {
-    mem.set("ai-dev-joplin-recent-clips", {
-      clips: [
-        {
-          title: "Clip A",
-          mode: "simplified",
-          createdAt: "2026-05-27T00:00:00Z",
-          joplinUrl: "joplin://x-callback-url/openNote?id=n1"
-        }
-      ]
+    await chrome.storage.local.set({
+      "ai-dev-joplin-recent-clips": {
+        clips: [
+          {
+            title: "Clip A",
+            mode: "simplified",
+            createdAt: "2026-05-27T00:00:00Z",
+            joplinUrl: "joplin://x-callback-url/openNote?id=n1"
+          }
+        ]
+      }
     })
     const out = await captureAmbient()
     expect(out.mostRecentClip).toEqual({

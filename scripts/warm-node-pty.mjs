@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pre-load node-pty so macOS Gatekeeper can approve pty.node once during
- * install instead of on first sidebar terminal use. The popup may name a
- * hash like `.99bfbbed9bcd5adb-00000000.node` — that is XProtect's scan
- * copy of prebuilds/darwin-arm64/pty.node (or darwin-x64).
+ * Pre-load node-pty after clearing Gatekeeper/XProtect xattrs so the first
+ * sidebar terminal does not surface macOS' scary `.hex-00000000.node` dialog.
  */
 import { spawnSync } from "child_process"
 import { resolve, join, dirname } from "path"
@@ -21,21 +19,19 @@ if (process.platform !== "darwin") {
   process.exit(0)
 }
 
-const { paths, assessments } = prepareNodePtyForGatekeeper(nativeHostDir)
+const { paths, scrub } = prepareNodePtyForGatekeeper(nativeHostDir)
 if (paths.length === 0) {
-  console.warn("warm-node-pty: node-pty prebuilds not found — run pnpm install in native-host/")
+  console.warn("warm-node-pty: node-pty native addon not found — run pnpm install in native-host/")
   process.exit(0)
 }
 
-const rejected = assessments.filter((a) => a.status === "rejected")
-if (rejected.length > 0) {
-  console.log("node-pty Gatekeeper assessment (before load):")
-  for (const a of rejected) {
-    console.log(`  ⚠  ${a.path.replace(repoRoot, "<repo>")}`)
-    console.log(`     ${a.detail.split("\n")[0]}`)
+if (scrub.errors.length > 0) {
+  console.warn("warm-node-pty: could not clear every node-pty native artifact:")
+  for (const err of scrub.errors) {
+    console.warn(`  ${err.path.replace(repoRoot, "<repo>")}: ${err.message}`)
   }
-  console.log(`\n${NODE_PTY_GATEKEEPER_HINT}\n`)
-  console.log("Loading node-pty now so you can approve it in the dialog…")
+} else {
+  console.log(`✓ Cleared Gatekeeper xattrs on ${scrub.scrubbed.length} node-pty native artifact(s).`)
 }
 
 const code = `
@@ -50,18 +46,18 @@ const res = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
 
 if (res.status !== 0) {
   console.warn(`\n${NODE_PTY_GATEKEEPER_HINT}`)
+  console.warn("If this keeps failing, run `pnpm rebuild-pty` to replace the downloaded prebuild with a local build.")
   process.exit(res.status ?? 1)
 }
 
-if (rejected.length > 0) {
-  console.log("Re-checking Gatekeeper after load…")
-  const after = prepareNodePtyForGatekeeper(nativeHostDir)
-  const still = after.assessments.filter((a) => a.status === "rejected")
-  if (still.length > 0) {
-    console.log(
-      "  Still rejected by spctl — open System Settings → Privacy & Security → Allow Anyway for pty.node."
-    )
-  } else {
-    console.log("  ✓ Gatekeeper now allows node-pty.")
+const afterImport = prepareNodePtyForGatekeeper(nativeHostDir)
+if (afterImport.scrub.errors.length > 0) {
+  console.warn("warm-node-pty: node-pty loaded, but post-import scrub had errors:")
+  for (const err of afterImport.scrub.errors) {
+    console.warn(`  ${err.path.replace(repoRoot, "<repo>")}: ${err.message}`)
   }
+} else {
+  console.log(`✓ Cleared post-import xattrs on ${afterImport.scrub.scrubbed.length} node-pty native artifact(s).`)
 }
+
+console.log("✓ node-pty loaded through Node without a Gatekeeper prompt.")

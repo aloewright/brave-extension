@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { LeoIcon } from "../../components/leo"
 import { MarkdownText } from "../../components/MarkdownText"
+import { PretextTextBlock } from "../../components/PretextTextBlock"
 import { addSessionSnippet } from "../../lib/session-snippets"
 import { ulid } from "../../lib/ulid"
 import { getSettings } from "../../storage"
@@ -452,8 +453,8 @@ function AgentMessageRow({ message }: { message: AgentMessage }) {
         disabled={!canAct}
         onClick={() => void saveMessageSnippet()}
         className="inline-flex h-5 items-center gap-1 rounded border border-default/70 bg-bg/70 px-1.5 text-[10px] text-fg/45 transition hover:bg-accent/40 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
-        title="Save message as session snippet"
-        aria-label="Save message as session snippet">
+        title="Save message as session highlight"
+        aria-label="Save message as session highlight">
         <LeoIcon name="save" size={11} />
         Snip
       </button>
@@ -467,9 +468,9 @@ function AgentMessageRow({ message }: { message: AgentMessage }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%]">
-          <div className="px-3 py-2 rounded bg-primary/20 text-fg text-sm whitespace-pre-wrap">
+          <PretextTextBlock text={content} verticalPadding={16} className="px-3 py-2 rounded bg-primary/20 text-fg text-sm whitespace-pre-wrap">
             {message.content}
-          </div>
+          </PretextTextBlock>
           {actions}
         </div>
       </div>

@@ -1,5 +1,10 @@
 import { getSettings } from "../storage"
-import { pullBookmarkSnapshot, type StoredBookmark } from "../lib/bookmark-snapshot"
+import {
+  BOOKMARK_SNAPSHOT_KEY,
+  pullBookmarkSnapshot,
+  readBookmarkSnapshot,
+  type StoredBookmark
+} from "../lib/bookmark-snapshot"
 import { createSidebarApiClient, type BookmarkPayload } from "../lib/sidebar-api"
 import { getBookmarkTombstones, setLastSyncedBookmarkIds } from "../lib/bookmark-tombstones"
 
@@ -26,15 +31,25 @@ function toPayload(b: StoredBookmark): BookmarkPayload {
 export function setupBookmarkSync(): void {
   // chrome.bookmarks may be undefined in tests / restricted contexts.
   const api = (chrome as unknown as { bookmarks?: typeof chrome.bookmarks }).bookmarks
-  if (!api) return
+  const refreshCachedSnapshot = () => {
+    void pullBookmarkSnapshot().catch((err) => {
+      console.warn("[bookmark-sync] failed to refresh local bookmark cache:", (err as Error).message)
+    })
+  }
 
-  api.onCreated.addListener(scheduleSync)
-  api.onRemoved.addListener(scheduleSync)
-  api.onChanged.addListener(scheduleSync)
-  api.onMoved.addListener(scheduleSync)
+  api?.onCreated?.addListener(refreshCachedSnapshot)
+  api?.onRemoved?.addListener(refreshCachedSnapshot)
+  api?.onChanged?.addListener(refreshCachedSnapshot)
+  api?.onMoved?.addListener(refreshCachedSnapshot)
+
+  chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
+    if (areaName !== "local") return
+    if (BOOKMARK_SNAPSHOT_KEY in changes) scheduleSync()
+  })
 
   // Push once on extension startup so the server has a current snapshot
-  // even if no bookmarks change.
+  // even if no bookmarks change. The extension-owned cache is the source of
+  // truth; browser bookmark APIs only hydrate that cache when it is absent.
   scheduleSync()
 }
 
@@ -55,7 +70,7 @@ export async function pushSnapshot(): Promise<{ pushed: boolean; reason?: string
       return { pushed: false, reason: "sidebar api not configured" }
     }
 
-    const snapshot = await pullBookmarkSnapshot()
+    const snapshot = (await readBookmarkSnapshot()) ?? (await pullBookmarkSnapshot())
     // Exclude bookmarks the server already deleted (tombstoned) so we never
     // re-push them. Server is the source of truth.
     const tombstones = await getBookmarkTombstones()

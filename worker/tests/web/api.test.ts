@@ -94,6 +94,40 @@ describe("createApiClient", () => {
     expect(calls[2]!.init.method).toBe("DELETE")
   })
 
+  it("supports scrape run and job requests", async () => {
+    const { calls } = mockFetchOnce([
+      { status: 200, body: { scrapes: [] } },
+      { status: 200, body: { scrape: { id: "s1" } } },
+      { status: 201, body: { scrape: { id: "s1" } } },
+      { status: 200, body: { jobs: [] } },
+      { status: 201, body: { job: { id: "j1" } } },
+      { status: 200, body: { job: { id: "j1" }, scrape: { id: "s2" } } },
+      { status: 204, body: null },
+      { status: 204, body: null }
+    ])
+    const client = createApiClient("tok")
+
+    await client.scrapes.listRuns({ limit: 12, jobId: "j1" })
+    await client.scrapes.getRun("s1")
+    await client.scrapes.runUrl("https://example.com")
+    await client.scrapes.listJobs()
+    await client.scrapes.createJob({ url: "https://example.com/feed", scheduleType: "cron", cron: "0 * * * *" })
+    await client.scrapes.runJob("j1")
+    await client.scrapes.deleteRun("s1")
+    await client.scrapes.deleteJob("j1")
+
+    expect(calls[0]!.url).toBe("/api/scrapes/runs?jobId=j1&limit=12")
+    expect(calls[1]!.url).toBe("/api/scrapes/runs/s1")
+    expect(calls[2]!.url).toBe("/api/scrapes/run")
+    expect(calls[2]!.init.method).toBe("POST")
+    expect(calls[3]!.url).toBe("/api/scrapes/jobs")
+    expect(calls[4]!.init.method).toBe("POST")
+    expect(calls[5]!.url).toBe("/api/scrapes/jobs/j1/run")
+    expect(calls[6]!.url).toBe("/api/scrapes/runs/s1")
+    expect(calls[6]!.init.method).toBe("DELETE")
+    expect(calls[7]!.init.method).toBe("DELETE")
+  })
+
   it("converts ApiError back to a plain Error subclass instance", () => {
     const err = new ApiError(500, "internal", "boom")
     expect(err).toBeInstanceOf(Error)

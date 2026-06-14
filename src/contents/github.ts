@@ -1,14 +1,7 @@
 // src/contents/github.ts
-import type { PlasmoCSConfig } from "plasmo"
 import type { GitHubFeatureSettings } from "../types"
 import { FEATURES } from "../lib/github/registry"
 import { createRuntime } from "../lib/github/runtime"
-
-export const config: PlasmoCSConfig = {
-  matches: ["https://github.com/*"],
-  run_at: "document_idle",
-  all_frames: false
-}
 
 const SETTINGS_KEY = "ai-dev-settings"
 const DEFAULT_GH: GitHubFeatureSettings = { enabled: true, features: {} }

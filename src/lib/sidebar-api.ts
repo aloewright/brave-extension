@@ -5,7 +5,7 @@
  * routes; the SPA copy can be regenerated.
  */
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight" | "scrape"
 
 export interface SearchHit {
   type: ResourceType
@@ -69,6 +69,94 @@ export interface RecordingUploadMetadata {
   duration_ms?: number
   source?: "tab" | "screen" | "camera"
   origin_url?: string | null
+}
+
+export interface ScrapeRunPayload {
+  url: string
+  title?: string
+  text?: string
+  html?: string
+  links?: Array<{ href: string; text: string }>
+  images?: Array<{ src: string; alt: string }>
+  meta?: Record<string, string>
+  timestamp?: number
+  source?: "extension" | "server" | "manual" | "cron"
+}
+
+export interface ScrapeRun {
+  id: string
+  jobId: string | null
+  source: string
+  url: string
+  finalUrl: string | null
+  title: string
+  text: string
+  html: string
+  links: Array<{ href: string; text: string }>
+  images: Array<{ src: string; alt: string }>
+  meta: Record<string, string>
+  status: "ready" | "failed"
+  statusMessage: string | null
+  contentType: string | null
+  sizeBytes: number
+  durationMs: number
+  chunkCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ScrapeJob {
+  id: string
+  url: string
+  title: string
+  enabled: boolean
+  scheduleType: "manual" | "interval" | "cron"
+  intervalMinutes: number | null
+  cron: string | null
+  lastRunId: string | null
+  lastRunAt: number | null
+  nextRunAt: number | null
+  lastStatus: "ready" | "failed" | null
+  lastError: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ScrapeJobPayload {
+  url: string
+  title?: string
+  enabled?: boolean
+  scheduleType?: "manual" | "interval" | "cron"
+  intervalMinutes?: number
+  cron?: string
+}
+
+export interface ExtensionSnapshotPayload {
+  extensions: Array<{
+    id: string
+    name: string
+    enabled: boolean
+    type: string
+    version: string
+    description?: string
+    installType?: string | null
+    homepageUrl?: string | null
+    mayDisable?: boolean
+    icons?: unknown[]
+  }>
+  profiles?: unknown[]
+  groups?: unknown[]
+  settings?: Record<string, unknown>
+  lastUsed?: Record<string, string>
+  pulledAt?: string
+}
+
+export interface NewTabSnapshotPayload {
+  quickLinks?: unknown[]
+  customApps?: unknown[]
+  hiddenApps?: string[]
+  appOrder?: string[]
+  appIconOverrides?: Record<string, unknown>
 }
 
 export interface BrowserAgentSession {
@@ -186,6 +274,26 @@ export interface SidebarApiClient {
       size_bytes: number
     }>
   }
+  scrapes: {
+    create: (payload: ScrapeRunPayload) => Promise<{ scrape: ScrapeRun }>
+    runUrl: (url: string) => Promise<{ scrape: ScrapeRun }>
+    listRuns: (opts?: { jobId?: string; limit?: number; before?: number }) => Promise<{ scrapes: ScrapeRun[] }>
+    createJob: (payload: ScrapeJobPayload) => Promise<{ job: ScrapeJob }>
+    listJobs: () => Promise<{ jobs: ScrapeJob[] }>
+    runJob: (id: string) => Promise<{ job: ScrapeJob; scrape: ScrapeRun }>
+    removeJob: (id: string) => Promise<void>
+  }
+  extensions: {
+    snapshot: (payload: ExtensionSnapshotPayload) => Promise<{
+      upserted: number
+      inserted: number
+      updated: number
+      deleted: number
+    }>
+  }
+  newtab: {
+    snapshot: (payload: NewTabSnapshotPayload) => Promise<{ ok: boolean; syncedAt: number }>
+  }
   agent: {
     chat: (payload: BrowserAgentChatPayload) => Promise<{
       session: BrowserAgentSession
@@ -301,6 +409,36 @@ export function createSidebarApiClient(token: string, baseUrl: string): SidebarA
     videos: {
       import: (payload) =>
         jsonRequest("/api/videos/import", { method: "POST", body: JSON.stringify(payload) })
+    },
+    scrapes: {
+      create: (payload) =>
+        jsonRequest("/api/scrapes", { method: "POST", body: JSON.stringify(payload) }),
+      runUrl: (url) =>
+        jsonRequest("/api/scrapes/run", { method: "POST", body: JSON.stringify({ url }) }),
+      listRuns: (opts = {}) => {
+        const params = new URLSearchParams()
+        if (opts.jobId) params.set("jobId", opts.jobId)
+        if (opts.limit) params.set("limit", String(opts.limit))
+        if (opts.before) params.set("before", String(opts.before))
+        const qs = params.toString()
+        return jsonRequest(`/api/scrapes/runs${qs ? `?${qs}` : ""}`)
+      },
+      createJob: (payload) =>
+        jsonRequest("/api/scrapes/jobs", { method: "POST", body: JSON.stringify(payload) }),
+      listJobs: () => jsonRequest("/api/scrapes/jobs"),
+      runJob: (id) =>
+        jsonRequest(`/api/scrapes/jobs/${encodeURIComponent(id)}/run`, { method: "POST" }),
+      removeJob: async (id) => {
+        await jsonRequest(`/api/scrapes/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })
+      }
+    },
+    extensions: {
+      snapshot: (payload) =>
+        jsonRequest("/api/extensions/snapshot", { method: "POST", body: JSON.stringify(payload) })
+    },
+    newtab: {
+      snapshot: (payload) =>
+        jsonRequest("/api/newtab/snapshot", { method: "POST", body: JSON.stringify(payload) })
     },
     recordings: {
       upload: async (blob, metadata) => {

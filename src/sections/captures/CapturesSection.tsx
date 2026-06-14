@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { LeoButton, LeoIcon } from "../../components/leo"
+import { PretextTextBlock } from "../../components/PretextTextBlock"
 import { openExternalLink } from "../../lib/open-url"
 import { openPopupWindow } from "../../lib/popup-window"
 import { getSettings } from "../../storage"
@@ -274,9 +275,12 @@ export function CapturesSection() {
                     </a>
                   )}
                   {isSearch && (
-                    <span className="mt-0.5 truncate text-[10px] text-fg/55">
+                    <PretextTextBlock
+                      text={(item as CaptureSearchHit).snippet}
+                      className="mt-0.5 line-clamp-2 text-[10px] text-fg/55"
+                    >
                       {(item as CaptureSearchHit).snippet}
-                    </span>
+                    </PretextTextBlock>
                   )}
                 </div>
                 <div className="ml-auto flex flex-shrink-0 items-center gap-1">

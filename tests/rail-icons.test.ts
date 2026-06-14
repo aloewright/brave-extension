@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 describe("rail icon mappings", () => {
-  it("Tech uses the cpu-chip icon and Agent uses the robot icon", () => {
+  it("keeps current rail icons wired for Inspector, Agent, and Lexicon", () => {
     const rail = readFileSync(join(process.cwd(), "src/components/SidebarRail.tsx"), "utf8")
-    expect(rail).toContain('tech: "cpu-chip"')
+    expect(rail).toContain('inspector: "search"')
     expect(rail).toContain('agentChat: "robot"')
+    expect(rail).toContain('lexicon: "book-open"')
+    expect(rail).not.toContain('tech: "cpu-chip"')
   })
 
   it("cpu-chip is a defined Leo icon", () => {

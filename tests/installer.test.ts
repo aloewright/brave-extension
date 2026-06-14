@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "fs"
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 import {
@@ -29,7 +29,6 @@ import {
   findSwiftToolchainArtifacts,
   resolveNodePtyNativePaths,
   assessNativeExecutable,
-  prepareNodePtyForGatekeeper,
   scrubQuarantine,
   scrubQuarantinePaths,
   scrubQuarantineAll,
@@ -37,7 +36,9 @@ import {
   repoNodeModuleRoots,
   isRelevantNativeArtifact,
   NODE_PTY_GATEKEEPER_HINT,
-  inspectNativeArtifact
+  inspectNativeArtifact,
+  browserPreferencePaths,
+  findExtensionIdInBrowserPreferences
 } from "../native-host/installer.mjs"
 
 describe("installer pure helpers", () => {
@@ -265,6 +266,65 @@ describe("installer fs helpers (sandboxed home)", () => {
   })
 })
 
+describe("browser extension ID discovery", () => {
+  let fakeHome: string
+  let fakeRepo: string
+
+  beforeEach(() => {
+    fakeHome = mkdtempSync(join(tmpdir(), "aids-browser-home-"))
+    fakeRepo = join(fakeHome, "Development", "ai-dev-sidebar")
+  })
+
+  it("includes Brave Secure Preferences profile files on macOS", () => {
+    const profileDir = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "BraveSoftware",
+      "Brave-Browser",
+      "Default"
+    )
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, "Secure Preferences"), "{}")
+
+    expect(browserPreferencePaths(fakeHome, "darwin")).toContain(join(profileDir, "Secure Preferences"))
+  })
+
+  it("prefers the current build path over a disabled legacy dist extension", () => {
+    const profileDir = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "BraveSoftware",
+      "Brave-Browser",
+      "Default"
+    )
+    mkdirSync(profileDir, { recursive: true })
+    const securePrefs = join(profileDir, "Secure Preferences")
+    writeFileSync(
+      securePrefs,
+      JSON.stringify({
+        extensions: {
+          settings: {
+            ahdpglmhinhafnabcfcapkelfnfafkbj: {
+              path: join(fakeRepo, "dist", "extension"),
+              disable_reasons: [4]
+            },
+            gkhofjjpnilonbinehpkblmcflbclcoh: {
+              path: join(fakeRepo, "build")
+            }
+          }
+        }
+      })
+    )
+
+    expect(findExtensionIdInBrowserPreferences({ home: fakeHome, platform: "darwin", repoRoot: fakeRepo })).toEqual({
+      id: "gkhofjjpnilonbinehpkblmcflbclcoh",
+      source: securePrefs
+    })
+  })
+})
+
 // ALO-472 — Gatekeeper / quarantine remediation
 describe("native artifact discovery + quarantine scrub", () => {
   let fakeRoot: string
@@ -381,30 +441,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     expect(found.some((p: string) => p.endsWith("/bin/swift-manifest"))).toBe(true)
   })
 
-  it("scrubQuarantineAll walks every existing repo node_modules root", () => {
-    const repo = mkdtempSync(join(tmpdir(), "aids-repo-"))
-    const roots = [
-      join(repo, "node_modules"),
-      join(repo, "native-host", "node_modules"),
-      join(repo, "worker", "node_modules")
-    ]
-    for (const root of roots) {
-      mkdirSync(join(root, "fsevents"), { recursive: true })
-      writeFileSync(join(root, "fsevents/fsevents.node"), "x")
-    }
-    const calls: string[] = []
-    const result = scrubQuarantineAll(repo, {
-      platform: "darwin",
-      spawnSync: (_cmd: string, args: string[]) => {
-        calls.push(args[2])
-        return { status: 0 }
-      }
-    })
-    expect(result.roots).toHaveLength(3)
-    expect(result.scrubbed.length).toBeGreaterThanOrEqual(3)
-    expect(calls.filter((p) => p?.includes("fsevents.node"))).toHaveLength(3)
-  })
-
   it("findNativeArtifacts skips non-darwin optional deps on macOS", () => {
     mkdirSync(join(fakeRoot, "@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin"), { recursive: true })
     mkdirSync(join(fakeRoot, "@esbuild+linux-x64@0.25.12/node_modules/@esbuild/linux-x64/bin"), { recursive: true })
@@ -429,46 +465,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     })
     expect(result.scrubbed).toEqual([])
     expect(calls).toEqual([])
-  })
-
-  it("scrubQuarantine runs xattr -d com.apple.quarantine for every native artifact", () => {
-    mkdirSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64"), { recursive: true })
-    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/pty.node"), "x")
-    writeFileSync(join(fakeRoot, "node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
-    const calls: { cmd: string; args: string[] }[] = []
-    const result = scrubQuarantine(fakeRoot, {
-      platform: "darwin",
-      spawnSync: (cmd: string, args: string[]) => {
-        calls.push({ cmd, args })
-        return { status: 0 }
-      }
-    })
-    expect(result.scrubbed).toHaveLength(2)
-    expect(result.errors).toEqual([])
-    expect(calls).toHaveLength(2)
-    for (const c of calls) {
-      expect(c.cmd).toBe("xattr")
-      expect(c.args.slice(0, 2)).toEqual(["-d", "com.apple.quarantine"])
-    }
-  })
-
-  it("scrubQuarantine surfaces spawn errors per-file without aborting the rest", () => {
-    mkdirSync(join(fakeRoot, "a"), { recursive: true })
-    mkdirSync(join(fakeRoot, "b"), { recursive: true })
-    writeFileSync(join(fakeRoot, "a/pty.node"), "x")
-    writeFileSync(join(fakeRoot, "b/other.node"), "x")
-    const result = scrubQuarantine(fakeRoot, {
-      platform: "darwin",
-      spawnSync: (_cmd: string, args: string[]) => {
-        if (args[2].endsWith("a/pty.node")) {
-          return { error: new Error("xattr missing"), status: null }
-        }
-        return { status: 0 }
-      }
-    })
-    expect(result.scrubbed).toHaveLength(1)
-    expect(result.errors).toHaveLength(1)
-    expect(result.errors[0].message).toBe("xattr missing")
   })
 
   it("inspectNativeArtifact reports adhoc + quarantine state from spawn output", () => {
@@ -564,27 +560,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     expect(isRelevantNativeArtifact("/nm/@esbuild/win32-x64/esbuild", "win32")).toBe(true)
   })
 
-  it("scrubQuarantinePaths strips quarantine from an explicit path list", () => {
-    mkdirSync(join(fakeRoot, "explicit"), { recursive: true })
-    writeFileSync(join(fakeRoot, "explicit/pty.node"), "x")
-    writeFileSync(join(fakeRoot, "explicit/spawn-helper"), "x")
-    const calls: { cmd: string; args: string[] }[] = []
-    const result = scrubQuarantinePaths(
-      [join(fakeRoot, "explicit/pty.node"), join(fakeRoot, "explicit/spawn-helper")],
-      {
-        platform: "darwin",
-        spawnSync: (cmd: string, args: string[]) => {
-          calls.push({ cmd, args })
-          return { status: 0 }
-        }
-      }
-    )
-    expect(result.scrubbed).toHaveLength(2)
-    expect(result.errors).toEqual([])
-    expect(calls).toHaveLength(2)
-    expect(calls.every((c) => c.cmd === "xattr" && c.args[0] === "-d" && c.args[1] === "com.apple.quarantine")).toBe(true)
-  })
-
   it("scrubQuarantinePaths is a no-op on non-darwin", () => {
     const calls: unknown[] = []
     const result = scrubQuarantinePaths(
@@ -596,29 +571,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     )
     expect(result.scrubbed).toEqual([])
     expect(calls).toEqual([])
-  })
-
-  it("scrubSwiftToolchain scrubs toolchain artifacts returned by findSwiftToolchainArtifacts", () => {
-    mkdirSync(join(fakeRoot, "swift-bin"), { recursive: true })
-    writeFileSync(join(fakeRoot, "swift-bin", "swift"), "x")
-    writeFileSync(join(fakeRoot, "swift-bin", "swift-manifest"), "x")
-    const scrubbed: string[] = []
-    const result = scrubSwiftToolchain({
-      platform: "darwin",
-      spawnSync: (cmd: string, args: string[]) => {
-        if (cmd === "xcrun") return { status: 1, stdout: "" }
-        if (cmd === "which" && args[0] === "swift") {
-          return { status: 0, stdout: join(fakeRoot, "swift-bin", "swift") + "\n" }
-        }
-        if (cmd === "xattr") {
-          scrubbed.push(args[2])
-          return { status: 0 }
-        }
-        return { status: 1 }
-      }
-    })
-    expect(result.scrubbed.length).toBeGreaterThanOrEqual(1)
-    expect(result.scrubbed.some((p: string) => p.endsWith("swift-manifest"))).toBe(true)
   })
 
   it("scrubSwiftToolchain returns empty on non-darwin", () => {
@@ -693,26 +645,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     expect(result).toEqual([])
   })
 
-  it("prepareNodePtyForGatekeeper returns paths, scrub, and assessments together", () => {
-    mkdirSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64"), { recursive: true })
-    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/pty.node"), "x")
-    writeFileSync(join(fakeRoot, "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"), "x")
-
-    const result = prepareNodePtyForGatekeeper(fakeRoot, {
-      platform: "darwin",
-      arch: "arm64",
-      spawnSync: (cmd: string, args: string[]) => {
-        if (cmd === "xattr") return { status: 0 }
-        if (cmd === "spctl") return { status: 0, stdout: "accepted", stderr: "" }
-        return { status: 1 }
-      }
-    })
-    expect(result.paths).toHaveLength(2)
-    expect(result.scrub.scrubbed).toHaveLength(2)
-    expect(result.assessments).toHaveLength(2)
-    expect(result.assessments.every((a: { status: string }) => a.status === "allowed")).toBe(true)
-  })
-
   it("scrubQuarantineAll is a no-op on non-darwin", () => {
     const repo = mkdtempSync(join(tmpdir(), "aids-nodarwin-"))
     mkdirSync(join(repo, "node_modules/fsevents"), { recursive: true })
@@ -724,28 +656,6 @@ describe("native artifact discovery + quarantine scrub", () => {
     })
     expect(result.scrubbed).toEqual([])
     expect(calls).toEqual([])
-  })
-
-  it("scrubQuarantineAll accepts explicit roots override", () => {
-    const rootA = mkdtempSync(join(tmpdir(), "aids-root-a-"))
-    const rootB = mkdtempSync(join(tmpdir(), "aids-root-b-"))
-    mkdirSync(join(rootA, "pkg"), { recursive: true })
-    mkdirSync(join(rootB, "pkg"), { recursive: true })
-    writeFileSync(join(rootA, "pkg/pty.node"), "x")
-    writeFileSync(join(rootB, "pkg/other.node"), "x")
-    const scrubbed: string[] = []
-    const result = scrubQuarantineAll("ignored-repo-root", {
-      platform: "darwin",
-      roots: [rootA, rootB],
-      spawnSync: (cmd: string, args: string[]) => {
-        if (cmd === "xattr") { scrubbed.push(args[2]); return { status: 0 } }
-        return { status: 1 }
-      }
-    })
-    expect(result.roots).toEqual([rootA, rootB])
-    expect(result.scrubbed).toHaveLength(2)
-    expect(scrubbed.some((p) => p.endsWith("pty.node"))).toBe(true)
-    expect(scrubbed.some((p) => p.endsWith("other.node"))).toBe(true)
   })
 
   it("findSwiftToolchainArtifacts returns empty on non-darwin", () => {

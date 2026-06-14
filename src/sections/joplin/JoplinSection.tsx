@@ -5,7 +5,6 @@
 // of "joplin/clip-result" — background owns the actual clip logic.
 
 import { useEffect, useMemo, useState } from "react"
-import { Storage } from "@plasmohq/storage"
 import {
   CLIP_MODES,
   CLIP_MODE_LABELS,
@@ -14,6 +13,7 @@ import {
   type RecentClip
 } from "../../lib/joplin-types"
 import { ping } from "../../lib/joplin"
+import { ExtensionStorage } from "../../lib/extension-storage"
 import {
   getRecentClips,
   clearRecentClips
@@ -21,7 +21,7 @@ import {
 import { ChatSection } from "../ai-chat/ChatSection"
 
 const LAST_MODE_KEY = "ai-dev-joplin-last-mode"
-const lastModeStorage = new Storage()
+const lastModeStorage = new ExtensionStorage()
 
 export function JoplinSection() {
   const [mode, setMode] = useState<ClipMode>("simplified")

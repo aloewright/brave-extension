@@ -10,7 +10,7 @@ interface PostBody {
   limit?: number
 }
 
-const KNOWN_TYPES: ResourceType[] = ["conversation", "link", "bookmark", "recording", "pdf", "capture", "highlight"]
+const KNOWN_TYPES: ResourceType[] = ["conversation", "link", "bookmark", "recording", "pdf", "capture", "highlight", "scrape"]
 
 router.post("/", async (c) => {
   const body = await c.req.json<PostBody>().catch(() => null)

@@ -23,12 +23,41 @@ import {
 } from "./capture-upload"
 import { suggestMediaFilename } from "./ai-rename"
 import { base64ToBytes, captureFullPagePdf } from "./pdf-capture"
+import type { ScrapeResult } from "../types"
 
 export type QuickActionResult =
   | { kind: "success"; message: string }
   | { kind: "error"; message: string }
 
 const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
+const PDF_MIME_TYPE = "application/pdf"
+const DOWNLOAD_URL_REVOKE_DELAY_MS = 30_000
+
+function pdfBase64ToBlob(base64: string): Blob {
+  const bytes = base64ToBytes(base64)
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return new Blob([buffer], { type: PDF_MIME_TYPE })
+}
+
+async function downloadPdfBase64(base64: string, filename: string): Promise<void> {
+  const dataUrl = `data:${PDF_MIME_TYPE};base64,${base64}`
+  if (typeof URL.createObjectURL !== "function") {
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false })
+    return
+  }
+
+  const url = URL.createObjectURL(pdfBase64ToBlob(base64))
+  try {
+    await chrome.downloads.download({ url, filename, saveAs: false })
+  } catch {
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false })
+  } finally {
+    if (typeof URL.revokeObjectURL === "function") {
+      setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_REVOKE_DELAY_MS)
+    }
+  }
+}
 
 /**
  * Capture the visible tab (or, when activeTab isn't available, prompt the
@@ -112,12 +141,10 @@ export async function runFullPagePdfQuickAction(): Promise<QuickActionResult> {
     const baseFilename = `page-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`
     const settings = await getSettings()
     const { destination, fallbackReason } = resolveCaptureDestination(baseFilename, settings)
-    const dataUrl = `data:application/pdf;base64,${base64}`
 
     if (destination.kind === "cloud") {
       try {
-        const bytes = base64ToBytes(base64)
-        const body = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" })
+        const body = pdfBase64ToBlob(base64)
         const uploaded = await uploadCapture({
           apiUrl: destination.apiUrl,
           apiToken: destination.apiToken,
@@ -134,12 +161,12 @@ export async function runFullPagePdfQuickAction(): Promise<QuickActionResult> {
           err instanceof CaptureUploadError
             ? `Cloud upload failed (${err.status}); saving locally instead`
             : `Cloud upload failed: ${err instanceof Error ? err.message : String(err)}`
-        await chrome.downloads.download({ url: dataUrl, filename: baseFilename, saveAs: false })
+        await downloadPdfBase64(base64, baseFilename)
         return { kind: "error", message: msg }
       }
     }
 
-    await chrome.downloads.download({ url: dataUrl, filename: destination.filename, saveAs: false })
+    await downloadPdfBase64(base64, destination.filename)
     const prefix =
       fallbackReason === "cloud-disabled"
         ? "Cloud disabled — "
@@ -187,6 +214,40 @@ export async function runSaveLinkQuickAction(): Promise<QuickActionResult> {
       () => resolve({ kind: "success", message: "Link saved" })
     )
   })
+}
+
+/**
+ * Ask the background service worker to scrape the active page. The background
+ * owns persistence, sidebar broadcasts, and optional Worker sync so the context
+ * menu and quick action stay behaviorally identical.
+ */
+export async function runScrapeCurrentPageQuickAction(): Promise<QuickActionResult> {
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+    const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
+    if (!tab?.id || !tab.url) return { kind: "error", message: "No active tab" }
+    if (/^(chrome|chrome-extension|about|edge|brave):\/\//.test(tab.url)) {
+      return { kind: "error", message: "Cannot scrape browser-internal pages" }
+    }
+
+    const result = await new Promise<ScrapeResult | { error: string } | null>((resolve) => {
+      chrome.runtime.sendMessage({ type: "SCRAPE_TAB", tabId: tab.id }, (response) => {
+        const err = chrome.runtime.lastError
+        if (err) {
+          resolve({ error: err.message || "scrape failed" })
+          return
+        }
+        resolve(response ?? null)
+      })
+    })
+
+    if (!result) return { kind: "error", message: "Scrape returned no content" }
+    if ("error" in result) return { kind: "error", message: result.error }
+    const words = result.text.trim() ? result.text.trim().split(/\s+/).length : 0
+    return { kind: "success", message: `Scraped ${words.toLocaleString()} words` }
+  } catch (err) {
+    return { kind: "error", message: `Scrape failed: ${err instanceof Error ? err.message : String(err)}` }
+  }
 }
 
 /**

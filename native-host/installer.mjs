@@ -341,19 +341,106 @@ export function removeTokenAndEnv(home = homedir()) {
   }
 }
 
+// ── Browser extension ID discovery ───────────────────────────────────────
+
+function existingProfileDirs(root) {
+  if (!existsSync(root)) return []
+  const dirs = new Set([join(root, "Default")])
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.add(join(root, entry.name))
+    }
+  } catch {}
+  return [...dirs]
+}
+
+export function browserPreferencePaths(home = homedir(), platform = process.platform) {
+  const roots = []
+  if (platform === "darwin") {
+    roots.push(
+      join(home, "Library", "Application Support", "BraveSoftware", "Brave-Browser"),
+      join(home, "Library", "Application Support", "Google", "Chrome"),
+      join(home, "Library", "Application Support", "Chromium")
+    )
+  } else if (platform === "linux") {
+    roots.push(
+      join(home, ".config", "BraveSoftware", "Brave-Browser"),
+      join(home, ".config", "google-chrome"),
+      join(home, ".config", "chromium")
+    )
+  }
+
+  const paths = []
+  for (const root of roots) {
+    for (const profileDir of existingProfileDirs(root)) {
+      paths.push(join(profileDir, "Preferences"))
+      paths.push(join(profileDir, "Secure Preferences"))
+    }
+  }
+  return [...new Set(paths)]
+}
+
+function extensionCandidateScore(ext, repoRoot) {
+  const path = typeof ext?.path === "string" ? resolvePath(ext.path) : ""
+  const repo = resolvePath(repoRoot)
+  const buildPath = join(repo, "build")
+  const legacyPath = join(repo, "dist", "extension")
+  const manifest = ext?.manifest && typeof ext.manifest === "object" ? ext.manifest : {}
+  const displayName = `${manifest.name || ""} ${manifest.short_name || ""}`
+  const disabled = Array.isArray(ext?.disable_reasons) && ext.disable_reasons.length > 0
+
+  let score = 0
+  if (path === buildPath) score += 80
+  else if (path.startsWith(`${buildPath}/`)) score += 75
+  else if (path === legacyPath || path.startsWith(`${legacyPath}/`)) score += 35
+  else if (path === repo || path.startsWith(`${repo}/`)) score += 25
+  if (/Brave Dev Extension|brave-extension|ai-dev-sidebar/i.test(displayName)) score += 10
+  if (ext?.state === 1) score += 5
+  if (disabled || ext?.state === 0) score -= 100
+  return score
+}
+
+export function findExtensionIdInBrowserPreferences(options = {}) {
+  const {
+    home = homedir(),
+    platform = process.platform,
+    repoRoot = process.cwd(),
+    preferencePaths = browserPreferencePaths(home, platform)
+  } = options
+  const candidates = []
+
+  for (const source of preferencePaths) {
+    if (!existsSync(source)) continue
+    try {
+      const data = JSON.parse(readFileSync(source, "utf-8"))
+      const exts = data.extensions?.settings || {}
+      for (const [id, ext] of Object.entries(exts)) {
+        const score = extensionCandidateScore(ext, repoRoot)
+        if (score > 0) candidates.push({ id, source, score })
+      }
+    } catch {
+      /* ignore unparseable browser preference files */
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score || a.source.localeCompare(b.source) || a.id.localeCompare(b.id))
+  return candidates[0] ? { id: candidates[0].id, source: candidates[0].source } : null
+}
+
 // ── macOS Gatekeeper / quarantine remediation (ALO-472) ──────────────────
 //
 // node-pty ships ad-hoc-signed `.node` and `spawn-helper` Mach-O bundles
-// (no Developer ID). When pnpm extracts them from a downloaded tarball, the
-// files can inherit the `com.apple.quarantine` xattr. Gatekeeper then
+// (no Developer ID). When pnpm extracts or builds them, the files can inherit
+// Gatekeeper/XProtect xattrs such as `com.apple.quarantine` or
+// `com.apple.provenance`. Gatekeeper then
 // shows "Apple could not verify '<random>.node' is free of malware…" the
 // first time the dlopen happens — the popup blocks the user's first
 // terminal session. The transient hash-prefixed filename in the popup is
 // XProtect's internal scan-cache name; the actual file on disk is
-// `prebuilds/darwin-{arm64,x64}/pty.node`.
+// node-pty's `pty.node` or `spawn-helper`.
 //
-// Fix: strip `com.apple.quarantine` from every Mach-O artifact the
-// native-host depends on at install time. Idempotent — re-running converges.
+// Fix: strip Gatekeeper-related xattrs from every Mach-O artifact the
+// native-host depends on at install/runtime. Idempotent — re-running converges.
 
 /**
  * Names we always treat as native artifacts even without an extension. Add
@@ -534,42 +621,134 @@ export function findSwiftToolchainArtifacts(options = {}) {
 }
 
 /**
- * Strip `com.apple.quarantine` from explicit paths. Injectable spawn for tests.
+ * Strip Gatekeeper-related extended attributes from explicit paths.
+ * Injectable spawn for tests.
  */
 export function scrubQuarantinePaths(paths, options = {}) {
   if ((options.platform ?? process.platform) !== "darwin") {
     return { scrubbed: [], errors: [] }
   }
   const spawn = options.spawnSync ?? defaultSpawnSync
+  const xattrBin = options.xattrCommand || (existsSync("/usr/bin/xattr") ? "/usr/bin/xattr" : "xattr")
   const scrubbed = []
   const errors = []
+  const gatekeeperXattrs = [
+    "com.apple.quarantine",
+    "com.apple.provenance",
+    "com.apple.macl"
+  ]
   for (const path of paths) {
-    const res = spawn("xattr", ["-d", "com.apple.quarantine", path], {
-      stdio: "pipe",
-      encoding: "utf8"
-    })
-    if (res.error) {
-      errors.push({ path, message: res.error.message })
-      continue
+    let failed = null
+    const listXattrs = () => {
+      const list = spawn(xattrBin, [path], {
+        stdio: "pipe",
+        encoding: "utf8"
+      })
+      if (list.error) {
+        return { failed: list.error.message, attrs: new Set() }
+      }
+      if (list.status !== 0) {
+        return {
+          failed: `${list.stderr ?? ""}${list.stdout ?? ""}`.trim() || `exit code ${list.status}`,
+          attrs: new Set()
+        }
+      }
+      return {
+        failed: null,
+        attrs: new Set(
+          String(list.stdout ?? "")
+            .split("\n")
+            .map((attr) => attr.trim())
+            .filter(Boolean)
+        )
+      }
     }
-    if (res.status !== 0) {
-      const stderr = res.stderr || ""
-      const stdout = res.stdout || ""
-      const detail = (stderr + stdout).trim() || `exit code ${res.status}`
-      errors.push({ path, message: detail })
-      continue
+    const firstList = listXattrs()
+    failed = firstList.failed
+    let presentXattrs = firstList.attrs
+    for (const attr of gatekeeperXattrs) {
+      if (failed) break
+      if (!presentXattrs.has(attr)) continue
+      const del = spawn(xattrBin, ["-d", attr, path], {
+        stdio: "pipe",
+        encoding: "utf8"
+      })
+      if (del.error) {
+        failed = del.error.message
+        break
+      }
+      if (del.status !== 0) {
+        const detail = `${del.stderr ?? ""}${del.stdout ?? ""}`.trim()
+        if (detail && !/No such xattr/i.test(detail)) {
+          failed = detail
+          break
+        }
+      }
     }
-    scrubbed.push(path)
+    if (!failed && options.clearAllXattrs) {
+      const res = spawn(xattrBin, ["-c", path], {
+        stdio: "pipe",
+        encoding: "utf8"
+      })
+      if (res.error) {
+        failed = res.error.message
+      } else if (res.status !== 0) {
+        const stderr = res.stderr || ""
+        const stdout = res.stdout || ""
+        failed = (stderr + stdout).trim() || `exit code ${res.status}`
+      }
+    }
+    if (!failed && options.verifyRemoval === true) {
+      const secondList = listXattrs()
+      failed = secondList.failed
+      presentXattrs = secondList.attrs
+    }
+    if (!failed && options.verifyRemoval === true) {
+      const remaining = gatekeeperXattrs.filter((attr) => presentXattrs.has(attr))
+      if (remaining.length > 0) {
+        // Some macOS provenance stamps have been observed to survive an
+        // apparently-successful child-process `xattr -d`. Retry through
+        // /bin/sh and then verify again; this matches the manual shell
+        // cleanup path that reliably clears the `.9db…node` popup trigger.
+        spawn(
+          "/bin/sh",
+          [
+            "-c",
+            "for a in com.apple.quarantine com.apple.provenance com.apple.macl; do /usr/bin/xattr -d \"$a\" \"$1\" 2>/dev/null || true; done",
+            "scrub-xattr",
+            path
+          ],
+          { stdio: "pipe", encoding: "utf8" }
+        )
+        const finalList = listXattrs()
+        failed = finalList.failed
+        presentXattrs = finalList.attrs
+      }
+    }
+    if (!failed && options.verifyRemoval === true) {
+      const remaining = gatekeeperXattrs.filter((attr) => presentXattrs.has(attr))
+      if (remaining.length > 0) {
+        failed = `xattrs remain after scrub: ${remaining.join(", ")}`
+      }
+    }
+    if (failed) {
+      errors.push({ path, message: failed })
+    } else {
+      scrubbed.push(path)
+    }
     const base = path.split("/").pop()
     if (base === "spawn-helper") {
-      try { chmodSync(path, 0o755) } catch { /* best effort */ }
+      try {
+        const mode = statSync(path).mode
+        if ((mode & 0o111) === 0) chmodSync(path, 0o755)
+      } catch { /* best effort */ }
     }
   }
   return { scrubbed, errors }
 }
 
 /**
- * Strip `com.apple.quarantine` from every native artifact found under
+ * Strip Gatekeeper-related xattrs from every native artifact found under
  * `root`. On non-darwin platforms this is a no-op so callers don't need
  * to platform-gate at the call site.
  */
@@ -597,10 +776,23 @@ export function resolveNodePtyNativePaths(nativeHostDir, options = {}) {
   if (platform !== "darwin") return []
   const nm = join(nativeHostDir, "node_modules")
   if (!existsSync(nm)) return []
+  const found = new Set()
+  const add = (p) => {
+    if (existsSync(p)) found.add(p)
+  }
+  for (const p of findNativeArtifacts(nm, { platform })) {
+    if (!p.includes("/node-pty/")) continue
+    if (p.includes("/build/Release/")) {
+      add(p)
+    }
+  }
   const needle = `/prebuilds/${platform}-${arch}/`
-  return findNativeArtifacts(nm, { platform }).filter(
-    (p) => p.includes("/node-pty/") && p.includes(needle)
-  )
+  for (const p of findNativeArtifacts(nm, { platform })) {
+    if (p.includes("/node-pty/") && p.includes(needle)) {
+      add(p)
+    }
+  }
+  return [...found].sort()
 }
 
 /** Run `spctl --assess` for a Mach-O executable. */
@@ -627,20 +819,26 @@ export function assessNativeExecutable(path, options = {}) {
 
 /**
  * Scrub quarantine on node-pty Mach-O helpers and return Gatekeeper assessment.
- * Quarantine removal alone does not satisfy Gatekeeper for linker-signed
- * prebuilds — the user must approve once via the dialog or Allow Anyway.
+ *
+ * Important: do not run `spctl --assess` on the runtime terminal-launch path.
+ * On some macOS versions, assessing the ad-hoc `spawn-helper` can stamp
+ * `com.apple.provenance` back onto the file immediately after we scrub it,
+ * recreating the exact warning we are trying to prevent. Diagnostics can opt
+ * into assessment with `{ assess: true }`; normal install/launch only scrubs.
  */
 export function prepareNodePtyForGatekeeper(nativeHostDir, options = {}) {
   const paths = resolveNodePtyNativePaths(nativeHostDir, options)
   const scrub = scrubQuarantinePaths(paths, options)
-  const assessments = paths.map((p) => assessNativeExecutable(p, options))
+  const assessments = options.assess
+    ? paths.map((p) => assessNativeExecutable(p, options))
+    : []
   return { paths, scrub, assessments }
 }
 
 export const NODE_PTY_GATEKEEPER_HINT =
   "If macOS shows '.<hex>-00000000.node Not Opened', that is node-pty's pty.node " +
-  "during XProtect scan. Click Open (not Cancel), or use System Settings → " +
-  "Privacy & Security → Allow Anyway once per node-pty version."
+  "or spawn-helper during XProtect scan. Run `pnpm rebuild-pty` from the repo root " +
+  "to rebuild locally and clear Gatekeeper xattrs before opening a sidebar terminal."
 
 /**
  * Default `node_modules` trees in this monorepo that may ship Mach-O addons

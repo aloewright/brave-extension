@@ -139,7 +139,7 @@ export function Highlights() {
           return (
             <li
               key={row.id}
-              className="flex min-h-80 flex-col gap-4 rounded-lg border border-fg/10 bg-surface p-4 shadow-[0_18px_45px_rgba(0,0,0,0.16)]"
+              className="flex min-h-80 min-w-0 flex-col gap-4 overflow-hidden rounded-lg border border-fg/10 bg-surface p-4 shadow-[0_18px_45px_rgba(0,0,0,0.16)]"
             >
               <div className="flex items-start gap-3">
                 {row.source_favicon ? (
@@ -190,15 +190,19 @@ export function Highlights() {
                   />
                 </div>
               ) : (
-                <div className="flex flex-1 flex-col gap-3">
-                  <blockquote className="whitespace-pre-wrap text-sm leading-6 text-fg">
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
+                  <blockquote className="min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-fg [overflow-wrap:anywhere]">
                     {row.text}
                   </blockquote>
-                  {row.note && <p className="rounded bg-bg/45 p-3 text-sm text-fg/90">{row.note}</p>}
+                  {row.note && (
+                    <p className="min-w-0 rounded bg-bg/45 p-3 text-sm text-fg/90 [overflow-wrap:anywhere]">
+                      {row.note}
+                    </p>
+                  )}
                   {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
                       {tags.map((tag) => (
-                        <span key={tag} className="rounded border border-fg/10 px-2 py-1 text-xs text-fg/90">
+                        <span key={tag} className="max-w-full rounded border border-fg/10 px-2 py-1 text-xs text-fg/90 [overflow-wrap:anywhere]">
                           {tag}
                         </span>
                       ))}

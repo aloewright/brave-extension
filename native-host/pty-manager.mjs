@@ -30,12 +30,15 @@ async function loadPty() {
     prepareNodePtyForGatekeeper(NATIVE_HOST_DIR)
   }
   try {
-    // Official `node-pty` ships darwin prebuilds (linker-signed adhoc). macOS
-    // may block the first dlopen until the user clicks Open on a dialog that
-    // names XProtect's scan-cache file (`.<hex>-00000000.node`) — that is
-    // this package's `pty.node`. Run `pnpm warm-pty` after install to approve
-    // once; the grant persists for the same node-pty version.
+    // Keep this import lazy: the native host scrubs node-pty's Mach-O files at
+    // launch and again here before dlopen so macOS does not show XProtect's
+    // transient `.<hex>-00000000.node` warning for the first terminal.
     ptyModule = await import("node-pty")
+    if (process.platform === "darwin") {
+      // dlopen can stamp provenance back onto the freshly scrubbed Mach-O
+      // files. Scrub once more before pty.spawn executes spawn-helper.
+      prepareNodePtyForGatekeeper(NATIVE_HOST_DIR)
+    }
     return ptyModule
   } catch (err) {
     const hint =

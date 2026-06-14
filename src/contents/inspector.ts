@@ -1,12 +1,4 @@
-import type { PlasmoCSConfig } from "plasmo";
-
 import type { ElementSnapshot, InspectorMessage } from "../types";
-
-export const config: PlasmoCSConfig = {
-  matches: ["<all_urls>"],
-  run_at: "document_idle",
-  all_frames: false,
-};
 
 const DOM_TOKEN = Math.random().toString(36).slice(2, 10);
 const OVERLAY_ID = `ui-surface-${DOM_TOKEN}`;

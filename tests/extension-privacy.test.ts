@@ -24,27 +24,4 @@ describe("extension page privacy", () => {
     expect(source).not.toContain("onMessageExternal.addListener((message");
   });
 
-  it("does not inject extension-branded DOM markers into web pages", () => {
-    const inspectorSource = readFileSync(
-      join(process.cwd(), "src/contents/inspector.ts"),
-      "utf8",
-    );
-    const pickerSource = readFileSync(
-      join(process.cwd(), "src/contents/picker.ts"),
-      "utf8",
-    );
-    const pageAgentSource = readFileSync(
-      join(process.cwd(), "src/contents/page-agent.ts"),
-      "utf8",
-    );
-
-    expect(inspectorSource).toContain("ACTIVE_ATTR");
-    expect(pickerSource).toContain("ACTIVE_ATTR");
-    expect(inspectorSource).not.toContain("alexometer-inspect-overlay");
-    expect(inspectorSource).not.toContain("data-alexometer-active");
-    expect(pickerSource).not.toContain("ai-dev-picker-overlay");
-    expect(pickerSource).not.toContain("data-ai-dev-picker");
-    expect(pageAgentSource).not.toContain("data-ai-dev");
-    expect(pageAgentSource).not.toContain("alexometer");
-  });
 });

@@ -145,8 +145,8 @@ interface StoredLink {
   title?: string
   date?: string
   tags?: string[]
-  // Plasmo's existing _lx CollectedLink uses these fields too — we tolerate
-  // both shapes by reading the legacy `date` and exposing `addedAt`.
+  // Legacy _lx CollectedLink data uses these fields too; tolerate both shapes
+  // by reading the legacy `date` and exposing `addedAt`.
 }
 
 async function readLinks(): Promise<StoredLink[]> {

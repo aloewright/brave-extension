@@ -1,11 +1,3 @@
-import type { PlasmoCSConfig } from "plasmo"
-
-export const config: PlasmoCSConfig = {
-  matches: ["http://*/*", "https://*/*"],
-  run_at: "document_idle",
-  all_frames: false
-}
-
 type MailTwoFactorResponse = {
   code?: string | null
   receivedAt?: number

@@ -41,3 +41,8 @@ binding = "AI"
 binding = "INGEST"
 name = "sidebar-ingest"
 class_name = "IngestWorkflow"
+
+# Runs due enabled scrape jobs. Each job's own interval/cron expression is
+# stored in D1; this tick only wakes the Worker often enough to check them.
+[triggers]
+crons = ["*/15 * * * *"]

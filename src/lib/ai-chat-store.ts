@@ -1,14 +1,14 @@
 // src/lib/ai-chat-store.ts
 //
 // Storage layer for the rolling AI chat conversation. Single key in
-// @plasmohq/storage. Append-only at runtime; updateMessage exists for
-// future patching paths but the orchestrator never calls it in V1.
+// chrome.storage.local. Append-only at runtime; updateMessage exists for future
+// patching paths but the orchestrator never calls it in V1.
 
-import { Storage } from "@plasmohq/storage"
 import type { ChatMessage, Conversation } from "./ai-chat-types"
+import { ExtensionStorage } from "./extension-storage"
 
 const STORAGE_KEY = "ai-dev-ai-chat-conversation"
-const storage = new Storage()
+const storage = new ExtensionStorage()
 
 export async function getConversation(): Promise<Conversation> {
   const raw = await storage.get<Conversation>(STORAGE_KEY)

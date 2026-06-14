@@ -21,6 +21,7 @@ import { PTYManager } from "./pty-manager.mjs"
 import { MCPServer } from "./mcp-server.mjs"
 import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
 import { prepareNodePtyForGatekeeper, scrubSwiftToolchain } from "./installer.mjs"
+import { backupInstalledExtension, listExtensionBackups } from "./extension-backup.mjs"
 
 const __hostDir = dirname(fileURLToPath(import.meta.url))
 if (process.platform === "darwin") {
@@ -67,6 +68,11 @@ async function waitForMcpReady() {
   } catch {
     return false
   }
+}
+
+function mcpPtyEnvIfReady() {
+  if (!mcp.port || !mcp.token) return {}
+  return mcp.ptyEnv()
 }
 
 function resolveUserConfigPath(configPath = "~/.claude.json") {
@@ -318,13 +324,19 @@ function parseMCPList(text) {
       type = "http"
     }
 
-    // Normalize status
+    // Normalize status. Claude CLI has used multiple marker glyphs here
+    // (`✓`, `✔`, `✗`, `✘`, `!`, `⏸`), so key off the status words instead
+    // of assuming a specific symbol. Otherwise connected servers parse as
+    // "unknown" and the settings UI never shows green.
     let status = "unknown"
-    const cleanStatus = statusRaw.replace(/[✓✗!]\s*/g, "").trim().toLowerCase()
-    if (cleanStatus.startsWith("connected")) status = "connected"
-    else if (cleanStatus.startsWith("failed")) status = "failed"
-    else if (cleanStatus.startsWith("needs auth")) status = "needs-auth"
-    else if (cleanStatus.startsWith("authenticat")) status = "needs-auth"
+    const cleanStatus = statusRaw.toLowerCase()
+    if (cleanStatus.includes("connected")) status = "connected"
+    else if (cleanStatus.includes("failed")) status = "failed"
+    else if (
+      cleanStatus.includes("needs auth") ||
+      cleanStatus.includes("authenticat") ||
+      cleanStatus.includes("pending approval")
+    ) status = "needs-auth"
     else if (cleanStatus.includes("disconnect")) status = "disconnected"
 
     // Determine source from name pattern
@@ -729,10 +741,9 @@ async function main() {
       }
 
       case "pty.spawn": {
-        await waitForMcpReady()
         const merged = {
           ...msg,
-          env: { ...(msg.env || {}), ...mcp.ptyEnv() }
+          env: { ...(msg.env || {}), ...mcpPtyEnvIfReady() }
         }
         await ptyManager.spawn(merged)
         break
@@ -895,6 +906,36 @@ async function main() {
 
       case "mcp.resource.remove": {
         if (msg.uri) mcp.removeResource(msg.uri)
+        break
+      }
+
+      case "extensions.backup": {
+        try {
+          const result = backupInstalledExtension(msg.extension || {}, { force: msg.force === true })
+          sendMessage({ type: "extensions.backup", requestId: msg.requestId, ok: true, ...result })
+        } catch (err) {
+          sendMessage({
+            type: "extensions.backup",
+            requestId: msg.requestId,
+            ok: false,
+            error: err.message
+          })
+        }
+        break
+      }
+
+      case "extensions.backups.list": {
+        try {
+          const result = listExtensionBackups()
+          sendMessage({ type: "extensions.backups.list", requestId: msg.requestId, ok: true, ...result })
+        } catch (err) {
+          sendMessage({
+            type: "extensions.backups.list",
+            requestId: msg.requestId,
+            ok: false,
+            error: err.message
+          })
+        }
         break
       }
 

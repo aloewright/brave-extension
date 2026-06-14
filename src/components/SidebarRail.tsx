@@ -1,32 +1,33 @@
-import { useEffect, useRef, useState } from "react"
-import type { SectionId } from "../sections/types"
-import { SECTIONS } from "../sections/types"
-import { LeoIcon, type LeoIconName } from "./leo"
+import { useEffect, useRef, useState } from "react";
+import type { SectionId } from "../sections/types";
+import { SECTIONS } from "../sections/types";
+import { LeoIcon, type LeoIconName } from "./leo";
+import { getSettings } from "../storage";
 import {
-  runPageAgentQuickAction,
   runPipQuickAction,
+  runScrapeCurrentPageQuickAction,
   type QuickActionResult,
   runSaveLinkQuickAction,
   runScreenshotQuickAction,
-  runFullPagePdfQuickAction
-} from "../lib/quick-actions"
-import { openResizableSidebarWindow } from "../lib/sidebar-window"
+  runFullPagePdfQuickAction,
+} from "../lib/quick-actions";
+import { openResizableSidebarWindow } from "../lib/sidebar-window";
 
 interface Props {
-  active: SectionId
-  onChange: (id: SectionId) => void
+  active: SectionId;
+  onChange: (id: SectionId) => void;
 }
 
 const ICONS: Record<SectionId, LeoIconName> = {
   terminal: "terminal",
   inspector: "search",
+  pageStudio: "paint-brush",
   extensions: "puzzle-piece",
-  tech: "cpu-chip",
   session: "inbox",
-  email: "inbox",
+  email: "mail",
   quickInfo: "avatar",
+  perplexity: "search",
   tasks: "list-checks",
-  passwords: "lock",
   bookmarks: "product-bookmarks",
   captures: "image-stack",
   cookies: "cookie",
@@ -35,79 +36,124 @@ const ICONS: Record<SectionId, LeoIconName> = {
   joplin: "file-export",
   agentChat: "robot",
   github: "github",
-  settings: "settings"
-}
+  lexicon: "book-open",
+  settings: "settings",
+};
 
 // Nord palette "frost" blue — locked here (rather than the theme tokens) so
 // the bottom quick-action group has an obvious, distinct accent regardless
 // of the active theme. ALO-471 spec calls these "nord blue".
-const NORD_BLUE = "#88C0D0"
+const NORD_BLUE = "#88C0D0";
 
 interface QuickActionDef {
-  label: string
-  icon: LeoIconName
-  run: () => Promise<QuickActionResult>
+  label: string;
+  icon: LeoIconName;
+  run: () => Promise<QuickActionResult>;
 }
 
-type QuickActionFeedback = QuickActionResult & { label: string }
+type QuickActionFeedback = QuickActionResult & { label: string };
 
 const QUICK_ACTIONS: QuickActionDef[] = [
-  { label: "Screenshot visible area", icon: "screenshot", run: runScreenshotQuickAction },
-  { label: "Save full-page PDF", icon: "file-export", run: runFullPagePdfQuickAction },
-  { label: "Picture-in-picture", icon: "picture-in-picture", run: runPipQuickAction },
+  {
+    label: "Screenshot visible area",
+    icon: "screenshot",
+    run: runScreenshotQuickAction,
+  },
+  {
+    label: "Save full-page PDF",
+    icon: "file-export",
+    run: runFullPagePdfQuickAction,
+  },
+  {
+    label: "Scrape current page",
+    icon: "search",
+    run: runScrapeCurrentPageQuickAction,
+  },
+  {
+    label: "Picture-in-picture",
+    icon: "picture-in-picture",
+    run: runPipQuickAction,
+  },
   { label: "Save link", icon: "link-normal", run: runSaveLinkQuickAction },
-  { label: "Page agent", icon: "cloud", run: runPageAgentQuickAction },
   {
     label: "Open resizable sidebar window",
     icon: "file-export",
     run: async () => {
-      await openResizableSidebarWindow()
-      return { kind: "success", message: "Opened resizable sidebar window" }
-    }
-  }
-]
+      await openResizableSidebarWindow();
+      return { kind: "success", message: "Opened resizable sidebar window" };
+    },
+  },
+];
 
 export function SidebarRail({ active, onChange }: Props) {
-  const [runningAction, setRunningAction] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<QuickActionFeedback | null>(null)
-  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [runningAction, setRunningAction] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<QuickActionFeedback | null>(null);
+  const [hiddenSections, setHiddenSections] = useState<Set<string>>(new Set());
+  const [hideQuickActions, setHideQuickActions] = useState(false);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
-      if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
-    }
-  }, [])
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const applyRailPrefs = (settings: {
+      hiddenRailSections?: string[];
+      hideRailQuickActions?: boolean;
+    }) => {
+      setHiddenSections(new Set(settings.hiddenRailSections ?? []));
+      setHideQuickActions(Boolean(settings.hideRailQuickActions));
+    };
+    void getSettings().then(applyRailPrefs);
+    const onChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area !== "local" || !changes["ai-dev-settings"]) return;
+      applyRailPrefs(changes["ai-dev-settings"].newValue ?? {});
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
 
   const showFeedback = (label: string, result: QuickActionResult) => {
-    setFeedback({ ...result, label })
-    if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
-    feedbackTimer.current = setTimeout(() => setFeedback(null), 1400)
-  }
+    setFeedback({ ...result, label });
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 1400);
+  };
 
   const handleQuickAction = async (def: QuickActionDef) => {
-    if (runningAction) return
-    setRunningAction(def.label)
-    setFeedback(null)
+    if (runningAction) return;
+    setRunningAction(def.label);
+    setFeedback(null);
     try {
-      showFeedback(def.label, await def.run())
+      showFeedback(def.label, await def.run());
     } catch (err) {
       showFeedback(def.label, {
         kind: "error",
-        message: err instanceof Error ? err.message : String(err)
-      })
+        message: err instanceof Error ? err.message : String(err),
+      });
     } finally {
-      setRunningAction(null)
+      setRunningAction(null);
     }
-  }
+  };
 
   return (
     <nav
-      className="relative flex flex-col items-center justify-between gap-1 px-1.5 py-2 border-r border-border bg-bg/50"
+      className="relative flex flex-col items-center justify-between gap-1 px-1.5 py-2 bg-bg/50"
       data-testid="sidebar-rail"
     >
-      <div className="flex flex-col items-center gap-1" data-testid="sidebar-rail-sections">
-        {SECTIONS.map((s) => {
-          const isActive = s.id === active
+      <div
+        className="flex flex-col items-center gap-1"
+        data-testid="sidebar-rail-sections"
+      >
+        {SECTIONS.filter(
+          (s) =>
+            s.id === "settings" || s.id === active || !hiddenSections.has(s.id),
+        ).map((s) => {
+          const isActive = s.id === active;
           return (
             <button
               key={s.id}
@@ -123,36 +169,45 @@ export function SidebarRail({ active, onChange }: Props) {
             >
               <LeoIcon name={ICONS[s.id]} size={16} />
             </button>
-          )
+          );
         })}
       </div>
 
       <div
-        className="flex flex-col items-center gap-1 pt-2 border-t border-border/50 w-full"
+        className={`flex flex-col items-center gap-1 pt-2 border-t border-border/50 w-full ${hideQuickActions ? "hidden" : ""}`}
         data-testid="sidebar-rail-quick-actions"
       >
         {QUICK_ACTIONS.map((def) => {
-          const isRunning = runningAction === def.label
-          const currentFeedback = feedback?.label === def.label ? feedback : null
+          const isRunning = runningAction === def.label;
+          const currentFeedback =
+            feedback?.label === def.label ? feedback : null;
           const iconName =
             currentFeedback?.kind === "error"
               ? "warning-triangle-outline"
               : currentFeedback
                 ? "check-normal"
-                : def.icon
+                : def.icon;
           const iconColor =
             currentFeedback?.kind === "error"
               ? "rgb(var(--error))"
               : currentFeedback
                 ? "rgb(var(--success))"
-                : NORD_BLUE
+                : NORD_BLUE;
           return (
             <button
               key={def.label}
               type="button"
               onClick={() => handleQuickAction(def)}
-              title={currentFeedback ? `${def.label}: ${currentFeedback.message}` : def.label}
-              aria-label={currentFeedback ? `${def.label}: ${currentFeedback.message}` : def.label}
+              title={
+                currentFeedback
+                  ? `${def.label}: ${currentFeedback.message}`
+                  : def.label
+              }
+              aria-label={
+                currentFeedback
+                  ? `${def.label}: ${currentFeedback.message}`
+                  : def.label
+              }
               aria-busy={isRunning ? true : undefined}
               disabled={runningAction !== null}
               data-feedback-kind={currentFeedback?.kind}
@@ -163,7 +218,7 @@ export function SidebarRail({ active, onChange }: Props) {
                   ? "rgba(136, 192, 208, 0.16)"
                   : currentFeedback
                     ? "rgba(136, 192, 208, 0.08)"
-                    : undefined
+                    : undefined,
               }}
             >
               {isRunning ? (
@@ -179,12 +234,12 @@ export function SidebarRail({ active, onChange }: Props) {
                 />
               )}
             </button>
-          )
+          );
         })}
         <span className="sr-only" aria-live="polite">
           {feedback ? `${feedback.label}: ${feedback.message}` : ""}
         </span>
       </div>
     </nav>
-  )
+  );
 }

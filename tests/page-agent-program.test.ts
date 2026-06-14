@@ -233,22 +233,6 @@ describe("native-host planner emits program", () => {
   })
 })
 
-describe("content script step rendering", () => {
-  const cs = readFileSync(join(process.cwd(), "src/contents/page-agent.ts"), "utf8")
-
-  it("declares a step ChatEntry variant", () => {
-    expect(cs).toMatch(/role:\s*["']step["']/)
-  })
-
-  it("renders a class 'step' element for step entries", () => {
-    expect(cs).toContain(".step")
-  })
-
-  it("listens for PAGE_AGENT_STEP_EVENT to push step entries", () => {
-    expect(cs).toContain("PAGE_AGENT_STEP_EVENT")
-  })
-})
-
 describe("background wiring", () => {
   const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
 

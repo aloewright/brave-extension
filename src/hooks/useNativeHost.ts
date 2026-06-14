@@ -155,9 +155,32 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     }
   }, [])
 
-  const send = useCallback((payload: any) => {
-    portRef.current?.postMessage({ type: "native-send", payload })
+  const reportLocalSendFailure = useCallback((payload: any, error: string) => {
+    setConnected(false)
+    if (typeof payload?.type === "string" && payload.type.startsWith("pty.")) {
+      optsRef.current.onPtyError?.(payload.sessionId, error)
+    } else {
+      optsRef.current.onError?.(error)
+    }
   }, [])
+
+  const send = useCallback((payload: any) => {
+    const port = portRef.current
+    if (!port) {
+      reportLocalSendFailure(payload, "Native host bridge is not connected")
+      return false
+    }
+    try {
+      port.postMessage({ type: "native-send", payload })
+      return true
+    } catch (err) {
+      reportLocalSendFailure(
+        payload,
+        err instanceof Error ? err.message : "Native host bridge failed to send"
+      )
+      return false
+    }
+  }, [reportLocalSendFailure])
 
   const exec = useCallback((command: string, backend: CLIBackend, cwd?: string) => {
     send({ type: "exec", command, backend, cwd })
@@ -185,7 +208,7 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
 
   const ptySpawn = useCallback(
     (sessionId: string, opts?: { cwd?: string; cols?: number; rows?: number; env?: Record<string, string> }) => {
-      send({ type: "pty.spawn", sessionId, ...(opts || {}) })
+      return send({ type: "pty.spawn", sessionId, ...(opts || {}) })
     },
     [send]
   )

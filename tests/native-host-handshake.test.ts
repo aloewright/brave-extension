@@ -33,6 +33,32 @@ describe("native host sidepanel handshake", () => {
     expect(backgroundSource).not.toContain('port.postMessage({ type: "mcp.tool.result"');
   });
 
+  it("surfaces failed terminal native sends as pty errors instead of silent spinner states", () => {
+    const backgroundSource = readFileSync(
+      join(process.cwd(), "src/background.ts"),
+      "utf8",
+    );
+    const hookSource = readFileSync(
+      join(process.cwd(), "src/hooks/useNativeHost.ts"),
+      "utf8",
+    );
+    const terminalSource = readFileSync(
+      join(process.cwd(), "src/sections/terminal/TerminalSection.tsx"),
+      "utf8",
+    );
+
+    expect(backgroundSource).toContain("function nativeSendFailurePayload");
+    expect(backgroundSource).toContain('msg.type.startsWith("pty.")');
+    expect(backgroundSource).toContain('type: "pty.error"');
+    expect(backgroundSource).toContain("if (port && postToNative(port, msg)) return;");
+    expect(hookSource).toContain("reportLocalSendFailure");
+    expect(hookSource).toContain("return false");
+    expect(hookSource).toContain('return send({ type: "pty.spawn"');
+    expect(terminalSource).toContain("const SPAWN_TIMEOUT_MS");
+    expect(terminalSource).toContain("spawn timed out");
+    expect(terminalSource).toContain("pendingData");
+  });
+
   it("waits for MCP startup before reporting status from the native host", () => {
     const hostSource = readFileSync(
       join(process.cwd(), "native-host/ai-dev-host.mjs"),
@@ -49,5 +75,19 @@ describe("native host sidepanel handshake", () => {
     expect(hostSource).toContain("msg.configPath");
     expect(hostSource).toContain("await waitForMcpReady()");
     expect(hostSource).toContain("sendMcpStatus(msg.configPath");
+  });
+
+  it("does not block pty.spawn on MCP startup", () => {
+    const hostSource = readFileSync(
+      join(process.cwd(), "native-host/ai-dev-host.mjs"),
+      "utf8",
+    );
+    const spawnStart = hostSource.indexOf('case "pty.spawn"');
+    const spawnEnd = hostSource.indexOf('case "pty.write"', spawnStart);
+    const spawnCase = hostSource.slice(spawnStart, spawnEnd);
+
+    expect(spawnCase).toContain("mcpPtyEnvIfReady()");
+    expect(spawnCase).toContain("await ptyManager.spawn(merged)");
+    expect(spawnCase).not.toContain("waitForMcpReady");
   });
 });
