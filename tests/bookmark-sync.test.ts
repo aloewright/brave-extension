@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { pushSnapshot } from "../src/background/bookmark-sync"
+import { BOOKMARK_SNAPSHOT_KEY } from "../src/lib/bookmark-snapshot"
 import { setSettings } from "../src/storage"
 
 interface FakeNode {
@@ -95,6 +96,56 @@ describe("pushSnapshot", () => {
     expect(body.bookmarks).toHaveLength(1)
     expect(body.bookmarks[0]!.id).toBe("b1")
     expect(body.bookmarks[0]!.isFavorite).toBe(true)  // under "Bookmarks Bar"
+  })
+
+  it("posts the extension's cached bookmark snapshot when one already exists", async () => {
+    installChromeBookmarks([
+      {
+        id: "0",
+        title: "",
+        children: [
+          { id: "browser-only", title: "Browser", url: "https://browser.example" }
+        ]
+      }
+    ])
+    await chrome.storage.local.set({
+      [BOOKMARK_SNAPSHOT_KEY]: {
+        pulledAt: "2026-06-14T12:00:00Z",
+        bookmarks: [
+          {
+            id: "cached",
+            url: "https://cached.example",
+            title: "Cached",
+            parentId: "1",
+            category: "Synced",
+            path: ["Synced"],
+            isFavorite: false,
+            dateAdded: 100,
+            index: 0
+          }
+        ]
+      }
+    })
+    await setSettings({
+      sidebarSyncEnabled: true,
+      sidebarApiUrl: "https://sidebar.pdx.software",
+      sidebarApiToken: "tok"
+    })
+
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ inserted: 1, updated: 0, deleted: 0, reembedded: 1 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const r = await pushSnapshot()
+    expect(r.pushed).toBe(true)
+    const call = fetchMock.mock.calls[0] as unknown as [URL | RequestInfo, RequestInit]
+    const body = JSON.parse(String(call[1].body)) as { bookmarks: { id: string }[]; pulledAt: string }
+    expect(body.pulledAt).toBe("2026-06-14T12:00:00Z")
+    expect(body.bookmarks.map((bookmark) => bookmark.id)).toEqual(["cached"])
   })
 
   it("surfaces an error reason when the request fails", async () => {

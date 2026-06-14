@@ -12,42 +12,40 @@ import type { SectionId } from "../../src/sections/types";
 const SECTION_IDS: SectionId[] = [
   "terminal",
   "inspector",
+  "pageStudio",
   "extensions",
-  "tech",
   "session",
+  "email",
   "quickInfo",
   "tasks",
-  "passwords",
   "bookmarks",
   "captures",
-  "email",
   "cookies",
-  "recorder",
-  "eyedropper",
-  "joplin",
   "agentChat",
   "github",
+  "lexicon",
   "settings",
 ];
 
 const SECTION_LABELS: Record<SectionId, string> = {
   terminal: "Terminal",
   inspector: "Inspector",
+  pageStudio: "Page Studio",
   extensions: "Extensions",
-  tech: "Tech",
   session: "Session",
+  email: "Email",
   quickInfo: "Contact Enrichment",
+  perplexity: "Perplexity",
   tasks: "Tasks",
-  passwords: "Passwords",
   bookmarks: "Bookmarks",
   captures: "Page Captures",
-  email: "Email",
   cookies: "Cookies",
   recorder: "Recorder",
   eyedropper: "Eyedropper",
   joplin: "Joplin",
   agentChat: "Agent",
   github: "GitHub",
+  lexicon: "Lexicon",
   settings: "Settings",
 };
 
@@ -82,13 +80,41 @@ test("last-active section persists across reload", async ({
   openSidepanel,
 }) => {
   const page = await openSidepanel();
-  await page.locator("nav button[aria-label='Recorder']").click();
+  await page.locator("nav button[aria-label='Lexicon']").click();
   await expect(
-    page.locator("nav button[aria-label='Recorder']"),
+    page.locator("nav button[aria-label='Lexicon']"),
   ).toHaveAttribute("aria-pressed", "true");
   await page.reload();
-  await page.waitForSelector("nav button[aria-label='Recorder']");
+  await page.waitForSelector("nav button[aria-label='Lexicon']");
   await expect(
-    page.locator("nav button[aria-label='Recorder']"),
+    page.locator("nav button[aria-label='Lexicon']"),
   ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("settings sections render as expandable accordions", async ({
+  openSidepanel,
+}) => {
+  const page = await openSidepanel();
+  await page.locator("nav button[aria-label='Settings']").click();
+
+  const summaries = page.locator("main summary");
+  await expect(summaries).toContainText([
+    "Appearance",
+    "Paths",
+    "MCP Servers",
+    "Sidebar UX",
+    "Connection Status",
+  ]);
+
+  const appearance = page
+    .locator("main details")
+    .filter({ hasText: "Appearance" });
+  await expect(appearance).toHaveAttribute("open", "");
+
+  const paths = page.locator("main details").filter({ hasText: "Paths" });
+  await expect(paths).toHaveCount(1);
+  await expect(paths).not.toHaveAttribute("open", "");
+  await paths.locator("summary").click();
+  await expect(paths).toHaveAttribute("open", "");
+  await expect(page.getByPlaceholder("~/Projects/my-app")).toBeVisible();
 });

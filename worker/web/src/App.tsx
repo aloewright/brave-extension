@@ -8,6 +8,7 @@ import { Links } from "./pages/Links"
 import { Bookmarks } from "./pages/Bookmarks"
 import { Recordings, RecordingDetail } from "./pages/Recordings"
 import { Pdfs, PdfDetail } from "./pages/Pdfs"
+import { Scrapes } from "./pages/Scrapes"
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/recordings/:id" element={<RecordingDetail />} />
             <Route path="/pdfs" element={<Pdfs />} />
             <Route path="/pdfs/:id" element={<PdfDetail />} />
+            <Route path="/scrapes" element={<Scrapes />} />
             <Route path="*" element={<div className="p-6 text-muted">Not found.</div>} />
           </Routes>
         </main>

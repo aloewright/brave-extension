@@ -24,7 +24,7 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
 ## Later
 
 - Firefox port (manifest v3 with the WebExtension `browser.*` shim and a
-  Plasmo target swap).
+  second custom extension build target).
 - Opt-in telemetry for backend-selection mix, error rates, and command
   latency — strictly local-first, off by default.
 - Conversation export (Markdown / JSONL) and per-project memory pinning.
@@ -33,8 +33,12 @@ Living plan for AI Dev Sidebar. Items move up the list as they land.
 
 ## Done
 
+- Custom extension build path: `pnpm build` and `pnpm build:extension` now run
+  `node scripts/build-extension.mjs`, which emits the MV3 manifest, explicit
+  extension pages, module background worker, and stable content-script files
+  without Plasmo or esbuild.
 - CI hardening (ALO-110 / ALO-111 / ALO-112): the `tests` workflow gained a
-  non-blocking `build` job that runs the full Plasmo production build to
+  non-blocking `build` job that runs the full extension production build to
   catch manifest / bundler regressions; `vitest.config.ts` now enforces a
   60% line / 50% branch coverage floor (scoped to `src/lib/**` initially),
   and `pnpm test:coverage` runs the v8 reporter.

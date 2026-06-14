@@ -1,5 +1,6 @@
 import { useState } from "react"
 
+import { PretextTextBlock } from "./PretextTextBlock"
 import type { ElementSnapshot } from "../types"
 import { generateCss, generateHtml, generateTailwind } from "../utils/codegen"
 
@@ -41,9 +42,12 @@ export function ExportPanel({ snapshot, onCopy }: Props) {
           Copy
         </button>
       </div>
-      <pre className="p-2 text-[10px] font-mono text-fg/80 max-h-48 overflow-auto whitespace-pre-wrap break-all">
+      <PretextTextBlock
+        text={code}
+        className="p-2 text-[10px] font-mono text-fg/80 max-h-48 overflow-auto whitespace-pre-wrap break-all"
+      >
         {code}
-      </pre>
+      </PretextTextBlock>
     </div>
   )
 }

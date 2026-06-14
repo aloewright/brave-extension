@@ -1,22 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import type { RecentClip } from "../src/lib/joplin-types"
-
-// Mock @plasmohq/storage. The real implementation persists to chrome.storage;
-// for tests we back it with an in-memory map. Reset between tests.
-const mem = new Map<string, unknown>()
-vi.mock("@plasmohq/storage", () => ({
-  Storage: class {
-    async get<T>(key: string): Promise<T | undefined> {
-      return mem.get(key) as T | undefined
-    }
-    async set(key: string, value: unknown): Promise<void> {
-      mem.set(key, value)
-    }
-    async remove(key: string): Promise<void> {
-      mem.delete(key)
-    }
-  }
-}))
 
 import { getRecentClips, prependRecentClip, clearRecentClips } from "../src/lib/joplin-recents"
 
@@ -33,10 +16,6 @@ function makeClip(id: string, offsetSecs = 0): RecentClip {
 }
 
 describe("joplin-recents", () => {
-  beforeEach(() => {
-    mem.clear()
-  })
-
   it("getRecentClips returns [] when storage is empty", async () => {
     expect(await getRecentClips()).toEqual([])
   })

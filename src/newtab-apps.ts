@@ -67,6 +67,10 @@ export const WORKSPACE_APPS: WorkspaceApp[] = [
         url: "https://dash.cloudflare.com/85d376fc54617bcb57185547f08e528b/workers-and-pages",
       },
       {
+        label: "AI",
+        url: "https://dash.cloudflare.com/85d376fc54617bcb57185547f08e528b/ai/ai-gateway/gateways",
+      },
+      {
         label: "Images",
         url: "https://dash.cloudflare.com/85d376fc54617bcb57185547f08e528b/images/hosted?stamp=1780813063881",
       },

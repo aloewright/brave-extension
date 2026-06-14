@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import "./style.css";
+import "./lib/appearance-entry";
 import {
   backfillBuiltinQuickLinks,
   WORKSPACE_APPS,
@@ -22,8 +23,6 @@ import {
   type QuickLink,
 } from "./newtab-quick-links";
 
-const TOP_APP_COUNT = 3;
-const FOCUS_APP_COUNT = 4;
 const MAX_OPEN_TAB_ITEMS = 8;
 
 const APP_ICONS: Partial<Record<WorkspaceAppIcon, ReactNode>> = {
@@ -2075,13 +2074,6 @@ function NewTabWorkspace() {
     }
   };
 
-  const appGroups = useMemo(() => {
-    const top = apps.slice(0, TOP_APP_COUNT);
-    const focus = apps.slice(TOP_APP_COUNT, TOP_APP_COUNT + FOCUS_APP_COUNT);
-    const compact = apps.slice(TOP_APP_COUNT + FOCUS_APP_COUNT);
-    return { top, focus, compact };
-  }, [apps]);
-
   const handleDrop = (toIndex: number) => {
     const from = dragIndex;
     setDragIndex(null);
@@ -2121,10 +2113,10 @@ function NewTabWorkspace() {
 
         <section className="newtab-app-groups" aria-label="Workspace apps">
           <div
-            className="newtab-app-grid newtab-app-grid--top"
-            aria-label="Primary apps"
+            className="newtab-app-grid newtab-app-grid--workspace"
+            aria-label="Workspace apps"
           >
-            {appGroups.top.map((app, i) => (
+            {apps.map((app, i) => (
               <AppCard
                 key={app.url}
                 app={app}
@@ -2133,38 +2125,9 @@ function NewTabWorkspace() {
                 onRemove={removeApp}
               />
             ))}
-          </div>
-          <div
-            className="newtab-app-grid newtab-app-grid--focus"
-            aria-label="Daily apps"
-          >
-            {appGroups.focus.map((app, i) => (
-              <AppCard
-                key={app.url}
-                app={app}
-                drag={makeDrag(TOP_APP_COUNT + i)}
-                onEdit={setEditingApp}
-                onRemove={removeApp}
-              />
-            ))}
-          </div>
-          <div
-            className="newtab-app-grid newtab-app-grid--compact"
-            aria-label="Other apps"
-          >
-            {appGroups.compact.map((app, i) => (
-              <AppCard
-                key={app.url}
-                app={app}
-                size="small"
-                drag={makeDrag(TOP_APP_COUNT + FOCUS_APP_COUNT + i)}
-                onEdit={setEditingApp}
-                onRemove={removeApp}
-              />
-            ))}
             <button
               type="button"
-              className="workspace-app-card workspace-app-card--small workspace-app-card--add"
+              className="workspace-app-card workspace-app-card--add"
               onClick={addCustomApp}
               aria-label="Add new link"
             >

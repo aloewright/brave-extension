@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { LeoBadge, LeoButton, LeoIcon } from "../../components/leo"
+import { PretextTextBlock } from "../../components/PretextTextBlock"
 import { openExternalLink } from "../../lib/open-url"
 
 interface SocialLink {
@@ -249,7 +250,7 @@ export function QuickInfoSection() {
 
         {data && (
           <div className="grid gap-3">
-            <section className="rounded border border-border bg-card/25 p-3">
+            <section className="min-w-0 overflow-hidden rounded border border-border bg-card/25 p-3">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate text-sm font-semibold text-fg">
@@ -269,7 +270,12 @@ export function QuickInfoSection() {
                 </LeoBadge>
               </div>
               {data.description && (
-                <p className="line-clamp-4 text-xs leading-5 text-fg/65">{data.description}</p>
+                <PretextTextBlock
+                  text={data.description}
+                  className="line-clamp-4 text-xs leading-5 text-fg/65"
+                >
+                  {data.description}
+                </PretextTextBlock>
               )}
               {keyFacts.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -287,23 +293,27 @@ export function QuickInfoSection() {
             <InfoList title="Organizations" items={data.organizations} />
             <InfoList title="Locations" items={data.locations} />
 
-            <section className="rounded border border-border bg-card/25 p-3">
+            <section className="min-w-0 overflow-hidden rounded border border-border bg-card/25 p-3">
               <SectionTitle title="Social Links" count={data.socialLinks.length} />
               {data.socialLinks.length === 0 ? (
                 <EmptyLine />
               ) : (
-                <div className="grid gap-1.5">
+                <div className="grid min-w-0 gap-1.5">
                   {data.socialLinks.map((link) => (
                     <a
                       key={`${link.label}:${link.url}`}
                       href={link.url}
                       onClick={openExternalLink(link.url)}
-                      className="flex min-w-0 items-center gap-2 rounded border border-border/60 bg-bg/60 px-2 py-1.5 text-xs hover:bg-accent"
+                      className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded border border-border/60 bg-bg/60 px-2 py-1.5 text-xs hover:bg-accent"
                       title={link.url}
                     >
                       <LeoIcon name="globe" size={13} className="shrink-0 text-fg/35" />
-                      <span className="shrink-0 font-medium text-fg/70">{link.label}</span>
-                      <span className="min-w-0 flex-1 truncate text-fg/45">{hostname(link.url)}</span>
+                      <span className="max-w-[34%] shrink-0 truncate font-medium text-fg/70">
+                        {link.label}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-fg/45">
+                        {link.url}
+                      </span>
                     </a>
                   ))}
                 </div>
@@ -358,7 +368,7 @@ function InfoList({
   kind?: "email" | "phone"
 }) {
   return (
-    <section className="rounded border border-border bg-card/25 p-3">
+    <section className="min-w-0 overflow-hidden rounded border border-border bg-card/25 p-3">
       <SectionTitle title={title} count={items.length} />
       {items.length === 0 ? (
         <EmptyLine />

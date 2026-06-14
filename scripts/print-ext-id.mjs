@@ -7,7 +7,7 @@ import * as path from "node:path"
 import * as fs from "node:fs"
 import * as os from "node:os"
 
-const EXT_DIST = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "build", "chrome-mv3-prod")
+const EXT_DIST = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "build")
 if (!fs.existsSync(EXT_DIST)) {
   console.error(`Build not found at ${EXT_DIST} — run \`pnpm build\` first.`)
   process.exit(2)

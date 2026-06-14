@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Strip com.apple.quarantine from native addons under every repo node_modules
- * tree (node-pty, esbuild, rollup *.node, fsevents.node, swift-manifest, …).
+ * Strip Gatekeeper/XProtect xattrs from native addons under every repo
+ * node_modules tree (node-pty, esbuild, rollup *.node, fsevents.node,
+ * swift-manifest, …).
  * See README macOS Gatekeeper section (ALO-472).
  */
 import { resolve, join, dirname } from "path"

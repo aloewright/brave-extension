@@ -10,9 +10,12 @@ import recordings from "./routes/recordings"
 import videos from "./routes/videos"
 import pdfs from "./routes/pdfs"
 import highlights from "./routes/highlights"
+import extensions from "./routes/extensions"
 import notes from "./routes/notes"
 import search from "./routes/search"
 import tts from "./routes/tts"
+import scrapes, { runDueScrapeJobs } from "./routes/scrapes"
+import newtab from "./routes/newtab"
 import type { Env } from "./env"
 
 // Re-exported so the [[workflows]] binding can resolve the class.
@@ -36,9 +39,12 @@ app.route("/api/recordings", recordings)
 app.route("/api/videos", videos)
 app.route("/api/pdfs", pdfs)
 app.route("/api/highlights", highlights)
+app.route("/api/extensions", extensions)
 app.route("/api/notes", notes)
 app.route("/api/search", search)
 app.route("/api/tts", tts)
+app.route("/api/scrapes", scrapes)
+app.route("/api/newtab", newtab)
 
 app.notFound((c) => {
   // For /api/* paths, return the JSON 404. For everything else, hand off to
@@ -54,4 +60,15 @@ app.notFound((c) => {
   return c.json({ error: { code: "not_found", message: "no such route" } }, 404)
 })
 
-export default app
+type ScheduledHonoApp = typeof app & {
+  scheduled: ExportedHandlerScheduledHandler<Env>
+}
+
+const worker = app as ScheduledHonoApp
+worker.scheduled = async (_controller, env, ctx) => {
+  ctx.waitUntil(runDueScrapeJobs(env).catch((err) => {
+    console.warn("scrape cron failed", err)
+  }))
+}
+
+export default worker

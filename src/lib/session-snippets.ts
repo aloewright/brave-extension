@@ -1,12 +1,12 @@
 /**
- * Session snippets storage (ALO-470). Context-menu "Save highlight"
+ * Session highlights storage (ALO-470). Context-menu "Save highlight"
  * captures the selected text + source URL/title into chrome.storage.local
  * under SESSION_SNIPPETS_KEY. The selected text is also copied to the
  * user's clipboard via chrome.scripting.executeScript in the calling tab.
  *
  * The previous "save-highlight" context menu fed src/review.ts (the
  * Review panel under Inspector). That still exists for backward
- * compatibility, but the canonical Session feed is here.
+ * compatibility, but the canonical Session highlights feed is here.
  */
 export const SESSION_SNIPPETS_KEY = "session.snippets" as const
 export const SNIPPET_CAP = 500
@@ -71,7 +71,7 @@ export async function clearSnippets(): Promise<void> {
 
 /**
  * Subscribe to chrome.storage changes and call back with the latest list
- * whenever the snippet key changes. Returns an unsubscribe function. The
+ * whenever the highlight key changes. Returns an unsubscribe function. The
  * subscription is best-effort — if chrome.storage.onChanged is missing
  * (test environments without the shim) we just no-op.
  */

@@ -1,8 +1,40 @@
 {
-  "extends": "plasmo/templates/tsconfig.base",
-  "exclude": ["node_modules", "worker", "agent-app"],
-  "include": [".plasmo/index.d.ts", "./**/*.ts", "./**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "worker",
+    "agent-app",
+    "password-app",
+    "tests/e2e"
+  ],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tabs/**/*.ts",
+    "tabs/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "*.ts",
+    "*.tsx"
+  ],
   "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["chrome", "node", "vitest/globals"],
     "ignoreDeprecations": "6.0"
   }
 }

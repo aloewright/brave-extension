@@ -5,7 +5,7 @@ import * as os from "node:os"
 
 /**
  * Shared Playwright fixture that launches Chromium with the unpacked
- * extension loaded from `build/chrome-mv3-prod`, discovers the extension
+ * extension loaded from `build`, discovers the extension
  * id from the service-worker URL, and exposes a helper for opening the
  * sidepanel HTML directly.
  *
@@ -15,7 +15,7 @@ import * as os from "node:os"
  * for testing. Storage and runtime APIs work the same.
  */
 
-export const EXT_DIST = path.resolve(__dirname, "../../build/chrome-mv3-prod")
+export const EXT_DIST = path.resolve(__dirname, "../../build")
 
 interface Fixtures {
   context: BrowserContext

@@ -1,0 +1,9 @@
+# JWT Secret for signing tokens (required)
+# IMPORTANT: change this value before any real deployment.
+# Generate one with: openssl rand -hex 32
+# (Example only, 64 hex chars = 32 bytes)
+JWT_SECRET=Enter-your-JWT-key-here-at-least-32-characters
+
+# Optional but strongly recommended on public deployments before the first user
+# registers. If set, the first admin account must provide this invite code.
+BOOTSTRAP_INVITE_CODE=replace-with-a-private-bootstrap-code

@@ -333,13 +333,16 @@ describe("new tab workspace apps", () => {
     }
   });
 
-  it("keeps the new tab layout grouped for search, cards, tabs, and history", () => {
+  it("keeps the new tab layout wired for search, fluid cards, tabs, and history", () => {
     const source = readFileSync(join(process.cwd(), "src/newtab.tsx"), "utf8");
     const styles = readFileSync(join(process.cwd(), "src/style.css"), "utf8");
+    const html = readFileSync(join(process.cwd(), "newtab.html"), "utf8");
     const packageJson = JSON.parse(
       readFileSync(join(process.cwd(), "package.json"), "utf8"),
     );
 
+    expect(html).toContain('<html lang="en" data-extension-page="newtab">');
+    expect(html).toContain('<body data-extension-page="newtab">');
     expect(source).toContain("https://search.brave.com/search");
     expect(source).toContain("chrome.tabs.query");
     expect(source).toContain("chrome.history.search");
@@ -353,24 +356,28 @@ describe("new tab workspace apps", () => {
     expect(source).toContain("onToggleKeepActive={toggleKeepActive}");
     expect(source).toContain("maxResults: 0");
     expect(source).not.toContain("chrome.bookmarks.getRecent");
+    expect(styles).toContain('html[data-extension-page="newtab"]');
+    expect(styles).toContain('body[data-extension-page="newtab"]');
+    expect(styles).toContain("scrollbar-width: none;");
     expect(source).toContain('title="Open Tabs"');
     expect(source).toContain('title="History"');
     expect(source).toContain("newtab-panel--scroll");
     expect(styles).toContain(".newtab-panel--scroll .newtab-shortcut-list");
     expect(styles).toContain("overflow-y: auto;");
     expect(packageJson.manifest.permissions).toContain("history");
-    expect(styles).toContain(".newtab-app-grid--top");
+    expect(source).toContain("newtab-app-grid newtab-app-grid--workspace");
+    expect(source).not.toContain("TOP_APP_COUNT");
+    expect(source).not.toContain("FOCUS_APP_COUNT");
+    expect(source).not.toContain("newtab-app-grid--top");
+    expect(source).not.toContain("newtab-app-grid--focus");
+    expect(source).not.toContain("newtab-app-grid--compact");
+    expect(styles).toContain(".newtab-app-grid");
     expect(styles).toContain(
-      "grid-template-columns: repeat(3, minmax(0, 1fr));",
+      "grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));",
     );
-    expect(styles).toContain(".newtab-app-grid--focus");
-    expect(styles).toContain(
-      "grid-template-columns: repeat(4, minmax(0, 1fr));",
-    );
-    expect(styles).toContain(".newtab-app-grid--compact");
-    expect(styles).toContain(
-      "grid-template-columns: repeat(5, minmax(0, 1fr));",
-    );
+    expect(styles).not.toContain(".newtab-app-grid--top");
+    expect(styles).not.toContain(".newtab-app-grid--focus");
+    expect(styles).not.toContain(".newtab-app-grid--compact");
     expect(styles).toContain(".newtab-panels");
     expect(styles).toContain(
       "grid-template-columns: repeat(2, minmax(0, 1fr));",

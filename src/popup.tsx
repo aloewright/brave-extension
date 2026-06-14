@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "./style.css";
+import "./lib/appearance-entry";
 import { companyNameForDomain } from "./lib/company-names";
 import { chooseDesktopMediaStream } from "./lib/desktop-capture";
 import { openResizableSidebarWindow } from "./lib/sidebar-window";

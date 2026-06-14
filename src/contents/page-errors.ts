@@ -1,10 +1,4 @@
-import type { PlasmoCSConfig } from "plasmo"
 import { normalizeConsoleEntry } from "../lib/console-errors"
-
-export const config: PlasmoCSConfig = {
-  matches: ["<all_urls>"],
-  run_at: "document_start"
-}
 
 const errors: any[] = []
 

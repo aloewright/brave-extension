@@ -1,6 +1,6 @@
 // src/contents/readability-bundle.ts
 //
-// Plasmo content-script entry. Bundled as a named content-script file so the
+// Bundled as a named content-script file by scripts/build-extension.mjs so the
 // background can inject it on demand via:
 //   chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: [READABILITY_BUNDLE_PATH] })
 //
@@ -13,12 +13,7 @@
 // script is lightweight (assigns one global) and runs at document_idle so
 // it does not meaningfully affect page performance.
 
-import type { PlasmoCSConfig } from "plasmo"
 import { Readability } from "@mozilla/readability"
-
-export const config: PlasmoCSConfig = {
-  matches: ["<all_urls>"]
-}
 
 ;(globalThis as { __JoplinReadability__?: typeof Readability }).__JoplinReadability__ =
   Readability

@@ -4,25 +4,43 @@ import { SidebarRail } from "./components/SidebarRail";
 import type { SectionId } from "./sections/types";
 import { TerminalSection } from "./sections/terminal/TerminalSection";
 import { InspectorSection } from "./sections/inspector/InspectorSection";
+import { PageStudioSection } from "./sections/page-studio/PageStudioSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
 import { EmailSection } from "./sections/email/EmailSection";
 import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
-import { PasswordsSection } from "./sections/passwords/PasswordsSection";
-import { TechSection } from "./sections/tech/TechSection";
+// import { PerplexitySection } from "./sections/perplexity/PerplexitySection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
 import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 // import { RecorderSection } from "./sections/recorder/RecorderSection";
-import { EyedropperSection } from "./sections/eyedropper/EyedropperSection";
 import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
+import { LexiconSection } from "./sections/lexicon/LexiconSection";
 // import { JoplinSection } from "./sections/joplin/JoplinSection";
 import { AgentChatSection } from "./sections/agent-chat/AgentChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
+import { applyAppearanceSettings } from "./lib/appearance";
+import { getSettings } from "./storage";
 
 const ACTIVE_KEY = "ui.activeSection";
+
+function resolveStoredSection(
+  section: string | undefined,
+): SectionId | undefined {
+  if (
+    section === "aiChat" ||
+    section === "joplin" ||
+    section === "perplexity" ||
+    section === "passwords"
+  ) {
+    return "session";
+  }
+  if (section === "tech" || section === "eyedropper") return "inspector";
+  if (section === "recorder") return "captures";
+  return section as SectionId | undefined;
+}
 
 function SidePanel() {
   const [active, setActive] = useState<SectionId>("terminal");
@@ -32,12 +50,7 @@ function SidePanel() {
     chrome.storage.local.get(ACTIVE_KEY).then((res) => {
       const stored = res[ACTIVE_KEY] as SectionId | undefined;
       // Redirect removed/hidden sections so users do not land on a blank panel.
-      const resolved =
-        (stored as string) === "aiChat" || (stored as string) === "joplin"
-          ? "session"
-          : (stored as string) === "recorder"
-          ? "captures"
-          : stored;
+      const resolved = resolveStoredSection(stored);
       if (resolved) setActive(resolved);
     });
     // React to programmatic navigation (e.g. QuickActionsBar → Library/Recorder).
@@ -48,16 +61,30 @@ function SidePanel() {
       if (area !== "local" || !changes[ACTIVE_KEY]) return;
       const next = changes[ACTIVE_KEY].newValue as string | undefined;
       // Mirror the initial-load redirect for removed/hidden sections.
-      const resolved =
-        next === "aiChat" || next === "joplin"
-          ? "session"
-          : next === "recorder"
-          ? "captures"
-          : (next as SectionId | undefined);
+      const resolved = resolveStoredSection(next);
       if (resolved) setActive(resolved);
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    getSettings().then((settings) => {
+      if (mounted) applyAppearanceSettings(settings);
+    });
+    const onChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      area: string,
+    ) => {
+      if (area !== "local" || !changes["ai-dev-settings"]) return;
+      applyAppearanceSettings(changes["ai-dev-settings"].newValue);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => {
+      mounted = false;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
   }, []);
 
   const change = (id: SectionId) => {
@@ -70,14 +97,14 @@ function SidePanel() {
   }, [active]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-x-hidden bg-bg font-sans text-fg">
+    <div className="app-shell flex h-screen w-full flex-col overflow-x-hidden text-fg">
       <ConsentBanner />
       <div className="flex-1 min-h-0 flex">
         <SidebarRail active={active} onChange={change} />
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {/*
-           * TerminalSection and PasswordsSection stay mounted across section switches so
-           * they survive when the user navigates to another section in the rail.
+           * TerminalSection stays mounted across section switches so it survives when
+           * the user navigates to another section in the rail.
            * Hidden via CSS when inactive; the other sections remain conditionally
            * rendered to keep their original mount/unmount semantics.
            */}
@@ -86,14 +113,9 @@ function SidePanel() {
           >
             <TerminalSection active={active === "terminal"} />
           </div>
-          <div
-            className={`flex-1 min-h-0 flex flex-col ${active === "passwords" ? "" : "hidden"}`}
-          >
-            <PasswordsSection />
-          </div>
           {active === "inspector" && <InspectorSection />}
+          {active === "pageStudio" && <PageStudioSection />}
           {active === "extensions" && <ExtensionsSection />}
-          {active === "tech" && <TechSection />}
           <div
             className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${active === "session" ? "" : "hidden"}`}
           >
@@ -101,12 +123,12 @@ function SidePanel() {
           </div>
           {active === "email" && <EmailSection />}
           {active === "quickInfo" && <QuickInfoSection />}
+          {/* {active === "perplexity" && <PerplexitySection />} */}
           {active === "tasks" && <TasksSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}
           {/* {active === "recorder" && <RecorderSection />} */}
-          {active === "eyedropper" && <EyedropperSection />}
           {/* {active === "joplin" && <JoplinSection />} */}
           {agentChatMounted && (
             <div
@@ -116,6 +138,7 @@ function SidePanel() {
             </div>
           )}
           {active === "github" && <GitHubSection />}
+          {active === "lexicon" && <LexiconSection />}
           {active === "settings" && <SettingsSection />}
         </main>
       </div>

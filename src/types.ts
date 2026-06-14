@@ -83,6 +83,103 @@ export interface GitHubFeatureSettings {
   features: Record<string, boolean>
 }
 
+export type ThemeName = "dark" | "light" | "aurora" | "paper" | "ember" | "custom"
+export type AppearanceDensity = "compact" | "comfortable" | "spacious"
+export type AppearanceBackgroundStyle = "flat" | "glow" | "grain"
+export type AppearanceColorKey =
+  | "background"
+  | "foreground"
+  | "card"
+  | "cardForeground"
+  | "popover"
+  | "popoverForeground"
+  | "primary"
+  | "primaryForeground"
+  | "secondary"
+  | "secondaryForeground"
+  | "muted"
+  | "mutedForeground"
+  | "accent"
+  | "accentForeground"
+  | "destructive"
+  | "destructiveForeground"
+  | "border"
+  | "input"
+  | "sidebar"
+  | "sidebarForeground"
+  | "success"
+  | "warning"
+  | "error"
+  | "info"
+
+export interface AppearanceSettings {
+  background: string
+  foreground: string
+  card: string
+  cardForeground: string
+  popover: string
+  popoverForeground: string
+  primary: string
+  primaryForeground: string
+  secondary: string
+  secondaryForeground: string
+  muted: string
+  mutedForeground: string
+  accent: string
+  accentForeground: string
+  destructive: string
+  destructiveForeground: string
+  border: string
+  input: string
+  sidebar: string
+  sidebarForeground: string
+  success: string
+  warning: string
+  error: string
+  info: string
+  radius: number
+  shadowOpacity: number
+  fontScale: number
+  fontFamily: string
+  monoFontFamily: string
+  density: AppearanceDensity
+  backgroundStyle: AppearanceBackgroundStyle
+}
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  background: "#3b3b3f",
+  foreground: "#f1f1f1",
+  card: "#4a4a4e",
+  cardForeground: "#f1f1f1",
+  popover: "#3b3b3f",
+  popoverForeground: "#f1f1f1",
+  primary: "#e1e3e6",
+  primaryForeground: "#3b3b3f",
+  secondary: "#505055",
+  secondaryForeground: "#f1f1f1",
+  muted: "#4a4a4e",
+  mutedForeground: "#b0b0b5",
+  accent: "#5a5a60",
+  accentForeground: "#f1f1f1",
+  destructive: "#9e5e5e",
+  destructiveForeground: "#fceaea",
+  border: "#505055",
+  input: "#505055",
+  sidebar: "#313135",
+  sidebarForeground: "#f1f1f1",
+  success: "#4ade80",
+  warning: "#fbbf24",
+  error: "#f87171",
+  info: "#60a5fa",
+  radius: 8,
+  shadowOpacity: 0.3,
+  fontScale: 1,
+  fontFamily: '"Inter", system-ui, sans-serif',
+  monoFontFamily: '"JetBrains Mono", "Fira Code", monospace',
+  density: "comfortable",
+  backgroundStyle: "flat"
+}
+
 export interface Settings {
   backend: CLIBackend
   workingDirectory: string
@@ -90,7 +187,8 @@ export interface Settings {
   autoScrape: boolean
   captureConsole: boolean
   captureNetwork: boolean
-  theme: "dark" | "light"
+  theme: ThemeName
+  appearance: AppearanceSettings
   // ALO-467 — capture (screenshot + full-page PDF) destination control.
   // "downloads" is the default for backwards compatibility with prior
   // releases; ALO-468 introduces "cloud" + cloudCapturesEnabled gating.
@@ -127,6 +225,10 @@ export interface Settings {
   browserAgentCloudPlanningEnabled: boolean
   browserAgentCloudVisionEnabled: boolean
   browserAgentCloudOcrEnabled: boolean
+  hiddenRailSections: string[]
+  hideRailQuickActions: boolean
+  passwordManagerProvider: PasswordManagerProvider
+  passwordAppUrl: string
   braveSearchApiKey: string
   dopplerProject: string
   dopplerConfig: string
@@ -147,6 +249,7 @@ export interface Settings {
 
 export type TtsVoice = "hyperion" | "thalia" | "andromeda" | "helena" | "apollo"
 export type TtsModel = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
+export type PasswordManagerProvider = "proton-pass" | "none" | "nodewarden-self-hosted"
 
 /** Status reported by the native host's mcp.status RPC. */
 export interface MCPStatus {
@@ -191,6 +294,7 @@ export const DEFAULT_SETTINGS: Settings = {
   captureConsole: true,
   captureNetwork: false,
   theme: "dark",
+  appearance: DEFAULT_APPEARANCE,
   captureSaveLocation: "downloads",
   captureSubfolder: "ai-dev-sidebar",
   cloudCapturesEnabled: false,
@@ -216,6 +320,10 @@ export const DEFAULT_SETTINGS: Settings = {
   browserAgentCloudPlanningEnabled: false,
   browserAgentCloudVisionEnabled: false,
   browserAgentCloudOcrEnabled: false,
+  hiddenRailSections: [],
+  hideRailQuickActions: false,
+  passwordManagerProvider: "proton-pass",
+  passwordAppUrl: "https://go.lazee.workers.dev",
   braveSearchApiKey: "",
   dopplerProject: "",
   dopplerConfig: "",

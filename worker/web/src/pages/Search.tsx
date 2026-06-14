@@ -11,7 +11,8 @@ const TYPE_LABEL: Record<ResourceType, string> = {
   recording: "Recording",
   pdf: "PDF",
   capture: "Capture",
-  highlight: "Highlight"
+  highlight: "Highlight",
+  scrape: "Scrape"
 }
 
 function detailPathFor(hit: SearchHit): string {
@@ -23,6 +24,7 @@ function detailPathFor(hit: SearchHit): string {
     case "pdf": return `/pdfs/${hit.id}`
     case "capture": return `/search`
     case "highlight": return `/highlights`
+    case "scrape": return `/scrapes`
   }
 }
 
@@ -63,7 +65,7 @@ export function Search() {
           value={query}
           autoFocus
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your highlights, conversations, links, bookmarks, recordings, pdfs..."
+          placeholder="Search your highlights, conversations, links, bookmarks, recordings, pdfs, scrapes..."
           className="flex-1 rounded border border-fg/20 bg-bg px-3 py-2 text-fg outline-none focus:border-accent"
         />
         <button

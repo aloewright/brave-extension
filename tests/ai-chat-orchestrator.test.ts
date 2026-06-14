@@ -25,7 +25,9 @@ vi.mock("../src/storage", () => ({
 }))
 
 // Mock chrome.runtime.sendMessage to capture broadcasts
+const baseChrome = (globalThis as { chrome?: unknown }).chrome as Record<string, unknown>
 ;(globalThis as { chrome?: unknown }).chrome = {
+  ...baseChrome,
   runtime: {
     sendMessage: sendMessageMock
   },
@@ -33,22 +35,6 @@ vi.mock("../src/storage", () => ({
     query: vi.fn(async () => [])
   }
 }
-
-// Mock @plasmohq/storage with in-memory backing
-const mem = new Map<string, unknown>()
-vi.mock("@plasmohq/storage", () => ({
-  Storage: class {
-    async get<T>(key: string): Promise<T | undefined> {
-      return mem.get(key) as T | undefined
-    }
-    async set(key: string, value: unknown): Promise<void> {
-      mem.set(key, value)
-    }
-    async remove(key: string): Promise<void> {
-      mem.delete(key)
-    }
-  }
-}))
 
 import { runChatTurn, stopTurn } from "../src/background/chat-orchestrator"
 
@@ -60,13 +46,29 @@ function turnDoneOf(broadcasts: Array<ChatTurnUpdateEvent | ChatTurnDoneEvent>):
   return broadcasts.find((b) => b.type === "ai-chat/turn-done") as ChatTurnDoneEvent | undefined
 }
 
+async function readStoredConversation(): Promise<{
+  messages: ChatMessage[]
+  compactedHead?: { summary: string; truncatedThrough: string }
+}> {
+  const result = await chrome.storage.local.get("ai-dev-ai-chat-conversation")
+  return result["ai-dev-ai-chat-conversation"] as {
+    messages: ChatMessage[]
+    compactedHead?: { summary: string; truncatedThrough: string }
+  }
+}
+
+async function seedStoredConversation(messages: ChatMessage[]): Promise<void> {
+  await chrome.storage.local.set({
+    "ai-dev-ai-chat-conversation": { messages }
+  })
+}
+
 describe("chat-orchestrator runChatTurn", () => {
   beforeEach(() => {
     chatMock.mockReset()
     compactMock.mockReset()
     getSettingsMock.mockReset()
     sendMessageMock.mockReset()
-    mem.clear()
     getSettingsMock.mockResolvedValue({ joplinToken: "tok" })
   })
 
@@ -169,9 +171,7 @@ describe("chat-orchestrator runChatTurn", () => {
   it("user message persists even if bridge rejects on first call", async () => {
     chatMock.mockRejectedValue(new Error("nope"))
     await runChatTurn({ userMessageId: "u-keep", text: "stored", ambient: {} })
-    const stored = mem.get("ai-dev-ai-chat-conversation") as {
-      messages: ChatMessage[]
-    }
+    const stored = await readStoredConversation()
     expect(stored.messages.find((m) => m.id === "u-keep")).toBeDefined()
   })
 
@@ -204,7 +204,7 @@ describe("chat-orchestrator runChatTurn", () => {
       turnId: "t-" + i,
       createdAt: new Date(1_700_000_000_000 + i * 1000).toISOString()
     }))
-    mem.set("ai-dev-ai-chat-conversation", { messages: seeded })
+    await seedStoredConversation(seeded)
     chatMock.mockResolvedValue({
       ok: true,
       available: true,
@@ -216,10 +216,7 @@ describe("chat-orchestrator runChatTurn", () => {
     // maybeCompact runs detached in finally — drain microtask queue
     await new Promise((r) => setTimeout(r, 0))
     expect(compactMock).toHaveBeenCalled()
-    const stored = mem.get("ai-dev-ai-chat-conversation") as {
-      messages: ChatMessage[]
-      compactedHead?: { summary: string; truncatedThrough: string }
-    }
+    const stored = await readStoredConversation()
     expect(stored.compactedHead?.summary).toBe("summary")
   })
 
@@ -231,7 +228,7 @@ describe("chat-orchestrator runChatTurn", () => {
       turnId: "t-" + i,
       createdAt: new Date(1_700_000_000_000 + i * 1000).toISOString()
     }))
-    mem.set("ai-dev-ai-chat-conversation", { messages: seeded })
+    await seedStoredConversation(seeded)
     chatMock.mockResolvedValue({
       ok: true,
       available: true,

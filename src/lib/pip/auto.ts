@@ -11,11 +11,10 @@
  * runs because of `all_frames: true`) pick up the live toggle too —
  * not just the top frame.
  *
- * Why direct `chrome.storage.local` instead of the @plasmohq/storage
- * wrapper used elsewhere: this flag is intentionally kept out of the
- * existing settings shape (`src/types.ts` / `src/storage.ts`) so it can
- * land independently of unrelated WIP in those files. Default is off
- * (key absent === false), so there's no migration to worry about.
+ * This flag is intentionally kept out of the existing settings shape
+ * (`src/types.ts` / `src/storage.ts`) so it can land independently of
+ * unrelated WIP in those files. Default is off (key absent === false),
+ * so there's no migration to worry about.
  *
  * Both helpers are best-effort and never throw — chrome API failures
  * degrade silently. The getter returns `false`, the setter eats the

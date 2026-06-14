@@ -1,5 +1,3 @@
-import type { PlasmoCSConfig } from "plasmo"
-
 import {
   getAutoPipEnabled,
   PIP_AUTO_CHANGED_MESSAGE,
@@ -27,12 +25,6 @@ import {
  * so embedded YouTube/Vimeo/etc. inside a third-party page is reachable
  * from the iframe's own copy of this script.
  */
-
-export const config: PlasmoCSConfig = {
-  matches: ["<all_urls>"],
-  run_at: "document_idle",
-  all_frames: true
-}
 
 function pickBestVideo(): HTMLVideoElement | null {
   const all = Array.from(document.querySelectorAll("video")) as HTMLVideoElement[]

@@ -7,7 +7,6 @@
 // The orchestrator imports buildTools(getToken) and runTool(tools,
 // name, args).
 
-import { Storage } from "@plasmohq/storage"
 import {
   createNote,
   ping,
@@ -24,6 +23,7 @@ import type {
   ToolDefinition,
   ToolExecutionResult
 } from "./ai-chat-types"
+import { ExtensionStorage } from "./extension-storage"
 import type { ScrapeResult } from "../types"
 
 const SCRAPES_KEY = "ai-dev-scrapes"
@@ -322,7 +322,7 @@ export async function captureAmbient(): Promise<AmbientContext> {
     /* swallow */
   }
   try {
-    const storage = new Storage()
+    const storage = new ExtensionStorage()
     const activeUrl = ctx.activeTab?.url
     const scrapes = await storage.get<ScrapeResult[]>(SCRAPES_KEY)
     const scrape = Array.isArray(scrapes)
@@ -342,7 +342,7 @@ export async function captureAmbient(): Promise<AmbientContext> {
     /* swallow */
   }
   try {
-    const storage = new Storage()
+    const storage = new ExtensionStorage()
     const recents = await storage.get<{
       clips: Array<{
         title: string

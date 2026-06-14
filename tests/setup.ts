@@ -2,8 +2,7 @@
 import { beforeEach } from "vitest"
 
 // In-memory chrome.storage.local shim. Values are deep-cloned on get/set
-// to mirror the structured-clone semantics that Plasmo / chrome.storage use
-// in the real extension runtime.
+// to mirror the structured-clone semantics of the real extension runtime.
 
 type StoreValue = unknown
 type Store = Record<string, StoreValue>

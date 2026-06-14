@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import "./style.css"
+import "./lib/appearance-entry"
 import { RECORDER_STORAGE_KEY, type RecordingMetadata } from "./types"
 
 function MediaPreview() {

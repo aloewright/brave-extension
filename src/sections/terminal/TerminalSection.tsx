@@ -12,6 +12,8 @@ interface Tab {
   exitInfo?: string
 }
 
+const SPAWN_TIMEOUT_MS = 10_000
+
 function newSessionId() {
   const webCrypto = globalThis.crypto
   if (webCrypto?.randomUUID) {
@@ -40,10 +42,34 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
   const [active, setActive] = useState<string | null>(null)
 
   const dataSinks = useRef(new Map<string, (data: string) => void>())
+  const pendingData = useRef(new Map<string, string[]>())
+  const spawnTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+
+  const writeTerminalMessage = useCallback((sessionId: string, data: string) => {
+    const sink = dataSinks.current.get(sessionId)
+    if (sink) {
+      sink(data)
+      return
+    }
+    const queued = pendingData.current.get(sessionId) ?? []
+    queued.push(data)
+    pendingData.current.set(sessionId, queued)
+  }, [])
+
+  const clearSpawnTimer = useCallback((sessionId: string) => {
+    const timer = spawnTimers.current.get(sessionId)
+    if (!timer) return
+    clearTimeout(timer)
+    spawnTimers.current.delete(sessionId)
+  }, [])
 
   const registerData = useCallback(
     (sessionId: string, sink: (data: string) => void) => {
       dataSinks.current.set(sessionId, sink)
+      const queued = pendingData.current.get(sessionId)
+      if (!queued) return
+      pendingData.current.delete(sessionId)
+      for (const data of queued) sink(data)
     },
     []
   )
@@ -69,6 +95,7 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
       dataSinks.current.get(sessionId)?.(data)
     },
     onPtySpawned: (sessionId, pid) => {
+      clearSpawnTimer(sessionId)
       deadSessions.current.delete(sessionId)
       announcedLost.current.delete(sessionId)
       setTabs((prev) =>
@@ -76,9 +103,10 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
       )
     },
     onPtyExit: (sessionId, exitCode, signal) => {
+      clearSpawnTimer(sessionId)
       deadSessions.current.add(sessionId)
-      const sink = dataSinks.current.get(sessionId)
-      sink?.(
+      writeTerminalMessage(
+        sessionId,
         `\r\n\x1b[2m[process exited code=${exitCode}${signal ? ` signal=${signal}` : ""}]\x1b[0m\r\n`
       )
       setTabs((prev) =>
@@ -97,10 +125,12 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
       // keystroke maps to one of these errors. Treat the session as dead
       // exactly once and stop sending writes/resizes for it.
       if (sessionId && /no such session/i.test(error)) {
+        clearSpawnTimer(sessionId)
         deadSessions.current.add(sessionId)
         if (!announcedLost.current.has(sessionId)) {
           announcedLost.current.add(sessionId)
-          dataSinks.current.get(sessionId)?.(
+          writeTerminalMessage(
+            sessionId,
             "\r\n\x1b[33m[session lost — the native host restarted. Close this tab (⌘W) and open a new one with the + button.]\x1b[0m\r\n"
           )
           setTabs((prev) =>
@@ -113,9 +143,9 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
         }
         return
       }
-      const sink = sessionId ? dataSinks.current.get(sessionId) : undefined
-      sink?.(`\r\n\x1b[31m[pty error] ${error}\x1b[0m\r\n`)
       if (sessionId) {
+        clearSpawnTimer(sessionId)
+        writeTerminalMessage(sessionId, `\r\n\x1b[31m[pty error] ${error}\x1b[0m\r\n`)
         deadSessions.current.add(sessionId)
         setTabs((prev) =>
           prev.map((t) => (t.sessionId === sessionId ? { ...t, status: "error", exitInfo: error } : t))
@@ -168,14 +198,34 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
   const openTab = useCallback(() => {
     if (!host.connected) return
     const sessionId = newSessionId()
+    const timeout = setTimeout(() => {
+      spawnTimers.current.delete(sessionId)
+      deadSessions.current.add(sessionId)
+      writeTerminalMessage(
+        sessionId,
+        "\r\n\x1b[31m[pty error] Terminal spawn timed out before the native host replied. Reload the extension and try again.\x1b[0m\r\n"
+      )
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.sessionId === sessionId && t.status === "spawning"
+            ? { ...t, status: "error", exitInfo: "spawn timed out" }
+            : t
+        )
+      )
+    }, SPAWN_TIMEOUT_MS)
+    spawnTimers.current.set(sessionId, timeout)
     setTabs((prev) => [...prev, { sessionId, status: "spawning" }])
     setActive(sessionId)
-    host.ptySpawn(sessionId)
-  }, [host])
+    if (!host.ptySpawn(sessionId)) {
+      clearSpawnTimer(sessionId)
+    }
+  }, [host, clearSpawnTimer, writeTerminalMessage])
 
   const closeTab = useCallback(
     (sessionId: string) => {
       host.ptyKill(sessionId)
+      clearSpawnTimer(sessionId)
+      pendingData.current.delete(sessionId)
       deadSessions.current.delete(sessionId)
       announcedLost.current.delete(sessionId)
       setTabs((prev) => {
@@ -186,7 +236,7 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
         return next
       })
     },
-    [host, active]
+    [host, active, clearSpawnTimer]
   )
 
   // onWrite/onResize are called by xterm on user input. Routing them
@@ -226,6 +276,13 @@ export function TerminalSection({ active: sectionActive = true }: TerminalSectio
   // down abruptly and effect cleanup is best-effort. The background owns
   // the native host connection and keeps it alive through the offscreen
   // document while PTYs are active.
+  useEffect(() => {
+    return () => {
+      for (const timer of spawnTimers.current.values()) clearTimeout(timer)
+      spawnTimers.current.clear()
+    }
+  }, [])
+
   useEffect(() => {
     if (!sectionActive) return
     function onKey(e: KeyboardEvent) {

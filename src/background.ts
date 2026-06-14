@@ -14,10 +14,10 @@ import {
   copyToClipboardViaTab,
 } from "./lib/session-snippets";
 import {
-  getMatchingPasswordLogins,
-  PASSWORD_SELECTED_LOGIN_KEY,
-  type PasswordLogin,
-} from "./lib/passwords";
+  closeCurrentWindowSavedTabs,
+  saveCurrentWindowTabs,
+} from "./lib/tab-collections";
+import { purgeLegacyPasswordStorage } from "./lib/password-strategy";
 import {
   buildMailTwoFactorListUrl,
   buildMailTwoFactorThreadUrl,
@@ -35,6 +35,12 @@ import { COOKIES_TOOL_HANDLERS } from "./background/cookies-tools";
 import { EXTENSIONS_TOOL_HANDLERS } from "./background/extensions-tools";
 import { SEARCH_TOOL_HANDLERS } from "./background/search-tools";
 import { startResourcePublishers } from "./background/resource-publishers";
+import { setupBookmarkSync } from "./background/bookmark-sync";
+import {
+  setupExtensionSync,
+  type ExtensionBackupRequest,
+} from "./background/extension-sync";
+import { setupNewTabStateSync } from "./background/newtab-sync";
 import {
   ensureBookmarkSnapshot,
   pullBookmarkSnapshot,
@@ -273,6 +279,28 @@ type MailInboxSidebarItem = {
   snippet: string;
   receivedAt?: number;
   codes: string[];
+  opened?: boolean;
+  clicked?: boolean;
+  sentStatus?: string;
+};
+type MailInboxSidebarPage = {
+  items: MailInboxSidebarItem[];
+  nextCursor: number | null;
+};
+type MailThreadSidebarMessage = {
+  id: string;
+  subject: string;
+  from: string;
+  body: string;
+  sentAt?: number;
+};
+type MailThreadSidebarDetail = {
+  id: string;
+  subject: string;
+  participants: string;
+  receivedAt?: number;
+  messages: MailThreadSidebarMessage[];
+  codes: string[];
 };
 type MailActivitySidebarItem = {
   id: string;
@@ -381,6 +409,10 @@ void ensureCalTasksOriginRule().catch((err) => {
 void ensureBookmarkSnapshot().catch((err) => {
   safeRuntimeWarning("failed to initialize bookmark snapshot", err);
 });
+
+setupBookmarkSync();
+setupExtensionSync({ backupExtension: requestExtensionBackup });
+setupNewTabStateSync();
 
 // Periodic server-authoritative bidirectional sync. Gated internally on
 // settings.sidebarSyncEnabled; fire-and-forget (never throws).
@@ -705,22 +737,35 @@ if (chrome.alarms?.create && chrome.alarms?.onAlarm) {
   );
 }
 
+function nativeSendFailurePayload(msg: any, error: string) {
+  if (typeof msg?.type === "string" && msg.type.startsWith("pty.")) {
+    return {
+      type: "pty.error",
+      sessionId: typeof msg.sessionId === "string" ? msg.sessionId : undefined,
+      error,
+    };
+  }
+  return { type: "error", data: error };
+}
+
+function sendNativeFailureToSidebars(msg: any, error: string) {
+  for (const [, p] of sidebarPorts) {
+    postToSidebar(p, {
+      type: "native-response",
+      payload: nativeSendFailurePayload(msg, error),
+    });
+  }
+}
+
 function sendToNative(msg: any) {
   const port = connectNativeHost();
-  if (port) {
-    postToNative(port, msg);
-  } else {
-    // Notify sidebars about connection failure
-    for (const [, p] of sidebarPorts) {
-      postToSidebar(p, {
-        type: "native-response",
-        payload: {
-          type: "error",
-          data: "Native host not connected. Run: npm run install-host",
-        },
-      });
-    }
-  }
+  if (port && postToNative(port, msg)) return;
+  sendNativeFailureToSidebars(
+    msg,
+    port
+      ? "Native host port is disconnected. Reload the extension and try again."
+      : "Native host not connected. Run: pnpm install-host and reload Brave.",
+  );
 }
 
 function requestNative(payload: any, timeoutMs = 2500): Promise<any> {
@@ -742,6 +787,14 @@ function requestNative(payload: any, timeoutMs = 2500): Promise<any> {
       reject(new Error("native host port is disconnected"));
     }
   });
+}
+
+async function requestExtensionBackup(extension: ExtensionBackupRequest): Promise<any> {
+  const response = await requestNative({ type: "extensions.backup", extension }, 15_000);
+  if (response?.ok === false) {
+    throw new Error(response.error || "extension backup failed");
+  }
+  return response;
 }
 
 // ─── Recorder state broadcasting ──────────────────────────────────────
@@ -887,7 +940,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "SCRAPE_TAB") {
-    scrapeTab(message.tabId).then((result) => sendResponse(result));
+    handleManualScrape(message.tabId).then((result) => sendResponse(result));
     return true;
   }
 
@@ -1183,13 +1236,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "PASSWORDS_MATCH_LOGINS") {
-    const pageUrl =
-      typeof message.url === "string" ? message.url : sender.tab?.url || "";
-    getAutofillMatches(pageUrl).then((matches) => sendResponse({ matches }));
-    return true;
-  }
-
   if (message.type === "MAIL_2FA_CODE_REQUEST") {
     const pageUrl =
       typeof message.url === "string" ? message.url : sender.tab?.url || "";
@@ -1198,12 +1244,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "MAIL_INBOX_LIST_REQUEST") {
-    getMailInboxSidebarItems()
-      .then((items) => sendResponse({ ok: true, items }))
+    const limit = Number.isFinite(message.limit) ? Number(message.limit) : 20;
+    const cursor = Number.isFinite(message.cursor) ? Number(message.cursor) : null;
+    getMailInboxSidebarItems({ limit, cursor })
+      .then((page) => sendResponse({ ok: true, ...page }))
       .catch((err) =>
         sendResponse({
           ok: false,
           items: [],
+          nextCursor: null,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
+  if (message.type === "MAIL_THREAD_DETAIL_REQUEST") {
+    const threadId = typeof message.threadId === "string" ? message.threadId : "";
+    getMailThreadSidebarDetail(threadId)
+      .then((detail) => sendResponse({ ok: true, detail }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          detail: null,
           error: err instanceof Error ? err.message : String(err),
         }),
       );
@@ -1563,21 +1626,6 @@ async function getFeedsForTab(tabId: number): Promise<FeedInfo[]> {
   });
 }
 
-async function getAutofillMatches(pageUrl: string): Promise<PasswordLogin[]> {
-  if (!/^https?:\/\//i.test(pageUrl)) return [];
-  const matches = await getMatchingPasswordLogins(pageUrl);
-  if (matches.length <= 1) return matches;
-  const selected = await chrome.storage.local.get(PASSWORD_SELECTED_LOGIN_KEY);
-  const selectedId = selected[PASSWORD_SELECTED_LOGIN_KEY];
-  if (typeof selectedId !== "string") return matches.map(withoutPassword);
-  const selectedMatch = matches.find((match) => match.id === selectedId);
-  return selectedMatch ? [selectedMatch] : matches.map(withoutPassword);
-}
-
-function withoutPassword(login: PasswordLogin): PasswordLogin {
-  return { ...login, password: "" };
-}
-
 async function getMailTwoFactorCode(pageUrl: string): Promise<MailTwoFactorResponse> {
   if (!/^https?:\/\//i.test(pageUrl)) return { code: null };
   if (/^https:\/\/mail\.fly\.pm\//i.test(pageUrl)) return { code: null };
@@ -1597,21 +1645,36 @@ async function getMailTwoFactorCode(pageUrl: string): Promise<MailTwoFactorRespo
   return response;
 }
 
-async function getMailInboxSidebarItems(): Promise<MailInboxSidebarItem[]> {
+async function getMailInboxSidebarItems(options: {
+  limit?: number;
+  cursor?: number | null;
+} = {}): Promise<MailInboxSidebarPage> {
   const cookieHeader = await getMailFlyPmCookieHeader();
   if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
   const headers = { accept: "application/json" };
   return withMailFlyPmCookieHeader(cookieHeader, () =>
-    fetchMailInboxSidebarItemsAuthed(headers),
+    fetchMailInboxSidebarItemsAuthed(headers, options),
   );
 }
 
 async function fetchMailInboxSidebarItemsAuthed(
   headers: { accept: string },
-): Promise<MailInboxSidebarItem[]> {
-  const list = await fetchMailJson<unknown>(buildMailThreadsListUrl("inbox", 14), headers);
-  const summaries = normalizeMailThreadSummaries(list).slice(0, 14);
-  if (!summaries.length) return [];
+  options: { limit?: number; cursor?: number | null } = {},
+): Promise<MailInboxSidebarPage> {
+  const limit = clampMailLimit(options.limit, 20);
+  const list = await fetchMailJson<unknown>(
+    buildMailThreadsListUrl("inbox", limit, options.cursor ?? null),
+    headers,
+  );
+  const listRecord = list && typeof list === "object" ? list as Record<string, unknown> : {};
+  const summaries = normalizeMailThreadSummaries(list).slice(0, limit);
+  const nextCursor =
+    typeof listRecord.nextCursor === "number"
+      ? listRecord.nextCursor
+      : typeof listRecord.nextCursor === "string" && Number.isFinite(Number(listRecord.nextCursor))
+      ? Number(listRecord.nextCursor)
+      : null;
+  if (!summaries.length) return { items: [], nextCursor: null };
 
   const details = await Promise.all(
     summaries.map((summary) =>
@@ -1620,7 +1683,7 @@ async function fetchMailInboxSidebarItemsAuthed(
     ),
   );
 
-  return summaries.map((summary, index) => {
+  const items = summaries.map((summary, index) => {
     const detail = details[index];
     const messages = Array.isArray(detail?.messages) ? detail.messages : [];
     const threadSubject =
@@ -1657,8 +1720,12 @@ async function fetchMailInboxSidebarItemsAuthed(
       snippet,
       receivedAt,
       codes: extractMailTwoFactorCodesFromText(text),
+      opened: Boolean((summary as MailThreadSummary & { opened?: boolean }).opened),
+      clicked: Boolean((summary as MailThreadSummary & { clicked?: boolean }).clicked),
+      sentStatus: mailStringValue((summary as MailThreadSummary & { sentStatus?: string }).sentStatus),
     };
   });
+  return { items, nextCursor };
 }
 
 async function getMailActivitySidebarItems(): Promise<MailActivitySidebarItem[]> {
@@ -1668,6 +1735,67 @@ async function getMailActivitySidebarItems(): Promise<MailActivitySidebarItem[]>
   return withMailFlyPmCookieHeader(cookieHeader, () =>
     fetchMailActivitySidebarItemsAuthed(headers),
   );
+}
+
+async function getMailThreadSidebarDetail(threadId: string): Promise<MailThreadSidebarDetail> {
+  if (!threadId) throw new Error("missing mail thread id");
+  const cookieHeader = await getMailFlyPmCookieHeader();
+  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
+  const headers = { accept: "application/json" };
+  return withMailFlyPmCookieHeader(cookieHeader, () =>
+    fetchMailThreadSidebarDetailAuthed(threadId, headers),
+  );
+}
+
+async function fetchMailThreadSidebarDetailAuthed(
+  threadId: string,
+  headers: { accept: string },
+): Promise<MailThreadSidebarDetail> {
+  const detail = await fetchMailJson<MailThreadDetail>(
+    buildMailTwoFactorThreadUrl(threadId),
+    headers,
+  );
+  const messages = Array.isArray(detail.messages) ? detail.messages : [];
+  const subject = mailStringValue(detail.thread?.subject) || mailStringValue(messages[0]?.subject);
+  const participants = stringifyMailParticipants(detail.thread?.participants);
+  const newestMessage = messages
+    .slice()
+    .sort((a, b) => timestampMs(b.sentAt) - timestampMs(a.sentAt))[0];
+  const messageItems = messages
+    .slice()
+    .sort((a, b) => timestampMs(a.sentAt) - timestampMs(b.sentAt))
+    .map((message, index) => {
+      const fromName = mailStringValue(message.fromName);
+      const fromAddr = mailStringValue(message.fromAddr);
+      return {
+        id: mailStringValue(message.id) || `${threadId}-${index}`,
+        subject: mailStringValue(message.subject),
+        from: fromName && fromAddr ? `${fromName} <${fromAddr}>` : fromName || fromAddr || "Unknown sender",
+        body: mailStringValue(message.textBody),
+        sentAt: timestampMs(message.sentAt) || undefined,
+      };
+    });
+  const codeText = [
+    subject,
+    participants,
+    ...messages.flatMap((message) => [
+      message.subject,
+      message.fromName,
+      message.fromAddr,
+      message.textBody,
+    ]),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    id: mailStringValue(detail.thread?.id) || threadId,
+    subject,
+    participants,
+    receivedAt: timestampMs(newestMessage?.sentAt) || undefined,
+    messages: messageItems,
+    codes: extractMailTwoFactorCodesFromText(codeText),
+  };
 }
 
 async function fetchMailActivitySidebarItemsAuthed(
@@ -1693,8 +1821,43 @@ async function fetchMailActivitySidebarItemsAuthed(
     }
   }
 
-  if (lastError) throw new Error("mail activity endpoint unavailable");
-  return [];
+  return fetchMailActivityFromThreadsAuthed(headers).catch((err) => {
+    if (lastError) {
+      safeRuntimeWarning("mail activity endpoints unavailable; thread fallback failed", err);
+    }
+    throw new Error("mail activity unavailable");
+  });
+}
+
+async function fetchMailActivityFromThreadsAuthed(
+  headers: { accept: string },
+): Promise<MailActivitySidebarItem[]> {
+  const page = await fetchMailInboxSidebarItemsAuthed(headers, { limit: 100 });
+  const activity = page.items.flatMap((item) => {
+    const events: MailActivitySidebarItem[] = [];
+    if (item.clicked) {
+      events.push({
+        id: `thread-click-${item.id}`,
+        type: "click",
+        email: item.participants,
+        subject: item.subject,
+        at: item.receivedAt,
+      });
+    }
+    if (item.opened) {
+      events.push({
+        id: `thread-open-${item.id}`,
+        type: "open",
+        email: item.participants,
+        subject: item.subject,
+        at: item.receivedAt,
+      });
+    }
+    return events;
+  });
+  return activity
+    .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+    .slice(0, 50);
 }
 
 function mailTwoFactorCacheKey(pageUrl: string) {
@@ -1785,10 +1948,18 @@ async function fetchLatestMailTwoFactorCodeAuthed(
 
 const MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS = 30 * 60 * 1000;
 
-function buildMailThreadsListUrl(folder: string, limit: number) {
+function clampMailLimit(value: number | undefined, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(100, Math.max(1, Math.floor(value)));
+}
+
+function buildMailThreadsListUrl(folder: string, limit: number, cursor?: number | null) {
   const url = new URL("/api/v1/threads", MAIL_TWO_FACTOR_API_BASE);
   url.searchParams.set("folder", folder);
   url.searchParams.set("limit", String(limit));
+  if (typeof cursor === "number" && Number.isFinite(cursor)) {
+    url.searchParams.set("cursor", String(cursor));
+  }
   return url.toString();
 }
 
@@ -2015,6 +2186,36 @@ function broadcastScrapeResult(result: unknown, source: "manual" | "auto") {
   for (const [, port] of sidebarPorts) {
     postToSidebar(port, { type: "scrape-result", payload: result, source });
   }
+}
+
+async function syncScrapeResult(result: ScrapeResult): Promise<boolean> {
+  const settings = await getSettings().catch(() => null);
+  if (!settings?.sidebarSyncEnabled || !settings.sidebarApiUrl || !settings.sidebarApiToken) {
+    return false;
+  }
+  try {
+    const client = createSidebarApiClient(settings.sidebarApiToken, settings.sidebarApiUrl);
+    await client.scrapes.create({ ...result, source: "extension" });
+    return true;
+  } catch (err) {
+    safeRuntimeWarning(
+      err instanceof ApiError
+        ? `scrape sync failed (${err.status} ${err.code})`
+        : "scrape sync failed",
+      err,
+    );
+    return false;
+  }
+}
+
+async function handleManualScrape(tabId: number) {
+  const result = await scrapeTab(tabId);
+  if (isScrapeResult(result)) {
+    await storeScrapeResult(result);
+    await syncScrapeResult(result);
+  }
+  broadcastScrapeResult(result, "manual");
+  return result;
 }
 
 // Scrape page content
@@ -2297,12 +2498,10 @@ try {
   safeRuntimeWarning("failed to enable side panel", err);
 }
 
-// Detach the default popup so a toolbar click goes straight to the
-// onClicked listener above (which opens the sidebar). The popup is
-// re-attached only while a recording is active — see setRecordingBadge.
-// Plasmo wires `default_popup: "popup.html"` automatically because
-// src/popup.tsx exists; this clears it at runtime. setPopup is
-// persistent, so we only need this on install + browser start.
+// Detach the manifest popup so a toolbar click goes straight to the onClicked
+// listener above (which opens the sidebar). The popup is re-attached only while
+// a recording is active; setPopup is persistent, so we only need this on install
+// + browser start.
 function clearActionPopup() {
   try {
     chrome.action?.setPopup?.({ popup: "" });
@@ -2312,8 +2511,14 @@ function clearActionPopup() {
 }
 
 clearActionPopup();
+void purgeLegacyPasswordStorage().catch((err) => {
+  safeRuntimeWarning("failed to purge legacy password storage", err);
+});
 chrome.runtime.onStartup.addListener(() => {
   clearActionPopup();
+  void purgeLegacyPasswordStorage().catch((err) => {
+    safeRuntimeWarning("failed to purge legacy password storage", err);
+  });
   void syncNormalBrowserWindows();
   void syncStoredHighlights().catch((err) => {
     safeRuntimeWarning("failed to sync stored highlights", err);
@@ -2323,6 +2528,9 @@ chrome.runtime.onStartup.addListener(() => {
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
   clearActionPopup();
+  void purgeLegacyPasswordStorage().catch((err) => {
+    safeRuntimeWarning("failed to purge legacy password storage", err);
+  });
   void syncNormalBrowserWindows();
   void syncStoredHighlights().catch((err) => {
     safeRuntimeWarning("failed to sync stored highlights", err);
@@ -2338,7 +2546,7 @@ chrome.runtime.onInstalled.addListener(() => {
     });
     chrome.contextMenus.create({
       id: "save-highlight",
-      title: "Save snippet",
+      title: "Save highlight",
       contexts: ["selection"],
     });
     chrome.contextMenus.create({
@@ -2407,9 +2615,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   if (info.menuItemId === "scrape-page") {
-    const result = await scrapeTab(tab.id);
-    if (isScrapeResult(result)) await storeScrapeResult(result);
-    broadcastScrapeResult(result, "manual");
+    await handleManualScrape(tab.id);
   }
 
   if (info.menuItemId === SCREENSHOT_CONTEXT_MENU_ID) {
@@ -2420,39 +2626,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "save-highlight" && info.selectionText) {
     try {
-      const selection = info.selectionText;
-      const highlight = {
-        id: crypto.randomUUID(),
-        text: selection,
-        sourceUrl: tab.url,
-        sourceTitle: tab.title,
-        createdAt: Date.now(),
-      };
-      // ALO-470: drop the highlight into Session snippets, copy it to the
-      // user's clipboard, and keep the legacy Review panel highlight write
-      // for back-compat (the Inspector → Review panel still consumes
-      // addHighlight via chrome.storage.onChanged).
-      await Promise.all([
-        addSessionSnippet({
-          text: selection,
-          sourceUrl: tab.url || "",
-          sourceTitle: tab.title ?? null,
-        }),
-        addHighlight(highlight),
-      ]);
-      void syncHighlight(highlight).catch((err) => {
-        safeRuntimeWarning("failed to sync highlight", err);
-      });
-      // Best-effort clipboard write — privileged URLs will refuse the
-      // script injection and the snippet still lands in Session.
-      void copyToClipboardViaTab(tab.id, selection);
-      // A subtle badge blip to confirm capture. The ReviewPanel auto-refreshes
-      // via chrome.storage.onChanged, so no port message is needed.
-      chrome.action.setBadgeText({ text: "+1" });
-      chrome.action.setBadgeBackgroundColor({ color: "#4ade80" });
-      setTimeout(() => {
-        if (!recorderState.active) chrome.action.setBadgeText({ text: "" });
-      }, 1200);
+      await saveSelectionAsSnippetFromTab(tab, info.selectionText);
     } catch (err) {
       console.warn("save-highlight failed:", err);
     }
@@ -2668,6 +2842,98 @@ async function speakSelectedText() {
   await speakTextWithTts(text);
 }
 
+async function saveSelectionAsSnippetFromTab(tab: chrome.tabs.Tab, selectionText?: string | null): Promise<boolean> {
+  if (!tab.id) return false;
+
+  let selection = (selectionText || "").trim();
+  if (!selection) {
+    try {
+      selection = (await getActiveTabSelectionText(tab.id)).trim();
+    } catch (err) {
+      safeRuntimeWarning("failed to read selected text for highlight shortcut", err);
+      return false;
+    }
+  }
+  if (!selection) return false;
+
+  const highlight = {
+    id: crypto.randomUUID(),
+    text: selection,
+    sourceUrl: tab.url,
+    sourceTitle: tab.title,
+    createdAt: Date.now(),
+  };
+  // ALO-470: keep the Session highlight feed canonical while still writing the
+  // legacy Review-panel highlight for back-compat.
+  await Promise.all([
+    addSessionSnippet({
+      text: selection,
+      sourceUrl: tab.url || "",
+      sourceTitle: tab.title ?? null,
+    }),
+    addHighlight(highlight),
+  ]);
+  void syncHighlight(highlight).catch((err) => {
+    safeRuntimeWarning("failed to sync highlight", err);
+  });
+  void copyToClipboardViaTab(tab.id, selection);
+  await chrome.action.setBadgeBackgroundColor({ color: "#4ade80" });
+  await chrome.action.setBadgeText({ text: "+1" });
+  setTimeout(() => {
+    if (!recorderState.active) chrome.action.setBadgeText({ text: "" });
+  }, 1200);
+  return true;
+}
+
+async function promptForTabCollectionTitle(tabId?: number): Promise<string | null> {
+  if (!tabId || !chrome?.scripting?.executeScript) return null;
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const value = window.prompt("Save all tabs as:", `Tabs ${new Date().toLocaleString()}`);
+        if (value === null) return null;
+        return value.trim();
+      },
+    });
+    const title = typeof result?.result === "string" ? result.result.trim() : "";
+    return title || null;
+  } catch (err) {
+    safeRuntimeWarning("failed to prompt for tab collection title", err);
+    return null;
+  }
+}
+
+async function saveTabsCollectionAndClose(title: string): Promise<number> {
+  const collection = await saveCurrentWindowTabs(title);
+  const closed = await closeCurrentWindowSavedTabs(collection);
+  await chrome.action.setBadgeBackgroundColor({ color: "#2c50cd" });
+  await chrome.action.setBadgeText({ text: `${closed}` });
+  setTimeout(() => {
+    if (!recorderState.active) chrome.action.setBadgeText({ text: "" });
+  }, 2000);
+  return closed;
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "session/save-tabs-hotkey") return false;
+  void (async () => {
+    try {
+      const title = typeof message.title === "string" ? message.title.trim() : "";
+      if (!title) {
+        sendResponse({ ok: false, error: "missing_title" });
+        return;
+      }
+      const closed = await saveTabsCollectionAndClose(title);
+      sendResponse({ ok: true, closed });
+    } catch (err) {
+      safeRuntimeWarning("save-tabs hotkey failed", err);
+      sendResponse({ ok: false, error: unknownErrorMessage(err) });
+    }
+  })();
+  return true;
+});
+
 // Keyboard shortcut
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "toggle-sidebar") {
@@ -2677,13 +2943,17 @@ chrome.commands.onCommand.addListener(async (command) => {
     });
     toggleSidePanel(tab?.windowId);
   } else if (command === "save-link") {
-    // Global Shift+Cmd+L (Ctrl+Shift+L) — save the active tab's link from any
-    // page, even when the sidebar is closed. Reuses the same library save path
-    // as the in-sidebar "Save link" quick action.
+    // Global Shift+Cmd+L (Ctrl+Shift+L) — if text is highlighted, save it as a
+    // Session highlight. Otherwise save the active tab's link from any page, even
+    // when the sidebar is closed. This reuses one manifest command slot because
+    // Chromium allows only four extension command shortcuts.
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
     });
+    if (tab?.id && (await saveSelectionAsSnippetFromTab(tab))) {
+      return;
+    }
     if (tab?.url && tab?.title) {
       await saveLinkToLibrary(tab.url, tab.title);
       // Best-effort visual confirmation on the toolbar icon.

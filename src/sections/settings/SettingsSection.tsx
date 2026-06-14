@@ -269,6 +269,15 @@ export function SettingsSection() {
     }
   } as any)
   const sidebarSync = useSidebarSync({ settings, messages: [] })
+  const requestMcpState = (delayListMs = 900) => {
+    if (!settings) return undefined
+    nativeHost.mcpEnsure(settings.claudeConfigPath)
+    nativeHost.mcpStatus(settings.claudeConfigPath)
+    const timer = setTimeout(() => {
+      nativeHost.getMCPServers(settings.claudeConfigPath)
+    }, delayListMs)
+    return timer
+  }
 
   useEffect(() => {
     if (!nativeHost.connected) clearAllPendingActions()
@@ -286,29 +295,30 @@ export function SettingsSection() {
   }, [])
 
   useEffect(() => {
-    if (settings && nativeHost.connected) {
-      nativeHost.getMCPServers(settings.claudeConfigPath)
-      nativeHost.mcpEnsure(settings.claudeConfigPath)
-      nativeHost.mcpStatus(settings.claudeConfigPath)
-      const defaultsPayload: {
-        project?: string
-        config?: string
-        scope?: string
-      } = {}
-      if (settings.dopplerProject.trim()) defaultsPayload.project = settings.dopplerProject.trim()
-      if (settings.dopplerConfig.trim()) defaultsPayload.config = settings.dopplerConfig.trim()
-      if (settings.dopplerScope.trim()) defaultsPayload.scope = settings.dopplerScope.trim()
-      if (Object.keys(defaultsPayload).length > 0) {
-        nativeHost.dopplerSetDefaults(defaultsPayload, { silent: true })
-      }
-      nativeHost.dopplerStatus()
+    if (!settings) return
+    const mcpListTimer = requestMcpState()
+    const secondPassTimer = setTimeout(() => requestMcpState(0), 2500)
+    const defaultsPayload: {
+      project?: string
+      config?: string
+      scope?: string
+    } = {}
+    if (settings.dopplerProject.trim()) defaultsPayload.project = settings.dopplerProject.trim()
+    if (settings.dopplerConfig.trim()) defaultsPayload.config = settings.dopplerConfig.trim()
+    if (settings.dopplerScope.trim()) defaultsPayload.scope = settings.dopplerScope.trim()
+    if (Object.keys(defaultsPayload).length > 0) {
+      nativeHost.dopplerSetDefaults(defaultsPayload, { silent: true })
+    }
+    nativeHost.dopplerStatus()
+    return () => {
+      if (mcpListTimer) clearTimeout(mcpListTimer)
+      clearTimeout(secondPassTimer)
     }
   }, [
     settings?.claudeConfigPath,
     settings?.dopplerProject,
     settings?.dopplerConfig,
-    settings?.dopplerScope,
-    nativeHost.connected
+    settings?.dopplerScope
   ])
 
   useEffect(() => {
@@ -350,10 +360,12 @@ export function SettingsSection() {
 
   // Periodic refresh while panel is mounted (every 10s).
   useEffect(() => {
-    if (!settings || !nativeHost.connected) return
-    const t = setInterval(() => nativeHost.mcpStatus(settings.claudeConfigPath), 10_000)
+    if (!settings) return
+    const t = setInterval(() => {
+      requestMcpState()
+    }, 10_000)
     return () => clearInterval(t)
-  }, [nativeHost.connected, settings?.claudeConfigPath])
+  }, [settings?.claudeConfigPath])
 
   // Fetch cloud-agent tool reachability when the agent client is configured.
   useEffect(() => {
@@ -409,7 +421,7 @@ export function SettingsSection() {
         status: mcpStatus,
         refresh: () => {
           beginPendingAction("mcp.refresh")
-          nativeHost.mcpStatus(settings.claudeConfigPath)
+          requestMcpState(0)
         },
         rotateToken: () => {
           beginPendingAction("mcp.rotateToken")

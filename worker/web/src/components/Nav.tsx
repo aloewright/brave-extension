@@ -8,7 +8,8 @@ const sections = [
   { to: "/links", label: "Links" },
   { to: "/bookmarks", label: "Bookmarks" },
   { to: "/recordings", label: "Recordings" },
-  { to: "/pdfs", label: "PDFs" }
+  { to: "/pdfs", label: "PDFs" },
+  { to: "/scrapes", label: "Scrapes" }
 ]
 
 export function Nav() {

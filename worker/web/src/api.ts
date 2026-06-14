@@ -102,7 +102,7 @@ export interface HighlightWrite {
   createdAt?: number
 }
 
-export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight"
+export type ResourceType = "conversation" | "link" | "bookmark" | "recording" | "pdf" | "capture" | "highlight" | "scrape"
 
 export interface SearchHit {
   type: ResourceType
@@ -112,6 +112,64 @@ export interface SearchHit {
   title: string
   snippet: string
   createdAt: number
+}
+
+export interface ScrapeLink {
+  href: string
+  text: string
+}
+
+export interface ScrapeImage {
+  src: string
+  alt: string
+}
+
+export interface ScrapeRunRow {
+  id: string
+  jobId: string | null
+  source: "extension" | "server" | "manual" | "cron" | string
+  url: string
+  finalUrl: string | null
+  title: string
+  text: string
+  html: string
+  links: ScrapeLink[]
+  images: ScrapeImage[]
+  meta: Record<string, string>
+  status: "ready" | "failed"
+  statusMessage: string | null
+  contentType: string | null
+  sizeBytes: number
+  durationMs: number
+  chunkCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ScrapeJobRow {
+  id: string
+  url: string
+  title: string
+  enabled: boolean
+  scheduleType: "manual" | "interval" | "cron"
+  intervalMinutes: number | null
+  cron: string | null
+  lastRunId: string | null
+  lastRunAt: number | null
+  nextRunAt: number | null
+  lastStatus: "ready" | "failed" | null
+  lastError: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ScrapeJobWrite {
+  url: string
+  title?: string
+  enabled?: boolean
+  scheduleType?: ScrapeJobRow["scheduleType"]
+  intervalMinutes?: number
+  cron?: string
 }
 
 // ── Error type ─────────────────────────────────────────────────────────────
@@ -154,6 +212,16 @@ export interface ApiClient {
     create: (payload: HighlightWrite & { text: string }) => Promise<{ id: string; created: boolean; chunkCount: number }>
     update: (id: string, payload: HighlightWrite) => Promise<HighlightRow>
     delete: (id: string) => Promise<void>
+  }
+  scrapes: {
+    listRuns: (opts?: { jobId?: string; limit?: number; before?: number }) => Promise<{ scrapes: ScrapeRunRow[] }>
+    getRun: (id: string) => Promise<{ scrape: ScrapeRunRow }>
+    deleteRun: (id: string) => Promise<void>
+    runUrl: (url: string) => Promise<{ scrape: ScrapeRunRow }>
+    listJobs: () => Promise<{ jobs: ScrapeJobRow[] }>
+    createJob: (payload: ScrapeJobWrite) => Promise<{ job: ScrapeJobRow }>
+    runJob: (id: string) => Promise<{ job: ScrapeJobRow; scrape: ScrapeRunRow }>
+    deleteJob: (id: string) => Promise<void>
   }
 }
 
@@ -217,6 +285,17 @@ export function createApiClient(token: string, baseUrl = ""): ApiClient {
       update: (id, payload) =>
         request(`/api/highlights/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
       delete: (id) => request(`/api/highlights/${encodeURIComponent(id)}`, { method: "DELETE" })
+    },
+    scrapes: {
+      listRuns: (opts = {}) =>
+        request(`/api/scrapes/runs${qs({ jobId: opts.jobId, limit: opts.limit, before: opts.before })}`),
+      getRun: (id) => request(`/api/scrapes/runs/${encodeURIComponent(id)}`),
+      deleteRun: (id) => request(`/api/scrapes/runs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      runUrl: (url) => request("/api/scrapes/run", { method: "POST", body: JSON.stringify({ url }) }),
+      listJobs: () => request("/api/scrapes/jobs"),
+      createJob: (payload) => request("/api/scrapes/jobs", { method: "POST", body: JSON.stringify(payload) }),
+      runJob: (id) => request(`/api/scrapes/jobs/${encodeURIComponent(id)}/run`, { method: "POST" }),
+      deleteJob: (id) => request(`/api/scrapes/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })
     }
   }
 }

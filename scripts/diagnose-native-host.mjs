@@ -72,14 +72,14 @@ for (const path of artifacts) {
   )
   if (info.gatekeeperStatus === "rejected" && short.includes("pty.node")) {
     console.log(
-      "    Gatekeeper popups may name .<hex>-00000000.node — that is this pty.node. Run `pnpm warm-pty`."
+      "    Gatekeeper popups may name .<hex>-00000000.node — that is this pty.node. Run `pnpm rebuild-pty`."
     )
   }
 }
 
 console.log("")
 if (problemCount > 0) {
-  console.log(`⚠  ${problemCount} artifact(s) still carry com.apple.quarantine.`)
+  console.log(`⚠  ${problemCount} native artifact issue(s) detected.`)
   if (fix) {
     const { scrubbed, errors } = scrubQuarantineAll(repoRoot)
     console.log(`✓ Scrubbed ${scrubbed.length} artifact(s)`)
@@ -90,9 +90,7 @@ if (problemCount > 0) {
 } else if (process.platform === "darwin") {
   console.log(`✓ No quarantine xattrs detected on native artifacts.`)
   console.log(
-    `  If Gatekeeper still pops on dev/build or first terminal use, open\n` +
-      `  System Settings → Privacy & Security and click "Allow Anyway".\n` +
-      `  Ad-hoc-signed prebuilds keep stable CDHashes per package version,\n` +
-      `  so the grant persists across reinstalls.`
+    `  If Gatekeeper still pops on dev/build or first terminal use, run\n` +
+      `  \`pnpm rebuild-pty\` to rebuild node-pty locally and scrub again.`
   )
 }

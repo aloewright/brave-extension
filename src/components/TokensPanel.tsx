@@ -1,5 +1,6 @@
 import { useState } from "react"
 
+import { PretextTextBlock } from "./PretextTextBlock"
 import type { ScanResult, TokenFormat } from "../types"
 import { generateTokens, inputsFromScan } from "../utils/tokens"
 
@@ -38,9 +39,12 @@ export function TokensPanel({ scan, defaultFormat, includeSpacing, includeFonts,
           Copy
         </button>
       </div>
-      <pre className="p-2 text-[10px] font-mono text-fg/80 max-h-48 overflow-auto whitespace-pre-wrap break-all">
+      <PretextTextBlock
+        text={payload}
+        className="p-2 text-[10px] font-mono text-fg/80 max-h-48 overflow-auto whitespace-pre-wrap break-all"
+      >
         {payload}
-      </pre>
+      </PretextTextBlock>
     </div>
   )
 }

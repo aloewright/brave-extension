@@ -1,13 +1,5 @@
-import type { PlasmoCSConfig } from "plasmo"
-
 import type { InspectorMessage, ScanResult, ScannedAsset } from "../types"
 import { collectFromDocument } from "../utils/assets"
-
-export const config: PlasmoCSConfig = {
-  matches: ["<all_urls>"],
-  run_at: "document_idle",
-  all_frames: false
-}
 
 const NODE_CAP = 8000
 const CHUNK_SIZE = 500

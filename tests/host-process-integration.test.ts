@@ -152,4 +152,21 @@ describe("native host child-process integration", () => {
     expect(reply.data).toContain("✓ → —")
     expect(parseErrors).toEqual([])
   })
+
+  it("spawns and kills a pty shell", async () => {
+    if (!proc) return
+    const sessionId = `test-pty-${Date.now()}`
+    send({ type: "pty.spawn", sessionId, cols: 40, rows: 12 })
+    const spawned = await waitFor(
+      (m) => m?.type === "pty.spawned" && m.sessionId === sessionId,
+      5000
+    )
+    expect(typeof spawned.pid).toBe("number")
+    send({ type: "pty.kill", sessionId })
+    const exited = await waitFor(
+      (m) => m?.type === "pty.exit" && m.sessionId === sessionId,
+      5000
+    )
+    expect(exited.sessionId).toBe(sessionId)
+  })
 })

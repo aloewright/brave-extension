@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { LeoIcon } from "../../components/leo"
 
 type EmailTab = "inbox" | "activity" | "compose"
@@ -9,6 +9,26 @@ type MailInboxItem = {
   participants: string
   snippet: string
   receivedAt?: number
+  codes: string[]
+  opened?: boolean
+  clicked?: boolean
+  sentStatus?: string
+}
+
+type MailThreadMessage = {
+  id: string
+  subject: string
+  from: string
+  body: string
+  sentAt?: number
+}
+
+type MailThreadDetail = {
+  id: string
+  subject: string
+  participants: string
+  receivedAt?: number
+  messages: MailThreadMessage[]
   codes: string[]
 }
 
@@ -28,6 +48,8 @@ type ComposeDraft = {
 }
 
 const QUICK_DRAFT_KEY = "email.quickComposeDraft.v1"
+const INBOX_PAGE_SIZE = 20
+const INBOX_PREFETCH_TARGET = 100
 
 const EMPTY_DRAFT: ComposeDraft = {
   to: "",
@@ -41,11 +63,20 @@ export function EmailSection() {
   const [activity, setActivity] = useState<MailActivityItem[]>([])
   const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT)
   const [pageEmails, setPageEmails] = useState<string[]>([])
+  const [selectedThreadId, setSelectedThreadId] = useState("")
+  const [threadDetail, setThreadDetail] = useState<MailThreadDetail | null>(null)
+  const [inboxNextCursor, setInboxNextCursor] = useState<number | null>(null)
+  const [inboxHasMore, setInboxHasMore] = useState(false)
   const [loadingInbox, setLoadingInbox] = useState(true)
+  const [loadingMoreInbox, setLoadingMoreInbox] = useState(false)
+  const [prefetchingInbox, setPrefetchingInbox] = useState(false)
   const [loadingActivity, setLoadingActivity] = useState(true)
+  const [loadingThread, setLoadingThread] = useState(false)
   const [inboxError, setInboxError] = useState("")
   const [activityError, setActivityError] = useState("")
+  const [threadError, setThreadError] = useState("")
   const [toast, setToast] = useState("")
+  const inboxRequestId = useRef(0)
 
   useEffect(() => {
     void refreshInbox()
@@ -72,23 +103,91 @@ export function EmailSection() {
     window.setTimeout(() => setToast(""), 1500)
   }
 
+  async function fetchInboxPage(cursor: number | null) {
+    return sendRuntimeMessage<{
+      ok: boolean
+      items?: MailInboxItem[]
+      nextCursor?: number | null
+      error?: string
+    }>({
+      type: "MAIL_INBOX_LIST_REQUEST",
+      limit: INBOX_PAGE_SIZE,
+      cursor: cursor ?? undefined
+    })
+  }
+
+  async function prefetchInbox(cursor: number | null, requestId: number, loadedCount: number) {
+    if (!cursor || loadedCount >= INBOX_PREFETCH_TARGET) return
+    setPrefetchingInbox(true)
+    let nextCursor: number | null = cursor
+    let count = loadedCount
+    try {
+      while (nextCursor && count < INBOX_PREFETCH_TARGET && inboxRequestId.current === requestId) {
+        const response = await fetchInboxPage(nextCursor)
+        if (inboxRequestId.current !== requestId) return
+        const pageItems = response.items ?? []
+        setInbox((current) => mergeInboxItems(current, pageItems))
+        count += pageItems.length
+        const normalizedCursor = normalizeCursor(response.nextCursor)
+        setInboxNextCursor(normalizedCursor)
+        setInboxHasMore(Boolean(normalizedCursor))
+        nextCursor = normalizedCursor
+        if (!response.ok) {
+          setInboxError(response.error || "Could not load inbox")
+          break
+        }
+        if (pageItems.length === 0) break
+      }
+    } catch {
+      // Background prefetch is opportunistic; keep the visible first page stable.
+    } finally {
+      if (inboxRequestId.current === requestId) setPrefetchingInbox(false)
+    }
+  }
+
   async function refreshInbox() {
+    const requestId = inboxRequestId.current + 1
+    inboxRequestId.current = requestId
     setLoadingInbox(true)
+    setLoadingMoreInbox(false)
+    setPrefetchingInbox(false)
     setInboxError("")
     try {
-      const response = await sendRuntimeMessage<{
-        ok: boolean
-        items?: MailInboxItem[]
-        error?: string
-      }>({ type: "MAIL_INBOX_LIST_REQUEST" })
-      setInbox(response.items ?? [])
+      const response = await fetchInboxPage(null)
+      if (inboxRequestId.current !== requestId) return
+      const nextCursor = normalizeCursor(response.nextCursor)
+      const items = response.items ?? []
+      setInbox(items)
+      setInboxNextCursor(nextCursor)
+      setInboxHasMore(Boolean(nextCursor))
       if (!response.ok) setInboxError(response.error || "Could not load inbox")
+      if (response.ok && nextCursor) void prefetchInbox(nextCursor, requestId, items.length)
     } catch (err) {
       setInboxError(err instanceof Error ? err.message : "Could not load inbox")
     } finally {
-      setLoadingInbox(false)
+      if (inboxRequestId.current === requestId) setLoadingInbox(false)
     }
   }
+
+  const loadMoreInbox = useCallback(async () => {
+    if (!inboxHasMore || !inboxNextCursor || loadingInbox || loadingMoreInbox || prefetchingInbox) return
+    const requestId = inboxRequestId.current
+    setLoadingMoreInbox(true)
+    setInboxError("")
+    try {
+      const response = await fetchInboxPage(inboxNextCursor)
+      if (inboxRequestId.current !== requestId) return
+      const nextCursor = normalizeCursor(response.nextCursor)
+      setInbox((current) => mergeInboxItems(current, response.items ?? []))
+      setInboxNextCursor(nextCursor)
+      setInboxHasMore(Boolean(nextCursor))
+      if (!response.ok) setInboxError(response.error || "Could not load more inbox")
+    } catch (err) {
+      setInboxError(err instanceof Error ? err.message : "Could not load more inbox")
+    } finally {
+      if (inboxRequestId.current === requestId) setLoadingMoreInbox(false)
+    }
+  }, [inboxHasMore, inboxNextCursor, loadingInbox, loadingMoreInbox, prefetchingInbox])
 
   async function refreshActivity() {
     setLoadingActivity(true)
@@ -106,6 +205,36 @@ export function EmailSection() {
     } finally {
       setLoadingActivity(false)
     }
+  }
+
+  async function openThread(threadId: string) {
+    setSelectedThreadId(threadId)
+    setThreadDetail(null)
+    setThreadError("")
+    setLoadingThread(true)
+    try {
+      const response = await sendRuntimeMessage<{
+        ok: boolean
+        detail?: MailThreadDetail | null
+        error?: string
+      }>({ type: "MAIL_THREAD_DETAIL_REQUEST", threadId })
+      if (response.ok && response.detail) {
+        setThreadDetail(response.detail)
+      } else {
+        setThreadError(response.error || "Could not load email")
+      }
+    } catch (err) {
+      setThreadError(err instanceof Error ? err.message : "Could not load email")
+    } finally {
+      setLoadingThread(false)
+    }
+  }
+
+  function closeThread() {
+    setSelectedThreadId("")
+    setThreadDetail(null)
+    setThreadError("")
+    setLoadingThread(false)
   }
 
   async function copyCode(code: string) {
@@ -224,14 +353,30 @@ export function EmailSection() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "inbox" && (
-          <InboxPane
-            error={inboxError}
-            items={inbox}
-            loading={loadingInbox}
-            onCopyCode={(code) => void copyCode(code)}
-            onFillCode={(code) => void fillCode(code)}
-            onRefresh={() => void refreshInbox()}
-          />
+          selectedThreadId ? (
+            <ThreadPane
+              detail={threadDetail}
+              error={threadError}
+              loading={loadingThread}
+              onBack={closeThread}
+              onCopyCode={(code) => void copyCode(code)}
+              onRefresh={() => void openThread(selectedThreadId)}
+            />
+          ) : (
+            <InboxPane
+              error={inboxError}
+              hasMore={inboxHasMore}
+              items={inbox}
+              loading={loadingInbox}
+              loadingMore={loadingMoreInbox}
+              onCopyCode={(code) => void copyCode(code)}
+              onFillCode={(code) => void fillCode(code)}
+              onLoadMore={() => void loadMoreInbox()}
+              onOpenThread={(threadId) => void openThread(threadId)}
+              onRefresh={() => void refreshInbox()}
+              prefetching={prefetchingInbox}
+            />
+          )
         )}
         {tab === "activity" && (
           <ActivityPane
@@ -258,19 +403,46 @@ export function EmailSection() {
 
 function InboxPane({
   error,
+  hasMore,
   items,
   loading,
+  loadingMore,
   onCopyCode,
   onFillCode,
-  onRefresh
+  onLoadMore,
+  onOpenThread,
+  onRefresh,
+  prefetching
 }: {
   error: string
+  hasMore: boolean
   items: MailInboxItem[]
   loading: boolean
+  loadingMore: boolean
   onCopyCode: (code: string) => void
   onFillCode: (code: string) => void
+  onLoadMore: () => void
+  onOpenThread: (threadId: string) => void
   onRefresh: () => void
+  prefetching: boolean
 }) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel || !hasMore) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && !loading && !loadingMore && !prefetching) {
+          onLoadMore()
+        }
+      },
+      { rootMargin: "180px 0px" }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, items.length, loading, loadingMore, onLoadMore, prefetching])
+
   return (
     <div className="space-y-2 p-2">
       <div className="flex items-center gap-2">
@@ -293,7 +465,18 @@ function InboxPane({
       {!loading && !error && items.length === 0 ? <EmptyNote text="No inbox items found." /> : null}
 
       {items.map((item) => (
-        <div key={item.id} className="rounded border border-border bg-card/35 p-2">
+        <div
+          key={item.id}
+          className="cursor-pointer rounded border border-border bg-card/35 p-2 text-left transition-colors hover:border-chart-1/35 hover:bg-card/55"
+          onClick={() => onOpenThread(item.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              onOpenThread(item.id)
+            }
+          }}
+          role="button"
+          tabIndex={0}>
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-fg">{item.subject || "(no subject)"}</p>
@@ -313,13 +496,19 @@ function InboxPane({
                 <div key={`${item.id}-${code}`} className="flex overflow-hidden rounded border border-success/25 bg-success/10">
                   <button
                     className="px-2 py-1 font-mono text-[11px] text-success hover:bg-success/10"
-                    onClick={() => onCopyCode(code)}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onCopyCode(code)
+                    }}
                     type="button">
                     {code}
                   </button>
                   <button
                     className="border-l border-success/20 px-2 py-1 text-[10px] text-success/80 hover:bg-success/10"
-                    onClick={() => onFillCode(code)}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onFillCode(code)
+                    }}
                     type="button">
                     Fill
                   </button>
@@ -329,6 +518,102 @@ function InboxPane({
           ) : null}
         </div>
       ))}
+      {!loading && prefetching ? <EmptyNote text="Caching recent mail in the background..." /> : null}
+      {!loading && loadingMore ? <EmptyNote text="Loading more inbox..." /> : null}
+      {!loading && hasMore ? (
+        <div ref={sentinelRef} className="h-8" aria-hidden="true" />
+      ) : null}
+    </div>
+  )
+}
+
+function ThreadPane({
+  detail,
+  error,
+  loading,
+  onBack,
+  onCopyCode,
+  onRefresh
+}: {
+  detail: MailThreadDetail | null
+  error: string
+  loading: boolean
+  onBack: () => void
+  onCopyCode: (code: string) => void
+  onRefresh: () => void
+}) {
+  return (
+    <div className="space-y-2 p-2">
+      <div className="flex items-center gap-2">
+        <button
+          className="rounded border border-border bg-card/40 px-2 py-1 text-[10px] text-fg/55 hover:text-fg"
+          onClick={onBack}
+          type="button">
+          Back
+        </button>
+        <p className="min-w-0 flex-1 truncate text-[10px] uppercase tracking-wider text-fg/30">
+          Email detail
+        </p>
+        <button
+          className="rounded border border-border bg-card/40 px-2 py-1 text-[10px] text-fg/55 hover:text-fg"
+          onClick={onRefresh}
+          type="button">
+          Refresh
+        </button>
+      </div>
+
+      {loading ? <EmptyNote text="Loading email..." /> : null}
+      {!loading && error ? <EmptyNote text={error} tone="warning" /> : null}
+
+      {!loading && detail ? (
+        <div className="space-y-2">
+          <div className="rounded border border-border bg-card/45 p-2">
+            <p className="text-xs font-medium leading-snug text-fg">
+              {detail.subject || "(no subject)"}
+            </p>
+            <p className="mt-1 truncate text-[10px] text-fg/35">
+              {detail.participants || "Unknown sender"} · {formatTime(detail.receivedAt)}
+            </p>
+            {detail.codes.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {detail.codes.map((code) => (
+                  <button
+                    key={`${detail.id}-${code}`}
+                    className="rounded border border-success/25 bg-success/10 px-2 py-1 font-mono text-[11px] text-success hover:bg-success/15"
+                    onClick={() => onCopyCode(code)}
+                    type="button">
+                    {code}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {detail.messages.length === 0 ? <EmptyNote text="No message body found." /> : null}
+          {detail.messages.map((message) => (
+            <article key={message.id} className="rounded border border-border bg-bg p-2">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[11px] font-medium text-fg/70">
+                    {message.from || "Unknown sender"}
+                  </p>
+                  {message.subject ? (
+                    <p className="truncate text-[10px] text-fg/35">{message.subject}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-[10px] text-fg/30">{formatTime(message.sentAt)}</span>
+              </div>
+              {message.body ? (
+                <PretextTextBlock text={message.body} className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-fg/60">
+                  {message.body}
+                </PretextTextBlock>
+              ) : (
+                <p className="mt-2 text-[11px] italic text-fg/30">No plain-text body.</p>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -504,6 +789,18 @@ function sendTabMessage<T>(tabId: number, message: Record<string, unknown>): Pro
   })
 }
 
+function normalizeCursor(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && Number.isFinite(Number(value))) return Number(value)
+  return null
+}
+
+function mergeInboxItems(current: MailInboxItem[], next: MailInboxItem[]) {
+  const byId = new Map(current.map((item) => [item.id, item]))
+  for (const item of next) byId.set(item.id, item)
+  return Array.from(byId.values()).sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0))
+}
+
 function formatTime(value?: number) {
   if (!value) return "recent"
   const diff = Date.now() - value
@@ -512,3 +809,4 @@ function formatTime(value?: number) {
   if (diff < 86_400_000) return `${Math.max(1, Math.round(diff / 3_600_000))}h`
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
+import { PretextTextBlock } from "../../components/PretextTextBlock"
