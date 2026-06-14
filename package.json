@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "Brave sidebar extension connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
   "author": "aloe",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "postinstall": "bash scripts/scrub-native-xattrs.sh && node scripts/scrub-quarantine.mjs",
     "dev": "node scripts/build-extension.mjs --watch",
@@ -37,7 +40,7 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/chrome": "^0.1.43",
-    "@types/node": "^22.19.17",
+    "@types/node": "^24",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitest/coverage-v8": "^4.1.8",
