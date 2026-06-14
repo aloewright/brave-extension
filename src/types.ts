@@ -226,6 +226,7 @@ export interface Settings {
   browserAgentCloudVisionEnabled: boolean
   browserAgentCloudOcrEnabled: boolean
   hiddenRailSections: string[]
+  railSectionOrder: string[]
   hideRailQuickActions: boolean
   passwordManagerProvider: PasswordManagerProvider
   passwordAppUrl: string
@@ -321,8 +322,9 @@ export const DEFAULT_SETTINGS: Settings = {
   browserAgentCloudVisionEnabled: false,
   browserAgentCloudOcrEnabled: false,
   hiddenRailSections: [],
+  railSectionOrder: [],
   hideRailQuickActions: false,
-  passwordManagerProvider: "proton-pass",
+  passwordManagerProvider: "nodewarden-self-hosted",
   passwordAppUrl: "https://go.lazee.workers.dev",
   braveSearchApiKey: "",
   dopplerProject: "",

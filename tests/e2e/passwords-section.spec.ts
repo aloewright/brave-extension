@@ -7,9 +7,9 @@ test("passwords tab renders a responsive vault surface", async ({ openSidepanel 
 
   await expect(page.getByTestId("passwords-section")).toBeVisible()
   await expect(page.getByRole("button", { name: "Vault", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Generator" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Web Vault" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "New" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Import \/ Export/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Backups/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Devices/ })).toBeVisible()
 
   const fitsNarrow = await page.getByTestId("passwords-section").evaluate((el) => {
     return el.scrollWidth <= el.clientWidth + 1

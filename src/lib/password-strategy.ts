@@ -2,21 +2,21 @@
  * Password-management boundary for the extension.
  *
  * Current strategy:
- * - Proton Pass is the user's active password manager.
- * - This extension does not expose a password-manager view.
+ * - The self-hosted go app is the user's active password manager.
+ * - This extension exposes a thin launcher/status view only.
  * - This extension does not inject passive password autofill.
  * - This extension must not persist decrypted vault passwords.
  *
- * Future Nodewarden/self-hosted work should treat the extension as a thin,
- * locked client. Store metadata only, keep decrypted secrets in memory after an
- * explicit unlock, and never bring back automatic submit behavior by default.
+ * Any future fill/copy work must keep go as the vault of record. Store metadata
+ * only, keep decrypted secrets in memory after an explicit unlock, and never
+ * bring back automatic submit behavior by default.
  */
 
 export const PASSWORD_STRATEGY = {
-  activeManager: "proton-pass",
+  activeManager: "nodewarden-self-hosted",
   extensionStoresVaultPasswords: false,
   passiveAutofillEnabled: false,
-  selfHostedNodewardenStatus: "deferred",
+  selfHostedNodewardenStatus: "go external vault",
 } as const;
 
 export const LEGACY_PASSWORD_STORAGE_KEYS = [
@@ -41,7 +41,7 @@ interface PasswordAppBootstrapResponse {
   registrationInviteRequired?: boolean;
 }
 
-function buildPasswordAppUrl(baseUrl: string, path: string): string {
+export function buildPasswordAppUrl(baseUrl: string, path: string): string {
   const normalized = baseUrl.trim();
   if (!normalized) {
     throw new Error("Password app URL is empty.");

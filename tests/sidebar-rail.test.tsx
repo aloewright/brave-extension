@@ -56,6 +56,29 @@ describe("SECTIONS reflects the current rail organization", () => {
     );
   });
 
+  it("includes Passwords as the go vault launcher surface", () => {
+    const ids = SECTIONS.map((s) => s.id);
+    const sidepanelSource = readFileSync(
+      join(process.cwd(), "src/sidepanel.tsx"),
+      "utf8",
+    );
+
+    expect(ids).toContain<SectionId>("passwords");
+    expect(SECTIONS.find((s) => s.id === "passwords")?.label).toBe(
+      "Passwords",
+    );
+    expect(sidepanelSource).toContain("<PasswordVaultSection />");
+    expect(sidepanelSource).not.toContain('section === "passwords"');
+  });
+
+  it("uses the lock icon for the Passwords rail entry", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8",
+    );
+    expect(source).toContain('passwords: "lock"');
+  });
+
   it("uses the avatar icon for Contact Enrichment", () => {
     const source = readFileSync(
       join(process.cwd(), "src/components/SidebarRail.tsx"),
@@ -187,5 +210,19 @@ describe("Bottom quick-action group composition", () => {
     expect(source).toContain("openResizableSidebarWindow");
     expect(source).toContain('label: "Open resizable sidebar window"');
     expect(source).toContain('icon: "file-export"');
+  });
+
+  it("persists custom rail ordering from drag and drop", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("draggable");
+    expect(source).toContain("onDragStart");
+    expect(source).toContain("onDrop");
+    expect(source).toContain("moveRailSection(sectionOrder");
+    expect(source).toContain("setSettings({ railSectionOrder: nextOrder })");
+    expect(source).toContain("data-drop-target");
   });
 });
