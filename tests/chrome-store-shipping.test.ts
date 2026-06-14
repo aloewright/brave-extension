@@ -58,19 +58,20 @@ describe("sticky notes", () => {
 })
 
 describe("password strategy", () => {
-  it("keeps the extension out of the password-vault business while Proton Pass is active", () => {
+  it("uses go as the external vault without storing passwords in the extension", () => {
     const ids = SECTIONS.map((section) => section.id)
-    expect(ids as string[]).not.toContain("passwords")
+    expect(ids as string[]).toContain("passwords")
     expect(PASSWORD_STRATEGY).toMatchObject({
-      activeManager: "proton-pass",
+      activeManager: "nodewarden-self-hosted",
       extensionStoresVaultPasswords: false,
       passiveAutofillEnabled: false,
-      selfHostedNodewardenStatus: "deferred"
+      selfHostedNodewardenStatus: "go external vault"
     })
   })
 
-  it("does not ship the old password manager UI or passive autofill content script", () => {
+  it("does not ship the old local password manager UI or passive autofill content script", () => {
     expect(existsSync(join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"))).toBe(false)
+    expect(existsSync(join(process.cwd(), "src/sections/passwords/PasswordVaultSection.tsx"))).toBe(true)
     expect(existsSync(join(process.cwd(), "src/contents/password-autofill.ts"))).toBe(false)
   })
 

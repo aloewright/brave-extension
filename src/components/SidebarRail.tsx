@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import type { SectionId } from "../sections/types";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import type { SectionDef, SectionId } from "../sections/types";
 import { SECTIONS } from "../sections/types";
 import { LeoIcon, type LeoIconName } from "./leo";
-import { getSettings } from "../storage";
+import { getSettings, setSettings } from "../storage";
+import {
+  moveRailSection,
+  normalizeRailSectionOrder,
+} from "../lib/rail-order";
 import {
   runPipQuickAction,
   runScrapeCurrentPageQuickAction,
@@ -24,6 +28,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   pageStudio: "paint-brush",
   extensions: "puzzle-piece",
   session: "inbox",
+  passwords: "lock",
   email: "mail",
   quickInfo: "avatar",
   perplexity: "search",
@@ -39,6 +44,10 @@ const ICONS: Record<SectionId, LeoIconName> = {
   lexicon: "book-open",
   settings: "settings",
 };
+
+const SECTIONS_BY_ID = new Map<SectionId, SectionDef>(
+  SECTIONS.map((section) => [section.id, section]),
+);
 
 // Nord palette "frost" blue — locked here (rather than the theme tokens) so
 // the bottom quick-action group has an obvious, distinct accent regardless
@@ -90,7 +99,17 @@ export function SidebarRail({ active, onChange }: Props) {
   const [feedback, setFeedback] = useState<QuickActionFeedback | null>(null);
   const [hiddenSections, setHiddenSections] = useState<Set<string>>(new Set());
   const [hideQuickActions, setHideQuickActions] = useState(false);
+  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(() =>
+    normalizeRailSectionOrder(undefined),
+  );
+  const [draggingSection, setDraggingSection] = useState<SectionId | null>(
+    null,
+  );
+  const [dragOverSection, setDragOverSection] = useState<SectionId | null>(
+    null,
+  );
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressClickAfterDrag = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -102,9 +121,11 @@ export function SidebarRail({ active, onChange }: Props) {
     const applyRailPrefs = (settings: {
       hiddenRailSections?: string[];
       hideRailQuickActions?: boolean;
+      railSectionOrder?: string[];
     }) => {
       setHiddenSections(new Set(settings.hiddenRailSections ?? []));
       setHideQuickActions(Boolean(settings.hideRailQuickActions));
+      setSectionOrder(normalizeRailSectionOrder(settings.railSectionOrder));
     };
     void getSettings().then(applyRailPrefs);
     const onChanged = (
@@ -140,6 +161,70 @@ export function SidebarRail({ active, onChange }: Props) {
     }
   };
 
+  const handleSectionClick = (id: SectionId) => {
+    if (suppressClickAfterDrag.current) {
+      suppressClickAfterDrag.current = false;
+      return;
+    }
+    onChange(id);
+  };
+
+  const handleDragStart = (
+    event: DragEvent<HTMLButtonElement>,
+    id: SectionId,
+  ) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+    setDraggingSection(id);
+  };
+
+  const handleDragOver = (
+    event: DragEvent<HTMLButtonElement>,
+    id: SectionId,
+  ) => {
+    if (!draggingSection || draggingSection === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverSection(id);
+  };
+
+  const handleDrop = async (
+    event: DragEvent<HTMLButtonElement>,
+    id: SectionId,
+  ) => {
+    event.preventDefault();
+    const draggedId = (event.dataTransfer.getData("text/plain") ||
+      draggingSection) as SectionId | null;
+    if (!draggedId || draggedId === id || !sectionOrder.includes(draggedId)) {
+      return;
+    }
+
+    const nextOrder = moveRailSection(sectionOrder, draggedId, id);
+    setSectionOrder(nextOrder);
+    suppressClickAfterDrag.current = true;
+    try {
+      await setSettings({ railSectionOrder: nextOrder });
+    } catch (error) {
+      console.warn("Failed to save sidebar rail order", error);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggingSection(null);
+    setDragOverSection(null);
+    window.setTimeout(() => {
+      suppressClickAfterDrag.current = false;
+    }, 120);
+  };
+
+  const orderedSections = sectionOrder
+    .map((id) => SECTIONS_BY_ID.get(id))
+    .filter((section): section is SectionDef => Boolean(section))
+    .filter(
+      (s) =>
+        s.id === "settings" || s.id === active || !hiddenSections.has(s.id),
+    );
+
   return (
     <nav
       className="relative flex flex-col items-center justify-between gap-1 px-1.5 py-2 bg-bg/50"
@@ -149,22 +234,35 @@ export function SidebarRail({ active, onChange }: Props) {
         className="flex flex-col items-center gap-1"
         data-testid="sidebar-rail-sections"
       >
-        {SECTIONS.filter(
-          (s) =>
-            s.id === "settings" || s.id === active || !hiddenSections.has(s.id),
-        ).map((s) => {
+        {orderedSections.map((s) => {
           const isActive = s.id === active;
+          const isDragging = draggingSection === s.id;
+          const isDropTarget = dragOverSection === s.id;
           return (
             <button
               key={s.id}
-              onClick={() => onChange(s.id)}
+              type="button"
+              draggable
+              onClick={() => handleSectionClick(s.id)}
+              onDragStart={(event) => handleDragStart(event, s.id)}
+              onDragOver={(event) => handleDragOver(event, s.id)}
+              onDragLeave={() => {
+                if (dragOverSection === s.id) setDragOverSection(null);
+              }}
+              onDrop={(event) => void handleDrop(event, s.id)}
+              onDragEnd={handleDragEnd}
               title={s.label}
               aria-label={s.label}
               aria-pressed={isActive}
+              aria-grabbed={isDragging || undefined}
+              data-dragging={isDragging ? "true" : undefined}
+              data-drop-target={isDropTarget ? "true" : undefined}
               className={`p-2 rounded transition-colors ${
                 isActive
                   ? "bg-accent text-fg"
                   : "text-fg/40 hover:bg-accent/50 hover:text-fg"
+              } ${isDragging ? "opacity-45" : ""} ${
+                isDropTarget ? "ring-1 ring-primary/60 bg-primary/10" : ""
               }`}
             >
               <LeoIcon name={ICONS[s.id]} size={16} />

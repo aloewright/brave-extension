@@ -4,6 +4,7 @@ export type SectionId =
   | "pageStudio"
   | "extensions"
   | "session"
+  | "passwords"
   | "email"
   | "quickInfo"
   // Perplexity is temporarily hidden while the remote-tab experiment is refined.
@@ -39,7 +40,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "quickInfo", label: "Contact Enrichment" },
   // { id: "perplexity", label: "Perplexity" },
   { id: "tasks", label: "Tasks" },
-  // Passwords/Nodewarden is hidden while Proton handles password management.
+  { id: "passwords", label: "Passwords" },
   { id: "bookmarks", label: "Bookmarks" },
   { id: "captures", label: "Page Captures" },
   { id: "cookies", label: "Cookies" },

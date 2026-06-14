@@ -7,6 +7,7 @@ import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { PageStudioSection } from "./sections/page-studio/PageStudioSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
+import { PasswordVaultSection } from "./sections/passwords/PasswordVaultSection";
 import { EmailSection } from "./sections/email/EmailSection";
 import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
 // import { PerplexitySection } from "./sections/perplexity/PerplexitySection";
@@ -32,8 +33,7 @@ function resolveStoredSection(
   if (
     section === "aiChat" ||
     section === "joplin" ||
-    section === "perplexity" ||
-    section === "passwords"
+    section === "perplexity"
   ) {
     return "session";
   }
@@ -121,6 +121,7 @@ function SidePanel() {
           >
             <SessionSection />
           </div>
+          {active === "passwords" && <PasswordVaultSection />}
           {active === "email" && <EmailSection />}
           {active === "quickInfo" && <QuickInfoSection />}
           {/* {active === "perplexity" && <PerplexitySection />} */}

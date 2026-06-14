@@ -19,6 +19,7 @@ import {
   purgeLegacyPasswordStorage,
   type PasswordAppStatus,
 } from "../lib/password-strategy";
+import { normalizeRailSectionOrder } from "../lib/rail-order";
 import {
   APPEARANCE_COLOR_FIELDS,
   APPEARANCE_PRESETS,
@@ -416,23 +417,23 @@ export function SettingsPanel({
     passwordProvider === "none"
       ? "Extension password features are off"
       : passwordProvider === "nodewarden-self-hosted"
-        ? "Self-hosted Nodewarden is deferred"
+        ? "go is the password vault"
         : "Proton Pass is in charge";
   const passwordStrategyDescription =
     passwordProvider === "none"
       ? "No extension password integration is active. Keep password management in your external manager."
       : passwordProvider === "nodewarden-self-hosted"
-        ? "Nodewarden needs a real self-hosted encrypted vault before it can return to the extension."
-        : "The extension is password-manager-neutral: no vault tab, no passive password autofill, no auto-submit.";
+        ? "The extension opens go and checks health, while go owns login, encryption, imports, and backups."
+        : "The extension keeps Proton external: no local vault storage, no passive password autofill, no auto-submit.";
   const passwordStrategyBadge =
     passwordProvider === "nodewarden-self-hosted"
-      ? "Deferred"
+      ? "Active"
       : passwordProvider === "none"
         ? "Off"
         : "Active";
   const passwordStrategyBadgeClass =
     passwordProvider === "nodewarden-self-hosted"
-      ? "bg-warning/15 text-warning"
+      ? "bg-success/15 text-success"
       : passwordProvider === "none"
         ? "bg-fg/10 text-fg/45"
         : "bg-success/15 text-success";
@@ -1070,11 +1071,11 @@ export function SettingsPanel({
                 }
                 className="w-full rounded border border-border bg-input px-2 py-1 text-[10px] text-fg outline-none"
               >
+                <option value="nodewarden-self-hosted">
+                  Self-hosted go
+                </option>
                 <option value="proton-pass">Proton Pass</option>
                 <option value="none">No extension password integration</option>
-                <option value="nodewarden-self-hosted" disabled>
-                  Self-hosted Nodewarden (deferred)
-                </option>
               </select>
             </label>
 
@@ -1204,9 +1205,11 @@ export function SettingsPanel({
                 }
               />
               <StatusRow
-                label="Nodewarden"
-                ok={false}
-                warn
+                label="Self-hosted go"
+                ok={
+                  PASSWORD_STRATEGY.selfHostedNodewardenStatus ===
+                  "go external vault"
+                }
                 detail={PASSWORD_STRATEGY.selfHostedNodewardenStatus}
               />
               <StatusRow
@@ -1231,19 +1234,6 @@ export function SettingsPanel({
             <div className="flex gap-1.5">
               <button
                 type="button"
-                onClick={() =>
-                  window.open(
-                    "https://pass.proton.me",
-                    "proton-pass",
-                    "popup,width=1100,height=760",
-                  )
-                }
-                className="flex-1 rounded bg-primary/20 px-2 py-1 text-[10px] text-primary hover:bg-primary/30"
-              >
-                Open Proton Pass
-              </button>
-              <button
-                type="button"
                 disabled={!settings.passwordAppUrl.trim()}
                 onClick={() =>
                   window.open(
@@ -1255,6 +1245,19 @@ export function SettingsPanel({
                 className="flex-1 rounded bg-primary/15 px-2 py-1 text-[10px] text-primary hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Open custom app
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  window.open(
+                    "https://pass.proton.me",
+                    "proton-pass",
+                    "popup,width=1100,height=760",
+                  )
+                }
+                className="flex-1 rounded bg-primary/20 px-2 py-1 text-[10px] text-primary hover:bg-primary/30"
+              >
+                Open Proton Pass
               </button>
               <button
                 type="button"
@@ -2071,6 +2074,15 @@ function RailVisibilitySection({
   onUpdate: (patch: Partial<Settings>) => void;
 }) {
   const hidden = new Set(settings.hiddenRailSections ?? []);
+  const sectionsById = new Map(
+    SECTIONS.map((section) => [section.id, section]),
+  );
+  const orderedSections = normalizeRailSectionOrder(settings.railSectionOrder)
+    .map((id) => sectionsById.get(id))
+    .filter((section): section is (typeof SECTIONS)[number] =>
+      Boolean(section),
+    )
+    .filter((section) => section.id !== "settings");
   const toggleSection = (id: string) => {
     const next = new Set(hidden);
     if (next.has(id)) next.delete(id);
@@ -2083,8 +2095,8 @@ function RailVisibilitySection({
       <div>
         <div className="text-[11px] text-fg/70">Rail icons</div>
         <div className="text-[9px] text-fg/30">
-          Hide sidebar rail icons without removing the features. Settings stays
-          visible.
+          Drag icons in the rail to reorder them. Hide icons here without
+          removing their features. Settings stays visible.
         </div>
       </div>
       <Toggle
@@ -2094,29 +2106,36 @@ function RailVisibilitySection({
         onChange={(v) => onUpdate({ hideRailQuickActions: v })}
       />
       <div className="grid grid-cols-2 gap-1.5">
-        {SECTIONS.filter((section) => section.id !== "settings").map(
-          (section) => {
-            const isHidden = hidden.has(section.id);
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => toggleSection(section.id)}
-                className={`rounded border px-2 py-1.5 text-left text-[10px] transition-colors ${
-                  isHidden
-                    ? "border-border bg-bg/40 text-fg/35 line-through"
-                    : "border-primary/25 bg-primary/10 text-primary"
-                }`}
-                title={
-                  isHidden ? `Show ${section.label}` : `Hide ${section.label}`
-                }
-              >
-                {section.label}
-              </button>
-            );
-          },
-        )}
+        {orderedSections.map((section) => {
+          const isHidden = hidden.has(section.id);
+          return (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => toggleSection(section.id)}
+              className={`rounded border px-2 py-1.5 text-left text-[10px] transition-colors ${
+                isHidden
+                  ? "border-border bg-bg/40 text-fg/35 line-through"
+                  : "border-primary/25 bg-primary/10 text-primary"
+              }`}
+              title={
+                isHidden ? `Show ${section.label}` : `Hide ${section.label}`
+              }
+            >
+              {section.label}
+            </button>
+          );
+        })}
       </div>
+      {settings.railSectionOrder.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onUpdate({ railSectionOrder: [] })}
+          className="w-full rounded border border-border/60 bg-bg/35 px-2 py-1.5 text-left text-[10px] text-fg/55 transition-colors hover:bg-accent/35 hover:text-fg"
+        >
+          Reset rail order
+        </button>
+      )}
     </div>
   );
 }

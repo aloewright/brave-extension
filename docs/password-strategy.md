@@ -2,13 +2,13 @@
 
 ## Current decision
 
-Use Proton Pass as the active password manager for now.
+Use the self-hosted `go` app at `https://go.lazee.workers.dev` as the active password manager.
 
-The Brave Dev Extension should not be a password vault while this is true. It should not expose a password-manager tab, inject passive password autofill, auto-submit login forms, or store decrypted vault passwords in extension storage.
+The Brave Dev Extension should not be the vault of record. It may expose a password tab for launch/status controls, but it must not inject passive password autofill, auto-submit login forms, or store decrypted vault passwords in extension storage.
 
 ## What changed
 
-- The Passwords/Nodewarden sidebar surface is hidden/removed.
+- The Passwords sidebar surface is a thin `go` launcher/status panel.
 - The passive password autofill content script is removed.
 - The background `PASSWORDS_MATCH_LOGINS` endpoint is removed.
 - Legacy password storage keys are purged on service-worker load, startup, and install.
@@ -21,26 +21,25 @@ The extension may keep non-sensitive password-manager metadata in the future, bu
 - Decrypted secrets: memory only, after explicit unlock.
 - Autofill: explicit user action only.
 - Auto-submit: disabled by default.
-- Provider of record: Proton Pass now; future Nodewarden only after a proper self-hosted vault exists.
+- Provider of record: self-hosted `go`.
 
 The code boundary lives in `src/lib/password-strategy.ts`.
 
 Settings exposes this as a visible Password strategy card:
 
-- Provider of record defaults to Proton Pass.
+- Provider of record defaults to self-hosted `go`.
 - Extension vault storage is shown as disabled.
 - Passive autofill is shown as disabled.
-- Self-hosted Nodewarden is marked deferred.
 - The self-hosted password app URL defaults to `https://go.lazee.workers.dev` and can be changed for launch/status integration.
 - Legacy Nodewarden/password cache keys can be purged manually.
 
-## Future Nodewarden shape
+## Future extension fill/copy shape
 
-If Nodewarden comes back, it should come back as a real self-hosted service, not as a plaintext browser-extension cache.
+If extension fill/copy comes back, it should connect to `go` as a real self-hosted service, not as a plaintext browser-extension cache.
 
 Recommended architecture:
 
-1. Self-host Nodewarden as the vault of record.
+1. Keep `go` as the vault of record.
 2. Store encrypted vault items server-side.
 3. Require an explicit unlock in the extension.
 4. Query only domain-relevant metadata before unlock.
@@ -50,7 +49,7 @@ Recommended architecture:
 
 ## Migration checklist
 
-Before reintroducing Nodewarden UI:
+Before adding secret fill/copy UI:
 
 1. Confirm the self-hosted backend is deployed and owned by this workspace.
 2. Confirm encrypted-at-rest storage and an unlock/session model.

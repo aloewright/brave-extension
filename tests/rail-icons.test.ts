@@ -8,6 +8,7 @@ describe("rail icon mappings", () => {
     expect(rail).toContain('inspector: "search"')
     expect(rail).toContain('agentChat: "robot"')
     expect(rail).toContain('lexicon: "book-open"')
+    expect(rail).toContain('passwords: "lock"')
     expect(rail).not.toContain('tech: "cpu-chip"')
   })
 
