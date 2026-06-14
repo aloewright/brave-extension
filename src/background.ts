@@ -83,6 +83,7 @@ import {
 } from "./background/cal-tasks-proxy";
 import { fetchMailViaPageContext } from "./background/mail-proxy";
 import { importVideoUrl } from "./background/video-import";
+import { runFullPagePdfQuickAction } from "./lib/quick-actions";
 import type {
   PickerCapture,
   PickerMessage,
@@ -1203,6 +1204,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     saveLinkToLibrary(message.url, message.title, message.tags).then(() =>
       sendResponse({ ok: true }),
     );
+    return true;
+  }
+
+  if (message.type === "session/save-page-link-hotkey") {
+    const url = sender.tab?.url || (typeof message.url === "string" ? message.url : "");
+    const title = sender.tab?.title || (typeof message.title === "string" ? message.title : url);
+    if (!url) {
+      sendResponse({ ok: false, error: "No page URL to save" });
+      return false;
+    }
+    saveLinkToLibrary(url, title, message.tags)
+      .then(async () => {
+        await showTtsBadge("LNK", "#2c50cd", 1200);
+        sendResponse({ ok: true });
+      })
+      .catch((err) => sendResponse({ ok: false, error: unknownErrorMessage(err) }));
+    return true;
+  }
+
+  if (message.type === "session/save-pdf-hotkey") {
+    const url = sender.tab?.url || (typeof message.url === "string" ? message.url : "");
+    const title = sender.tab?.title || (typeof message.title === "string" ? message.title : url);
+    const isPdfLink = /\.pdf(?:[?#].*)?$/i.test(url) || String(message.contentType || "").includes("pdf");
+    if (isPdfLink) {
+      saveLinkToLibrary(url, title, ["pdf"])
+        .then(async () => {
+          await showTtsBadge("PDF", "#2c50cd", 1200);
+          sendResponse({ ok: true, mode: "link" });
+        })
+        .catch((err) => sendResponse({ ok: false, error: unknownErrorMessage(err) }));
+      return true;
+    }
+    runFullPagePdfQuickAction()
+      .then(async (result) => {
+        await showTtsBadge(result.kind === "success" ? "PDF" : "ERR", result.kind === "success" ? "#2c50cd" : "#ef4444", 1600);
+        sendResponse({ ok: result.kind === "success", mode: "capture", message: result.message });
+      })
+      .catch((err) => sendResponse({ ok: false, mode: "capture", error: unknownErrorMessage(err) }));
     return true;
   }
 
