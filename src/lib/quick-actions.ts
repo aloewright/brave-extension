@@ -29,7 +29,6 @@ export type QuickActionResult =
   | { kind: "success"; message: string }
   | { kind: "error"; message: string }
 
-const PAGE_AGENT_VISIBLE_KEY = "pageAgent.visible"
 const PDF_MIME_TYPE = "application/pdf"
 const DOWNLOAD_URL_REVOKE_DELAY_MS = 30_000
 
@@ -248,36 +247,4 @@ export async function runScrapeCurrentPageQuickAction(): Promise<QuickActionResu
   } catch (err) {
     return { kind: "error", message: `Scrape failed: ${err instanceof Error ? err.message : String(err)}` }
   }
-}
-
-/**
- * Hide/show the page-agent launcher globally. Content scripts listen to the
- * stored visibility flag, so this works even when the active tab cannot receive
- * extension messages.
- */
-export async function runPageAgentQuickAction(): Promise<QuickActionResult> {
-  const result = await chrome.storage.local.get(PAGE_AGENT_VISIBLE_KEY)
-  const current =
-    typeof result?.[PAGE_AGENT_VISIBLE_KEY] === "boolean"
-      ? result[PAGE_AGENT_VISIBLE_KEY]
-      : true
-  const visible = !current
-  await chrome.storage.local.set({ [PAGE_AGENT_VISIBLE_KEY]: visible })
-
-  try {
-    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
-    if (win?.id) {
-      const [tab] = await chrome.tabs.query({ active: true, windowId: win.id })
-      if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: "PAGE_AGENT_TOGGLE",
-          visible
-        })
-      }
-    }
-  } catch {
-    // The storage flag is the source of truth; messaging is only an immediate
-    // refresh for tabs that already have the content script loaded.
-  }
-  return { kind: "success", message: visible ? "Page agent shown" : "Page agent hidden" }
 }

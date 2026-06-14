@@ -23,9 +23,6 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.2
         version: 3.14.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@vectorize-io/hindsight-client':
-        specifier: ^0.7.2
-        version: 0.7.2
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
@@ -300,9 +297,6 @@ packages:
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
-
-  '@vectorize-io/hindsight-client@0.7.2':
-    resolution: {integrity: sha512-wl0ICqGyr1Ui29+sOiJMJl+4zhGJplgQOlTR6oH60DZBH38uFePuSyxpX87hknEpCw62/xxk56uwHawxYIrwHQ==}
 
   '@vitest/coverage-v8@4.1.8':
     resolution: {integrity: sha512-lt3kovsyHwYe00wq4D1ti0Z974fWj4NLp6siqiyEufUpyFwK9Yhi7rBhac9JL5aA0zoMrJqc4vYPZRUnI7l7nw==}
@@ -1177,8 +1171,6 @@ snapshots:
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 22.19.17
-
-  '@vectorize-io/hindsight-client@0.7.2': {}
 
   '@vitest/coverage-v8@4.1.8(vitest@4.1.8)':
     dependencies:

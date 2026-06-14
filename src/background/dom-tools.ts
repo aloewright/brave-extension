@@ -24,7 +24,8 @@ function isRestrictedUrl(url: string | undefined | null): boolean {
   return RESTRICTED_URL_PREFIXES.some((p) => url.startsWith(p))
 }
 
-const NO_TAB_ERR = "no active tab; pass tabId explicitly"
+const NO_TAB_ERR =
+  "no usable active tab (it may be a restricted browser page like chrome:// or about:); use tabs_list and pass tabId explicitly"
 
 type ToolResult = {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>

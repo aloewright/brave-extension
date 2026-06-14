@@ -1,5 +1,4 @@
 import { ulid } from "./lib/ulid";
-import { HindsightClient } from "@vectorize-io/hindsight-client";
 import { MENU_ID_TO_MODE } from "./lib/joplin-types";
 import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
 import { handleClipRequest } from "./lib/joplin-clip-handler";
@@ -10,7 +9,6 @@ import { syncLink, changedLinks } from "./background/link-sync";
 import { triggerBackgroundSyncReconcile } from "./background/sync-reconcile-runner";
 import { getSettings } from "./storage";
 import { ApiError, createSidebarApiClient } from "./lib/sidebar-api";
-import { buildBrowserAgentCloudChatPayload } from "./lib/browser-agent-cloud";
 import {
   addSessionSnippet,
   copyToClipboardViaTab,
@@ -85,12 +83,6 @@ import {
 } from "./background/cal-tasks-proxy";
 import { fetchMailViaPageContext } from "./background/mail-proxy";
 import { importVideoUrl } from "./background/video-import";
-import {
-  parseProgram,
-  executeProgram,
-  type ProgramDeps,
-  type StepEntry
-} from "./background/page-agent-program";
 import type {
   PickerCapture,
   PickerMessage,
@@ -952,44 +944,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "PAGE_AGENT_OBSERVE") {
-    const tabId = sender.tab?.id;
-    if (typeof tabId !== "number") {
-      sendResponse({ ok: false, error: "tabId unavailable" });
-      return;
-    }
-    pageAgentObserve(tabId)
-      .then((observation) => sendResponse({ ok: true, observation }))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
-  if (message.type === "PAGE_AGENT_MESSAGE") {
-    const tabId = sender.tab?.id;
-    if (typeof tabId !== "number") {
-      sendResponse({ ok: false, error: "tabId unavailable" });
-      return;
-    }
-    handlePageAgentMessage({
-      tabId,
-      sessionId: typeof message.sessionId === "string" ? message.sessionId : undefined,
-      text: String(message.text || ""),
-    })
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
   if (message.type === "GET_CONSOLE_ERRORS") {
     const tabId = message.tabId;
     const errors = normalizeConsoleEntries(consoleErrors.get(tabId));
@@ -1350,201 +1304,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Tiny in-memory caches + helpers for the quick-actions bar.
 const cachedTech = new Map<string, { techs: any[]; ts: number }>();
-
-async function pageAgentObserve(tabId: number): Promise<unknown> {
-  const result = await DOM_TOOL_HANDLERS.browser_observe({ tabId });
-  if (result.isError) throw new Error(result.content[0]?.text || "observe failed");
-  return JSON.parse(result.content[0]?.text || "null");
-}
-
-type LocalPlanResponse = { ok?: boolean; reply?: string; plan?: unknown } | null;
-
-// Instantiated once, not per message, so a single client/connection is reused.
-const hindsightClient = new HindsightClient({ baseUrl: "http://localhost:8888" });
-const hindsightBankId = "page-agent-bank";
-
-async function handlePageAgentMessage(input: {
-  tabId: number;
-  sessionId?: string;
-  text: string;
-}): Promise<{
-  sessionId: string;
-  reply: string;
-  provider: string;
-  steps: StepEntry[];
-}> {
-  const text = input.text.trim();
-  if (!text) throw new Error("message required");
-
-  let memoryContext = "";
-  try {
-    const tab = await new Promise<chrome.tabs.Tab>((resolve) => chrome.tabs.get(input.tabId, resolve));
-    if (tab.url) {
-      const url = new URL(tab.url);
-      const domain = url.hostname;
-      const query = `Domain: ${domain}\nObjective: ${text}`;
-      const results = await hindsightClient.recall(hindsightBankId, query);
-      if (results && results.results && results.results.length > 0) {
-        memoryContext = `\n\nPast experiences for ${domain}:\n${JSON.stringify(results.results)}`;
-      }
-    }
-  } catch (err) {
-    safeRuntimeWarning("hindsight pre-planning recall failed", err);
-  }
-
-  const enhancedObjective = text + memoryContext;
-
-  const initialObservation = await pageAgentObserve(input.tabId);
-  const sessionId = input.sessionId || `page_${crypto.randomUUID()}`;
-  const localPlan = (await requestNative(
-    { type: "foundationModels.plan", objective: enhancedObjective, observation: initialObservation },
-    15000,
-  ).catch(() => null)) as LocalPlanResponse;
-
-  const programDeps: ProgramDeps = {
-    runTool: async (name, args) => {
-      const handler = DOM_TOOL_HANDLERS[name];
-      if (!handler) return { ok: false, reason: `unknown tool ${name}` };
-      const r = await handler(args);
-      if (r.isError) return { ok: false, reason: r.content?.[0]?.text || "tool error" };
-      const text = r.content?.[0]?.text ?? "";
-      try {
-        return { ok: true, data: text ? JSON.parse(text) : null };
-      } catch {
-        safeRuntimeWarning("page agent runTool got non-JSON output", { name });
-        return { ok: true, data: null };
-      }
-    },
-    observe: async (tabId) => {
-      const obs = await pageAgentObserve(tabId);
-      return (obs ?? { nodes: [] }) as Awaited<ReturnType<ProgramDeps["observe"]>>;
-    },
-    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    waitFor: async (tabId, selector, timeoutMs) => {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        try {
-          const [res] = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: (sel: string) => Boolean(document.querySelector(sel)),
-            args: [selector]
-          });
-          if (res?.result) return true;
-        } catch {
-          /* tab may be mid-navigation; keep polling until the deadline */
-        }
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-      return false;
-    },
-    newTab: async (url) => {
-      const tab = await chrome.tabs.create({
-        url: url || undefined,
-        active: true
-      });
-      return tab.id ?? -1;
-    },
-    switchTab: async (tabId) => {
-      await chrome.tabs.update(tabId, { active: true });
-    },
-    closeTab: async (tabId) => {
-      await chrome.tabs.remove(tabId);
-      // Report the now-active tab so executeProgram can re-target observation
-      // instead of observing the tab it just removed.
-      const [active] = await chrome.tabs.query({
-        active: true,
-        lastFocusedWindow: true
-      });
-      return active?.id ?? null;
-    },
-    onStep: (step) => {
-      try {
-        chrome.runtime.sendMessage({ type: "PAGE_AGENT_STEP", step });
-      } catch {
-        /* no listener (e.g. side panel closed) — streaming is best-effort */
-      }
-    },
-    now: () => Date.now(),
-    retain: async (content) => {
-      try {
-        await hindsightClient.retain(hindsightBankId, content);
-      } catch (err) {
-        safeRuntimeWarning("hindsight retain failed", err);
-      }
-    },
-    recall: async (query) => {
-      try {
-        const results = await hindsightClient.recall(hindsightBankId, query);
-        return typeof results === 'string' ? results : JSON.stringify(results);
-      } catch (err) {
-        safeRuntimeWarning("hindsight recall failed", err);
-        return "";
-      }
-    }
-  };
-
-  const program = parseProgram(localPlan?.plan ?? localPlan);
-  const trace = await executeProgram(input.tabId, program, initialObservation as any, programDeps);
-
-  // Trace ingestion into Hindsight
-  try {
-    const tab = await new Promise<chrome.tabs.Tab>((resolve) => chrome.tabs.get(input.tabId, resolve));
-    if (tab.url) {
-      const url = new URL(tab.url);
-      const domain = url.hostname;
-      
-      const traceContent = `Action Trace for Domain: ${domain}\nObjective: ${text}\nSteps:\n${trace.steps.map((s, i) => `[Step ${i+1}] ${s.kind} on ${s.selector || s.label || 'N/A'}: ${s.ok ? 'SUCCESS' : 'FAILED (' + (s.reason || '') + ')'}`).join('\n')}`;
-      
-      await hindsightClient.retain(hindsightBankId, traceContent);
-    }
-  } catch (err) {
-    safeRuntimeWarning("hindsight trace ingestion failed", err);
-  }
-
-  const settings = await getSettings();
-  if (settings.sidebarSyncEnabled && settings.sidebarApiUrl) {
-    try {
-      const client = createSidebarApiClient(settings.sidebarApiToken, settings.sidebarApiUrl);
-      const res = await client.agent.chat(buildBrowserAgentCloudChatPayload({
-        settings,
-        sessionId,
-        message: text,
-        // Send only the raw user objective to the cloud. `enhancedObjective`
-        // carries recalled Hindsight memory, which must stay local and not be
-        // forwarded to sidebar-api.
-        objective: text,
-        observation: trace.finalObservation
-      }));
-      return {
-        sessionId: res.session.id,
-        reply: localPlan?.ok && localPlan.reply ? localPlan.reply : res.reply,
-        provider: localPlan?.ok ? "foundation-models" : res.provider,
-        steps: trace.steps
-      };
-    } catch (err) {
-      safeRuntimeWarning("page agent cloud chat failed; using local fallback", err);
-    }
-  }
-
-  const nodes = Array.isArray((trace.finalObservation as any)?.nodes)
-    ? (trace.finalObservation as any).nodes.length
-    : 0;
-  const reply =
-    localPlan?.ok && localPlan.reply
-      ? localPlan.reply
-      : [
-          `Objective: ${text}`,
-          `Status: observed ${nodes} visible page node${nodes === 1 ? "" : "s"}.`,
-          "Plan: choose one safe browser action, request consent for write actions, then observe again.",
-          "Next step: configure sidebar-api sync for persistent memory or continue locally from this page observation."
-        ].join("\n");
-  return {
-    sessionId,
-    reply,
-    provider: localPlan?.ok ? "foundation-models" : "local-deterministic",
-    steps: trace.steps
-  };
-}
 
 async function resolveHostname(hostname: string): Promise<string | null> {
   try {
