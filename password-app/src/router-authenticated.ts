@@ -70,6 +70,7 @@ import {
 import { handleAuthenticatedDeviceRoute } from './router-devices';
 import { handleAdminRoute } from './router-admin';
 import { handleGetDomains, handleUpdateDomains } from './handlers/domains';
+import { handleAuthenticatedExtensionRoute } from './handlers/extension-bridge';
 import {
   handleCreateAccountPasskeyCredential,
   handleDeleteAccountPasskeyCredential,
@@ -98,6 +99,9 @@ export async function handleAuthenticatedRoute(
       return errorResponse('Not implemented', 501);
     }
   }
+
+  const extensionResponse = await handleAuthenticatedExtensionRoute(request, env, currentUser, path, method);
+  if (extensionResponse) return extensionResponse;
 
   if (path === '/api/accounts/profile') {
     if (method === 'GET') return handleGetProfile(request, env, userId);

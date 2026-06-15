@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LeoButton, LeoIcon, type LeoIconName } from "../../components/leo";
 import { useSettings } from "../../hooks/useSettings";
+import {
+  checkGoVaultBridge,
+  type GoVaultBackupStatus,
+  type GoVaultBridgeSnapshot,
+  type GoVaultImportStatus,
+  type GoVaultSessionStatus,
+} from "../../lib/go-vault-client";
 import { openExternalUrl } from "../../lib/open-url";
 import {
   PASSWORD_STRATEGY,
   buildPasswordAppUrl,
-  checkPasswordAppStatus,
   type PasswordAppStatus,
 } from "../../lib/password-strategy";
 import { DEFAULT_SETTINGS } from "../../types";
@@ -15,6 +21,14 @@ interface VaultRoute {
   path: string;
   icon: LeoIconName;
   meta: string;
+}
+
+interface OperationCard {
+  label: string;
+  value: string;
+  detail: string;
+  icon: LeoIconName;
+  path: string;
 }
 
 const VAULT_ROUTES: VaultRoute[] = [
@@ -58,9 +72,56 @@ function displayTime(status: PasswordAppStatus | null): string {
   });
 }
 
+function sessionLabel(session: GoVaultSessionStatus | null): string {
+  if (!session || session.state === "not_linked") return "Not linked";
+  return session.user?.email || "Authenticated";
+}
+
+function sessionDetail(session: GoVaultSessionStatus | null): string {
+  if (!session || session.state === "not_linked") return "Open go to sign in";
+  return session.user?.role === "admin" ? "Admin session" : "User session";
+}
+
+function backupLabel(backup: GoVaultBackupStatus | null): string {
+  if (!backup || backup.state === "not_linked") return "Needs go session";
+  if (backup.state === "not_admin") return "Admin only";
+  if (backup.state === "needs_reactivation") return "Needs repair";
+  if (backup.summary.destinationCount === 0) return "No destinations";
+  return `${backup.summary.configuredDestinationCount}/${backup.summary.destinationCount} configured`;
+}
+
+function backupDetail(backup: GoVaultBackupStatus | null): string {
+  if (!backup || backup.state === "not_linked") return "Status stays in go";
+  if (backup.state === "not_admin") return "Current user cannot manage backups";
+  if (backup.state === "needs_reactivation") return "Open backup settings in go";
+  if (backup.summary.lastSuccessAt) {
+    return `Last success ${new Date(backup.summary.lastSuccessAt).toLocaleDateString()}`;
+  }
+  if (backup.summary.scheduledDestinationCount > 0) return "Scheduled, no success yet";
+  return "Manual backups ready";
+}
+
+function importLabel(importExport: GoVaultImportStatus | null): string {
+  if (!importExport || importExport.state === "not_linked") return "Open in go";
+  return "Ready";
+}
+
+function importDetail(importExport: GoVaultImportStatus | null): string {
+  if (!importExport || importExport.state === "not_linked") return "Secrets handled by go";
+  if (importExport.supportedSources.length > 0) {
+    return `${importExport.supportedSources.length} source formats`;
+  }
+  return "Import/export enabled";
+}
+
+function getGoVaultBridgeBearer(): string | null {
+  // Keep the extension read-only until an explicit go token handoff exists.
+  return null;
+}
+
 export function PasswordVaultSection() {
   const { settings, update } = useSettings();
-  const [status, setStatus] = useState<PasswordAppStatus | null>(null);
+  const [bridge, setBridge] = useState<GoVaultBridgeSnapshot | null>(null);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -72,25 +133,66 @@ export function PasswordVaultSection() {
   );
   const isGoProvider =
     settings?.passwordManagerProvider === "nodewarden-self-hosted";
+  const status = bridge?.status ?? null;
 
   const refreshStatus = useCallback(async () => {
     if (!baseUrl || checking) return;
     setChecking(true);
     setMessage(null);
     try {
-      setStatus(await checkPasswordAppStatus(baseUrl));
+      setBridge(await checkGoVaultBridge(baseUrl, getGoVaultBridgeBearer()));
     } catch (error) {
-      setStatus({
-        ok: false,
-        url: baseUrl,
-        checkedAt: new Date().toISOString(),
-        version: null,
-        jwtUnsafeReason: null,
-        registrationInviteRequired: null,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Password app status check failed.",
+      const checkedAt = new Date().toISOString();
+      setBridge({
+        checkedAt,
+        status: {
+          ok: false,
+          url: baseUrl,
+          checkedAt,
+          version: null,
+          jwtUnsafeReason: null,
+          registrationInviteRequired: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Password app status check failed.",
+        },
+        publicStatus: null,
+        session: {
+          object: "go-extension-session",
+          state: "not_linked",
+          checkedAt,
+          user: null,
+          capabilities: {
+            canOpenVault: false,
+            canImport: false,
+            canManageBackups: false,
+            canManageDevices: false,
+          },
+        },
+        backup: {
+          object: "go-extension-backup-status",
+          state: "not_linked",
+          checkedAt,
+          destinations: [],
+          summary: {
+            destinationCount: 0,
+            configuredDestinationCount: 0,
+            scheduledDestinationCount: 0,
+            healthyDestinationCount: 0,
+            lastSuccessAt: null,
+            lastAttemptAt: null,
+            lastErrorAt: null,
+          },
+        },
+        importExport: {
+          object: "go-extension-import-status",
+          state: "not_linked",
+          checkedAt,
+          directImportFromExtension: false,
+          route: "/backup/import-export",
+          supportedSources: [],
+        },
       });
     } finally {
       setChecking(false);
@@ -120,6 +222,37 @@ export function PasswordVaultSection() {
   };
 
   if (!settings) return null;
+
+  const operations: OperationCard[] = [
+    {
+      label: "Session",
+      value: sessionLabel(bridge?.session ?? null),
+      detail: sessionDetail(bridge?.session ?? null),
+      icon: "avatar",
+      path: bridge?.session.state === "authenticated" ? "/vault" : "/login",
+    },
+    {
+      label: "Backups",
+      value: backupLabel(bridge?.backup ?? null),
+      detail: backupDetail(bridge?.backup ?? null),
+      icon: "cloud",
+      path: "/backup",
+    },
+    {
+      label: "Import / Export",
+      value: importLabel(bridge?.importExport ?? null),
+      detail: importDetail(bridge?.importExport ?? null),
+      icon: "file-export",
+      path: "/backup/import-export",
+    },
+    {
+      label: "Bridge",
+      value: bridge?.publicStatus ? "Read-only" : "Legacy probe",
+      detail: "No secret material crosses into the extension",
+      icon: "shield",
+      path: "/settings",
+    },
+  ];
 
   return (
     <section
@@ -218,6 +351,35 @@ export function PasswordVaultSection() {
               Make go active
             </LeoButton>
           )}
+        </div>
+
+        <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+          {operations.map((operation) => (
+            <button
+              key={operation.label}
+              type="button"
+              aria-label={operation.label}
+              onClick={() => openRoute(operation.path)}
+              className="min-w-0 rounded border border-border bg-card/25 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
+            >
+              <div className="flex items-start gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-border bg-bg/40 text-primary">
+                  <LeoIcon name={operation.icon} size={16} />
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[10px] uppercase tracking-normal text-fg/35">
+                    {operation.label}
+                  </div>
+                  <div className="mt-1 truncate text-xs font-semibold text-fg">
+                    {operation.value}
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-fg/45">
+                    {operation.detail}
+                  </div>
+                </div>
+              </div>
+            </button>
+          ))}
         </div>
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">

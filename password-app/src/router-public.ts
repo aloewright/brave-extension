@@ -24,6 +24,7 @@ import {
 } from './handlers/notifications';
 import { handlePublicUploadSendFile } from './handlers/sends';
 import { handleBootstrapBackupSettings } from './handlers/backup';
+import { handlePublicExtensionStatus } from './handlers/extension-bridge';
 import { jsonResponse } from './utils/response';
 import { StorageService } from './services/storage';
 import type { Env } from './types';
@@ -348,6 +349,12 @@ export async function handlePublicRoute(
     const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
     if (blocked) return blocked;
     return jsonResponse(await buildWebBootstrapResponse(env));
+  }
+
+  if (path === '/api/extension/status' && method === 'GET') {
+    const blocked = await enforcePublicRateLimit('public-read', LIMITS.rateLimit.publicReadRequestsPerMinute);
+    if (blocked) return blocked;
+    return handlePublicExtensionStatus(env);
   }
 
   const iconMatch = path.match(/^\/icons\/([^/]+)\/icon\.png$/i);
