@@ -36,7 +36,8 @@ function isExtensionBridgePath(path: string): boolean {
   return path === '/api/extension/status'
     || path === '/api/extension/session'
     || path === '/api/extension/backup/status'
-    || path === '/api/extension/import/status';
+    || path === '/api/extension/import/status'
+    || path === '/api/extension/devices/status';
 }
 
 function isWildcardCorsPath(path: string): boolean {
