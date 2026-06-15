@@ -57,6 +57,7 @@ import { useToastManager } from '@/hooks/useToastManager';
 import { t } from '@/lib/i18n';
 import { APP_NOTIFY_EVENT, type AppNotifyDetail } from '@/lib/app-notify';
 import { dispatchBackupProgress, type BackupProgressDetail } from '@/lib/backup-restore-progress';
+import { publishExtensionSessionStatus } from '@/lib/extension-session-bridge';
 import { clearOfflineUnlockRecord } from '@/lib/offline-auth';
 import { decryptSends, decryptVaultCore } from '@/lib/vault-decrypt';
 import { decryptSendsInWorker, decryptVaultCoreInWorker } from '@/lib/vault-worker';
@@ -346,6 +347,25 @@ export default function App() {
       setUnlockPreparing(false);
     }
   }, [phase, profile, session]);
+
+  useEffect(() => {
+    if (IS_DEMO_MODE) return;
+    publishExtensionSessionStatus({
+      phase,
+      session,
+      profile,
+      route: location,
+    });
+  }, [
+    phase,
+    session?.accessToken,
+    session?.symEncKey,
+    session?.symMacKey,
+    session?.email,
+    profile?.email,
+    profile?.role,
+    location,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

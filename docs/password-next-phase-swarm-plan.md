@@ -1,7 +1,7 @@
 # Password Manager Swarm Plan
 
 Date: 2026-06-14
-Status: Proposed
+Status: In progress
 Scope: next development phase after the thin `go` launcher tab
 
 ## Goal
@@ -39,6 +39,24 @@ The extension must not store:
 - per-site password match caches
 
 ## Proposed Architecture
+
+### Session Handoff Slice
+
+The extension cannot safely call authenticated `go` endpoints yet because the
+webapp intentionally keeps bearer tokens in memory and strips them from
+persisted browser storage. The next implemented slice uses a narrow, read-only
+session pulse instead:
+
+- `go` posts a same-origin browser message when its app phase changes.
+- A content script scoped to `https://go.lazee.workers.dev/*` forwards only the
+  sanitized status to the extension background.
+- The extension stores only `state`, `email`, `role`, `origin`, route, and
+  timestamp under `passwords.go.sessionStatus.v1`.
+- Tokens, vault ciphers, generated passwords, WebDAV credentials, and master
+  keys are still out of scope for extension storage.
+
+This gives the Vault panel enough context to show signed-out, locked, or
+unlocked go-tab state without creating a token handoff.
 
 ### Worker/API Contract
 

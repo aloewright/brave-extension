@@ -8,6 +8,13 @@ import {
   type GoVaultImportStatus,
   type GoVaultSessionStatus,
 } from "../../lib/go-vault-client";
+import {
+  GO_VAULT_SESSION_STATUS_STORAGE_KEY,
+  goVaultBrowserSessionRefreshDelayMs,
+  isFreshGoVaultBrowserSessionStatus,
+  readGoVaultBrowserSessionStatus,
+  type GoVaultBrowserSessionStatus,
+} from "../../lib/go-vault-session-state";
 import { openExternalUrl } from "../../lib/open-url";
 import {
   PASSWORD_STRATEGY,
@@ -82,6 +89,60 @@ function sessionDetail(session: GoVaultSessionStatus | null): string {
   return session.user?.role === "admin" ? "Admin session" : "User session";
 }
 
+function isFreshBrowserSession(
+  session: GoVaultBrowserSessionStatus | null,
+): session is GoVaultBrowserSessionStatus {
+  return isFreshGoVaultBrowserSessionStatus(session);
+}
+
+function browserSessionLabel(
+  session: GoVaultBrowserSessionStatus | null,
+): string {
+  if (!isFreshBrowserSession(session)) return "Not linked";
+  if (session.state === "unlocked") return session.email || "Unlocked in go";
+  if (session.state === "locked") return "Locked in go";
+  return "Signed out";
+}
+
+function browserSessionDetail(
+  session: GoVaultBrowserSessionStatus | null,
+): string {
+  if (!isFreshBrowserSession(session)) return "Open go to sign in";
+  if (session.state === "unlocked") {
+    return session.role === "admin" ? "Live admin go tab" : "Live go tab";
+  }
+  if (session.state === "locked") return "Open go to unlock";
+  return "Open go to sign in";
+}
+
+function displaySessionLabel(
+  session: GoVaultSessionStatus | null,
+  browserSession: GoVaultBrowserSessionStatus | null,
+): string {
+  if (session?.state === "authenticated") return sessionLabel(session);
+  return browserSessionLabel(browserSession);
+}
+
+function displaySessionDetail(
+  session: GoVaultSessionStatus | null,
+  browserSession: GoVaultBrowserSessionStatus | null,
+): string {
+  if (session?.state === "authenticated") return sessionDetail(session);
+  return browserSessionDetail(browserSession);
+}
+
+function sessionRoute(
+  session: GoVaultSessionStatus | null,
+  browserSession: GoVaultBrowserSessionStatus | null,
+): string {
+  if (session?.state === "authenticated") return "/vault";
+  if (isFreshBrowserSession(browserSession)) {
+    if (browserSession.state === "unlocked") return "/vault";
+    if (browserSession.state === "locked") return "/lock";
+  }
+  return "/login";
+}
+
 function backupLabel(backup: GoVaultBackupStatus | null): string {
   if (!backup || backup.state === "not_linked") return "Needs go session";
   if (backup.state === "not_admin") return "Admin only";
@@ -122,6 +183,8 @@ function getGoVaultBridgeBearer(): string | null {
 export function PasswordVaultSection() {
   const { settings, update } = useSettings();
   const [bridge, setBridge] = useState<GoVaultBridgeSnapshot | null>(null);
+  const [browserSession, setBrowserSession] =
+    useState<GoVaultBrowserSessionStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -206,6 +269,61 @@ export function PasswordVaultSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.passwordAppUrl]);
 
+  useEffect(() => {
+    let cancelled = false;
+    readGoVaultBrowserSessionStatus(baseUrl)
+      .then((next) => {
+        if (!cancelled) setBrowserSession(next);
+      })
+      .catch(() => {
+        if (!cancelled) setBrowserSession(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl]);
+
+  useEffect(() => {
+    if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return;
+    let cancelled = false;
+
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      areaName: string,
+    ) => {
+      if (areaName !== "local") return;
+      if (!changes[GO_VAULT_SESSION_STATUS_STORAGE_KEY]) return;
+      void readGoVaultBrowserSessionStatus(baseUrl).then((next) => {
+        if (!cancelled) setBrowserSession(next);
+      });
+    };
+
+    chrome.storage.onChanged.addListener(listener);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(listener);
+    };
+  }, [baseUrl]);
+
+  useEffect(() => {
+    const delayMs = goVaultBrowserSessionRefreshDelayMs(browserSession);
+    if (delayMs === null) return;
+
+    const timer = window.setTimeout(() => {
+      setBrowserSession((current) => {
+        if (
+          current?.origin !== browserSession?.origin ||
+          current?.checkedAt !== browserSession?.checkedAt
+        ) {
+          return current;
+        }
+        return null;
+      });
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [browserSession?.origin, browserSession?.checkedAt]);
+
   const openRoute = (path: string) => {
     try {
       void openExternalUrl(buildPasswordAppUrl(baseUrl, path));
@@ -226,10 +344,10 @@ export function PasswordVaultSection() {
   const operations: OperationCard[] = [
     {
       label: "Session",
-      value: sessionLabel(bridge?.session ?? null),
-      detail: sessionDetail(bridge?.session ?? null),
+      value: displaySessionLabel(bridge?.session ?? null, browserSession),
+      detail: displaySessionDetail(bridge?.session ?? null, browserSession),
       icon: "avatar",
-      path: bridge?.session.state === "authenticated" ? "/vault" : "/login",
+      path: sessionRoute(bridge?.session ?? null, browserSession),
     },
     {
       label: "Backups",
