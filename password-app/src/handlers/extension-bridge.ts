@@ -56,7 +56,7 @@ export async function handleAuthenticatedExtensionRoute(
 
   if (path === '/api/extension/devices/status') {
     const storage = new StorageService(env.DB);
-    const currentDeviceIdentifier = String(request.headers.get('X-NodeWarden-Acting-Device-Id') || '').trim();
+    const currentDeviceIdentifier = (request.headers.get('X-NodeWarden-Acting-Device-Id') ?? '').trim();
     const [devices, trustedDeviceTokenSummaries, onlineDeviceIdentifiers] = await Promise.all([
       storage.getDevicesByUserId(currentUser.id),
       storage.getTrustedDeviceTokenSummariesByUserId(currentUser.id),

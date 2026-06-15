@@ -334,7 +334,7 @@ export function buildExtensionDeviceStatus(
   const devices = input?.devices ?? [];
   const trusted = input?.trustedDeviceTokenSummaries ?? [];
   const online = new Set(input?.onlineDeviceIdentifiers ?? []);
-  const currentDeviceIdentifier = String(input?.currentDeviceIdentifier || '').trim();
+  const currentDeviceIdentifier = (input?.currentDeviceIdentifier ?? '').trim();
   const knownDeviceIdentifiers = new Set(devices.map((device) => device.deviceIdentifier));
   const trustedDeviceIdentifiers = new Set(trusted.map((row) => row.deviceIdentifier));
 
