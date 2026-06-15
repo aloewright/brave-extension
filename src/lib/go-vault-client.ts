@@ -48,6 +48,7 @@ export interface GoVaultPublicStatus {
     session: string;
     backupStatus: string;
     importStatus: string;
+    deviceStatus: string;
   };
 }
 
@@ -97,6 +98,8 @@ export interface GoVaultBackupStatus {
   object: "go-extension-backup-status";
   state: GoVaultBackupState;
   checkedAt: string;
+  directBackupFromExtension: false;
+  route: string;
   destinations: GoVaultBackupDestinationStatus[];
   summary: {
     destinationCount: number;
@@ -153,6 +156,8 @@ function emptyBackupStatus(): GoVaultBackupStatus {
     object: "go-extension-backup-status",
     state: "not_linked",
     checkedAt: new Date().toISOString(),
+    directBackupFromExtension: false,
+    route: "/backup",
     destinations: [],
     summary: {
       destinationCount: 0,

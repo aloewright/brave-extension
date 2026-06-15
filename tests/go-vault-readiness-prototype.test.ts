@@ -43,6 +43,7 @@ const PUBLIC_STATUS = {
     session: "/api/extension/session",
     backupStatus: "/api/extension/backup/status",
     importStatus: "/api/extension/import/status",
+    deviceStatus: "/api/extension/devices/status",
   },
 };
 
@@ -119,6 +120,8 @@ const EMPTY_BACKUP = {
   object: "go-extension-backup-status" as const,
   state: "not_linked" as const,
   checkedAt: "2026-06-15T10:00:00.000Z",
+  directBackupFromExtension: false as const,
+  route: "/backup",
   destinations: [],
   summary: {
     destinationCount: 0,
@@ -135,6 +138,8 @@ const HEALTHY_BACKUP = {
   object: "go-extension-backup-status" as const,
   state: "available" as const,
   checkedAt: "2026-06-15T10:00:00.000Z",
+  directBackupFromExtension: false as const,
+  route: "/backup",
   destinations: [],
   summary: {
     destinationCount: 1,

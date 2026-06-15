@@ -73,6 +73,7 @@ Add extension-safe endpoints to `password-app`:
 | `GET /api/extension/session` | session cookie | `signed_out`, `locked`, `unlocked`, email, role |
 | `GET /api/extension/backup/status` | admin session cookie | sanitized backup health, last run, next run |
 | `GET /api/extension/import/status` | session cookie | supported formats, import enabled, current lock requirement |
+| `GET /api/extension/devices/status` | session cookie | sanitized device readiness counts and route hint |
 
 All responses must be sanitized. Backup status can say a WebDAV destination is
 configured, but it must not return the URL username, password, path secret, or

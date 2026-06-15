@@ -11,6 +11,7 @@ export type ExtensionJwtUnsafeReason = 'missing' | 'default' | 'too_short' | nul
 export type ExtensionSessionState = 'authenticated' | 'not_linked';
 export type ExtensionBackupState = 'available' | 'not_admin' | 'not_linked' | 'needs_reactivation';
 export type ExtensionImportState = 'available' | 'not_linked';
+export type ExtensionDeviceState = 'available' | 'not_linked';
 
 export interface ExtensionPublicStatusInput {
   version: string;
@@ -54,6 +55,7 @@ export interface ExtensionPublicStatusResponse {
     session: '/api/extension/session';
     backupStatus: '/api/extension/backup/status';
     importStatus: '/api/extension/import/status';
+    deviceStatus: '/api/extension/devices/status';
   };
 }
 
@@ -101,6 +103,8 @@ export interface ExtensionBackupStatusResponse {
   object: 'go-extension-backup-status';
   state: ExtensionBackupState;
   checkedAt: string;
+  directBackupFromExtension: false;
+  route: '/backup';
   destinations: ExtensionBackupDestinationStatus[];
   summary: {
     destinationCount: number;
@@ -120,6 +124,36 @@ export interface ExtensionImportStatusResponse {
   directImportFromExtension: false;
   route: '/backup/import-export';
   supportedSources: string[];
+}
+
+export interface ExtensionDeviceStatusInput {
+  devices: Array<{
+    deviceIdentifier: string;
+    devicePendingAuthRequest?: unknown;
+    [key: string]: unknown;
+  }>;
+  trustedDeviceTokenSummaries: Array<{
+    deviceIdentifier: string;
+    [key: string]: unknown;
+  }>;
+  onlineDeviceIdentifiers: string[];
+  currentDeviceIdentifier?: string | null;
+}
+
+export interface ExtensionDeviceStatusResponse {
+  object: 'go-extension-device-status';
+  state: ExtensionDeviceState;
+  checkedAt: string;
+  directDeviceManagementFromExtension: false;
+  route: '/security/devices';
+  summary: {
+    knownDeviceCount: number;
+    trustedDeviceCount: number;
+    onlineDeviceCount: number;
+    pendingAuthRequestCount: number;
+    currentDeviceKnown: boolean;
+    currentDeviceTrusted: boolean;
+  };
 }
 
 const SUPPORTED_IMPORT_SOURCES = [
@@ -171,6 +205,7 @@ export function buildExtensionPublicStatus(input: ExtensionPublicStatusInput): E
       session: '/api/extension/session',
       backupStatus: '/api/extension/backup/status',
       importStatus: '/api/extension/import/status',
+      deviceStatus: '/api/extension/devices/status',
     },
   };
 }
@@ -264,6 +299,8 @@ export function buildExtensionBackupStatus(
     object: 'go-extension-backup-status',
     state,
     checkedAt: nowIso(),
+    directBackupFromExtension: false,
+    route: '/backup',
     destinations,
     summary: {
       destinationCount: destinations.length,
@@ -287,5 +324,33 @@ export function buildExtensionImportStatus(state: ExtensionImportState = 'availa
     directImportFromExtension: false,
     route: '/backup/import-export',
     supportedSources: [...SUPPORTED_IMPORT_SOURCES],
+  };
+}
+
+export function buildExtensionDeviceStatus(
+  input: ExtensionDeviceStatusInput | null,
+  state: ExtensionDeviceState = input ? 'available' : 'not_linked'
+): ExtensionDeviceStatusResponse {
+  const devices = input?.devices ?? [];
+  const trusted = input?.trustedDeviceTokenSummaries ?? [];
+  const online = new Set(input?.onlineDeviceIdentifiers ?? []);
+  const currentDeviceIdentifier = String(input?.currentDeviceIdentifier || '').trim();
+  const knownDeviceIdentifiers = new Set(devices.map((device) => device.deviceIdentifier));
+  const trustedDeviceIdentifiers = new Set(trusted.map((row) => row.deviceIdentifier));
+
+  return {
+    object: 'go-extension-device-status',
+    state,
+    checkedAt: nowIso(),
+    directDeviceManagementFromExtension: false,
+    route: '/security/devices',
+    summary: {
+      knownDeviceCount: devices.length,
+      trustedDeviceCount: trustedDeviceIdentifiers.size,
+      onlineDeviceCount: devices.filter((device) => online.has(device.deviceIdentifier)).length,
+      pendingAuthRequestCount: devices.filter((device) => !!device.devicePendingAuthRequest).length,
+      currentDeviceKnown: !!currentDeviceIdentifier && knownDeviceIdentifiers.has(currentDeviceIdentifier),
+      currentDeviceTrusted: !!currentDeviceIdentifier && trustedDeviceIdentifiers.has(currentDeviceIdentifier),
+    },
   };
 }
