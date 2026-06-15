@@ -186,7 +186,7 @@ async function renderPasswordVaultSection() {
 
 function buttonByLabel(host: HTMLElement, label: string): HTMLButtonElement {
   const button = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
-    (node) => node.getAttribute("aria-label") === label,
+    (node) => node.getAttribute("aria-label")?.startsWith(label),
   );
   expect(button, `button ${label}`).toBeTruthy();
   return button!;
@@ -322,7 +322,7 @@ describe("PasswordVaultSection readiness UX", () => {
       expect(mocks.checkGoVaultBridge).toHaveBeenCalledWith("https://vault.example", null);
 
       await act(async () => {
-        buttonByLabel(host, "Vault").click();
+        buttonByLabel(host, "Open Vault").click();
       });
       expect(mocks.openExternalUrl).toHaveBeenCalledWith("https://vault.example/vault");
     } finally {

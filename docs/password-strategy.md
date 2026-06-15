@@ -11,6 +11,9 @@ The token/session handoff decision is recorded in
 no authenticated `go` credential is handed to, stored by, refreshed by, or
 replayed by the extension.
 
+The latest deploy and extension smoke evidence is recorded in
+[`go-password-release-smoke.md`](./go-password-release-smoke.md).
+
 ## What changed
 
 - The Passwords sidebar surface is a thin `go` launcher/status panel.
