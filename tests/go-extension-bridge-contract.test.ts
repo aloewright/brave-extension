@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExtensionBackupStatus,
+  buildExtensionDeviceStatus,
+  buildExtensionImportStatus,
   buildExtensionPublicStatus,
   type ExtensionBackupStatusResponse,
+  type ExtensionDeviceStatusResponse,
 } from "../password-app/src/extension-bridge-contract";
 
 function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
@@ -58,6 +61,8 @@ describe("go extension bridge contract", () => {
     expect(buildExtensionBackupStatus(null, "needs_reactivation")).toMatchObject({
       object: "go-extension-backup-status",
       state: "needs_reactivation",
+      directBackupFromExtension: false,
+      route: "/backup",
       destinations: [],
       summary: {
         destinationCount: 0,
@@ -169,8 +174,108 @@ describe("go extension bridge contract", () => {
       configuredDestinationCount: 2,
       scheduledDestinationCount: 1,
     });
+    expect(response.directBackupFromExtension).toBe(false);
+    expect(response.route).toBe("/backup");
     expect(response.destinations[1].runtime.lastErrorSummary).toBe(
       "Backup failed. Open go for details.",
     );
+  });
+
+  it("keeps import/export readiness route-only from the extension", () => {
+    const response = buildExtensionImportStatus("available");
+
+    expect(response).toMatchObject({
+      object: "go-extension-import-status",
+      state: "available",
+      directImportFromExtension: false,
+      route: "/backup/import-export",
+    });
+
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain("cipher");
+    expect(serialized).not.toContain("vault-password");
+    expect(serialized).not.toContain("backup-archive-bytes");
+  });
+
+  it("sanitizes device readiness before returning it to the extension", () => {
+    const response: ExtensionDeviceStatusResponse = buildExtensionDeviceStatus({
+      currentDeviceIdentifier: "device-id-secret",
+      onlineDeviceIdentifiers: ["device-id-secret", "other-device-secret"],
+      trustedDeviceTokenSummaries: [
+        {
+          deviceIdentifier: "device-id-secret",
+          expiresAt: Date.parse("2026-06-16T00:00:00.000Z"),
+          tokenCount: 2,
+        },
+      ],
+      devices: [
+        {
+          userId: "user-secret",
+          deviceIdentifier: "device-id-secret",
+          name: "Aloe MacBook",
+          deviceNote: "private note",
+          type: 14,
+          sessionStamp: "session-stamp-secret",
+          encryptedUserKey: "encrypted-user-key-secret",
+          encryptedPublicKey: "encrypted-public-key-secret",
+          encryptedPrivateKey: "encrypted-private-key-secret",
+          devicePendingAuthRequest: {
+            id: "pending-auth-secret",
+            creationDate: "2026-06-15T00:00:00.000Z",
+          },
+          lastSeenAt: "2026-06-15T01:00:00.000Z",
+          createdAt: "2026-06-14T01:00:00.000Z",
+          updatedAt: "2026-06-15T01:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({
+      object: "go-extension-device-status",
+      state: "available",
+      directDeviceManagementFromExtension: false,
+      route: "/security/devices",
+      summary: {
+        knownDeviceCount: 1,
+        trustedDeviceCount: 1,
+        onlineDeviceCount: 1,
+        pendingAuthRequestCount: 1,
+        currentDeviceKnown: true,
+        currentDeviceTrusted: true,
+      },
+    });
+
+    const serialized = JSON.stringify(response);
+    for (const secretValue of [
+      "device-id-secret",
+      "other-device-secret",
+      "user-secret",
+      "session-stamp-secret",
+      "encrypted-user-key-secret",
+      "encrypted-public-key-secret",
+      "encrypted-private-key-secret",
+      "pending-auth-secret",
+      "private note",
+    ]) {
+      expect(serialized).not.toContain(secretValue);
+    }
+
+    const keys = collectKeys(response);
+    for (const forbiddenKey of [
+      "deviceIdentifier",
+      "identifier",
+      "userId",
+      "sessionStamp",
+      "encryptedUserKey",
+      "encryptedPublicKey",
+      "encryptedPrivateKey",
+      "devicePendingAuthRequest",
+      "trustedDeviceTokenSummaries",
+      "tokenCount",
+      "devices",
+      "onlineDeviceIdentifiers",
+    ]) {
+      expect(keys.has(forbiddenKey)).toBe(false);
+    }
   });
 });

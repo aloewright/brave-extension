@@ -40,10 +40,11 @@ Existing Bitwarden-compatible public routes such as `/api/version`,
 ## Deferred authenticated bridge routes
 
 `/api/extension/session`, `/api/extension/backup/status`, and
-`/api/extension/import/status` remain design-review gated from the extension
-point of view. The backend may expose sanitized handlers for same-origin app
-use, but the browser extension should not call them with cookies or tokens
-until the token/session handoff decision record lands.
+`/api/extension/import/status`, and `/api/extension/devices/status` remain
+design-review gated from the extension point of view. The backend may expose
+sanitized handlers for same-origin app use, but the browser extension should not
+call them with cookies or tokens unless a later token/session handoff decision
+changes the current route-only model.
 
 ## Executable checks
 

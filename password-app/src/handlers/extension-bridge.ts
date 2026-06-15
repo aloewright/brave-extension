@@ -1,11 +1,13 @@
 import { LIMITS } from '../config/limits';
 import {
   buildExtensionBackupStatus,
+  buildExtensionDeviceStatus,
   buildExtensionImportStatus,
   buildExtensionPublicStatus,
   buildExtensionSessionStatus,
   type ExtensionJwtUnsafeReason,
 } from '../extension-bridge-contract';
+import { getOnlineUserDevices } from '../durable/notifications-hub';
 import { loadBackupSettings } from '../services/backup-config';
 import { StorageService } from '../services/storage';
 import { DEFAULT_DEV_SECRET, type Env, type User } from '../types';
@@ -41,8 +43,6 @@ export async function handleAuthenticatedExtensionRoute(
   path: string,
   method: string
 ): Promise<Response | null> {
-  void request;
-
   if (!path.startsWith('/api/extension/')) return null;
   if (method !== 'GET') return errorResponse('Method not allowed', 405);
 
@@ -52,6 +52,23 @@ export async function handleAuthenticatedExtensionRoute(
 
   if (path === '/api/extension/import/status') {
     return jsonResponse(buildExtensionImportStatus('available'));
+  }
+
+  if (path === '/api/extension/devices/status') {
+    const storage = new StorageService(env.DB);
+    const currentDeviceIdentifier = String(request.headers.get('X-NodeWarden-Acting-Device-Id') || '').trim();
+    const [devices, trustedDeviceTokenSummaries, onlineDeviceIdentifiers] = await Promise.all([
+      storage.getDevicesByUserId(currentUser.id),
+      storage.getTrustedDeviceTokenSummariesByUserId(currentUser.id),
+      getOnlineUserDevices(env, currentUser.id),
+    ]);
+
+    return jsonResponse(buildExtensionDeviceStatus({
+      devices,
+      trustedDeviceTokenSummaries,
+      onlineDeviceIdentifiers,
+      currentDeviceIdentifier,
+    }));
   }
 
   if (path === '/api/extension/backup/status') {

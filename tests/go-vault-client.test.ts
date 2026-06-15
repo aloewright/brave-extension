@@ -54,6 +54,7 @@ describe("go vault bridge client", () => {
           session: "/api/extension/session",
           backupStatus: "/api/extension/backup/status",
           importStatus: "/api/extension/import/status",
+          deviceStatus: "/api/extension/devices/status",
         },
       }),
     );

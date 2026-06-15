@@ -237,6 +237,8 @@ export function PasswordVaultSection() {
           object: "go-extension-backup-status",
           state: "not_linked",
           checkedAt,
+          directBackupFromExtension: false,
+          route: "/backup",
           destinations: [],
           summary: {
             destinationCount: 0,
