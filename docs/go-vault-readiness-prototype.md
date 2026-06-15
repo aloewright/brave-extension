@@ -1,9 +1,10 @@
 # Go Vault Readiness Contract
 
 Date: 2026-06-15
-Status: Prototype — contract/readiness work only
+Status: Contract — readiness derivation layer only, not token handoff or autofill
 Branch: cursor/go-vault-readiness-contract
 Parent: [ALO-705](https://linear.app/aloey/issue/ALO-705/ai-dev-sidebar-complete-custom-go-password-manager-integration)
+See also: [docs/go-extension-bridge-public-contract.md](./go-extension-bridge-public-contract.md)
 
 ## Scope
 
@@ -80,11 +81,17 @@ A `healthyDestinationCount === destinationCount` check is sufficient. The panel
 shows a warning card on `backupHealthy === false`; non-admin users see
 `backupHealthy === null` and no backup card.
 
-## Relation to Merged Swarm Plan
+## Relation to Adjacent Contracts
 
 `docs/password-next-phase-swarm-plan.md` (merged via PR #131/#132) defines the
 four API endpoints and the `GoVaultBridgeSnapshot` shape. This document focuses
 on the single derivation step on top: snapshot → UI action.
+
+`docs/go-extension-bridge-public-contract.md` (merged via PR #135) pins the
+public CORS boundary and the credentialless extension bridge model. The
+readiness helper relies on the public status route (`/api/extension/status`)
+only — no authenticated routes are called until the token/session design review
+lands.
 
 No new API endpoints are introduced here. The readiness helper consumes the
 existing `GoVaultBridgeSnapshot` from `checkGoVaultBridge` and the
