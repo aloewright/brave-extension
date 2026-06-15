@@ -262,6 +262,15 @@ describe("go vault readiness contract", () => {
   });
 
   describe("open_vault action", () => {
+    it("opens vault when browser session is unlocked without an API session", () => {
+      const snapshot = makeSnapshot({ session: NOT_LINKED_SESSION });
+      const state = deriveGoVaultReadiness(snapshot, makeBrowserSession("unlocked"));
+      expect(state.action).toBe("open_vault");
+      expect(state.vaultRoute).toBe("/vault");
+      expect(state.backupHealthy).toBeNull();
+      expect(state.importAvailable).toBe(false);
+    });
+
     it("opens vault when browser session is unlocked", () => {
       const snapshot = makeSnapshot({ session: AUTHENTICATED_ADMIN_SESSION });
       const state = deriveGoVaultReadiness(snapshot, makeBrowserSession("unlocked"));
