@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExtensionBackupStatus,
+  buildExtensionDeviceReadiness,
+  buildExtensionImportStatus,
   buildExtensionPublicStatus,
   type ExtensionBackupStatusResponse,
 } from "../password-app/src/extension-bridge-contract";
@@ -172,5 +174,99 @@ describe("go extension bridge contract", () => {
     expect(response.destinations[1].runtime.lastErrorSummary).toBe(
       "Backup failed. Open go for details.",
     );
+  });
+
+  it("import status carries no credential-shaped fields and blocks direct cipher access", () => {
+    const response = buildExtensionImportStatus("available");
+
+    expect(response.directImportFromExtension).toBe(false);
+    expect(response.route).toBe("/backup/import-export");
+
+    const serialized = JSON.stringify(response);
+    for (const forbiddenValue of [
+      "cipher",
+      "password",
+      "token",
+      "secret",
+      "key",
+    ]) {
+      expect(serialized.toLowerCase()).not.toContain(forbiddenValue);
+    }
+
+    const keys = collectKeys(response);
+    const forbiddenKeyShape =
+      /(cipher|password|token|secret|^key$|credential|accessKey|privateKey)/i;
+    expect(
+      [...keys].filter((key) => forbiddenKeyShape.test(key)),
+    ).toEqual([]);
+  });
+
+  it("device readiness carries no credential-shaped fields and blocks direct mutations", () => {
+    const response = buildExtensionDeviceReadiness({
+      totalDeviceCount: 3,
+      trustedDeviceCount: 1,
+      verifyDevicesEnabled: true,
+    });
+
+    expect(response.directDeviceMutationFromExtension).toBe(false);
+    expect(response.route).toBe("/security/devices");
+    expect(response.summary.totalDeviceCount).toBe(3);
+    expect(response.summary.trustedDeviceCount).toBe(1);
+    expect(response.summary.verifyDevicesEnabled).toBe(true);
+
+    const serialized = JSON.stringify(response);
+    for (const forbiddenValue of [
+      "identifier",
+      "encryptedUserKey",
+      "encryptedPublicKey",
+      "encryptedPrivateKey",
+      "sessionStamp",
+      "token",
+    ]) {
+      expect(serialized).not.toContain(forbiddenValue);
+    }
+
+    const keys = collectKeys(response);
+    const forbiddenKeyShape =
+      /(identifier|encrypted|password|token|secret|^key$|credential|privateKey|publicKey|sessionStamp)/i;
+    expect(
+      [...keys].filter((key) => forbiddenKeyShape.test(key)),
+    ).toEqual([]);
+  });
+
+  it("device readiness not_linked state returns zero counts", () => {
+    const response = buildExtensionDeviceReadiness(null, "not_linked");
+
+    expect(response.state).toBe("not_linked");
+    expect(response.summary.totalDeviceCount).toBe(0);
+    expect(response.summary.trustedDeviceCount).toBe(0);
+    expect(response.summary.verifyDevicesEnabled).toBe(false);
+    expect(response.directDeviceMutationFromExtension).toBe(false);
+  });
+
+  it("public status exposes device status api route without credentials", () => {
+    const response = buildExtensionPublicStatus({
+      version: "2026.6.15",
+      jwtUnsafeReason: null,
+      jwtSecretMinLength: 32,
+      registrationInviteRequired: false,
+    });
+
+    expect(response.apiRoutes.deviceStatus).toBe("/api/extension/device/status");
+
+    const keys = collectKeys(response);
+    const publicStatusAllowlist = new Set([
+      "extensionStoresVaultPasswords",
+      "decryptedSecretsStoredByExtension",
+      "jwtSecretMinLength",
+    ]);
+    const forbiddenKeyShape =
+      /(access.*token|refresh.*token|password|passphrase|cipher|credential|webdav|access.*key|secret.*key|private.*key|master.*key|^key$|destination|username|bucket|rootPath)/i;
+    expect(
+      [...keys].filter(
+        (key) =>
+          !publicStatusAllowlist.has(key) && forbiddenKeyShape.test(key),
+      ),
+    ).toEqual([]);
   });
 });

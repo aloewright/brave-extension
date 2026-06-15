@@ -1,6 +1,7 @@
 import { LIMITS } from '../config/limits';
 import {
   buildExtensionBackupStatus,
+  buildExtensionDeviceReadiness,
   buildExtensionImportStatus,
   buildExtensionPublicStatus,
   buildExtensionSessionStatus,
@@ -66,6 +67,22 @@ export async function handleAuthenticatedExtensionRoute(
     } catch {
       return jsonResponse(buildExtensionBackupStatus(null, 'needs_reactivation'));
     }
+  }
+
+  if (path === '/api/extension/device/status') {
+    const storage = new StorageService(env.DB);
+    const [devices, trustedTokens] = await Promise.all([
+      storage.getDevicesByUserId(currentUser.id),
+      storage.getTrustedDeviceTokenSummariesByUserId(currentUser.id),
+    ]);
+    const trustedDeviceIdentifiers = new Set(trustedTokens.map((t) => t.deviceIdentifier));
+    return jsonResponse(
+      buildExtensionDeviceReadiness({
+        totalDeviceCount: devices.length,
+        trustedDeviceCount: trustedDeviceIdentifiers.size,
+        verifyDevicesEnabled: currentUser.verifyDevices ?? true,
+      })
+    );
   }
 
   return null;

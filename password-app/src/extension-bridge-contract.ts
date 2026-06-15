@@ -11,6 +11,7 @@ export type ExtensionJwtUnsafeReason = 'missing' | 'default' | 'too_short' | nul
 export type ExtensionSessionState = 'authenticated' | 'not_linked';
 export type ExtensionBackupState = 'available' | 'not_admin' | 'not_linked' | 'needs_reactivation';
 export type ExtensionImportState = 'available' | 'not_linked';
+export type ExtensionDeviceState = 'available' | 'not_linked';
 
 export interface ExtensionPublicStatusInput {
   version: string;
@@ -54,6 +55,7 @@ export interface ExtensionPublicStatusResponse {
     session: '/api/extension/session';
     backupStatus: '/api/extension/backup/status';
     importStatus: '/api/extension/import/status';
+    deviceStatus: '/api/extension/device/status';
   };
 }
 
@@ -122,6 +124,25 @@ export interface ExtensionImportStatusResponse {
   supportedSources: string[];
 }
 
+export interface ExtensionDeviceReadinessInput {
+  totalDeviceCount: number;
+  trustedDeviceCount: number;
+  verifyDevicesEnabled: boolean;
+}
+
+export interface ExtensionDeviceReadinessResponse {
+  object: 'go-extension-device-readiness';
+  state: ExtensionDeviceState;
+  checkedAt: string;
+  directDeviceMutationFromExtension: false;
+  route: '/security/devices';
+  summary: {
+    totalDeviceCount: number;
+    trustedDeviceCount: number;
+    verifyDevicesEnabled: boolean;
+  };
+}
+
 const SUPPORTED_IMPORT_SOURCES = [
   'Bitwarden',
   'Proton Pass',
@@ -171,6 +192,7 @@ export function buildExtensionPublicStatus(input: ExtensionPublicStatusInput): E
       session: '/api/extension/session',
       backupStatus: '/api/extension/backup/status',
       importStatus: '/api/extension/import/status',
+      deviceStatus: '/api/extension/device/status',
     },
   };
 }
@@ -287,5 +309,23 @@ export function buildExtensionImportStatus(state: ExtensionImportState = 'availa
     directImportFromExtension: false,
     route: '/backup/import-export',
     supportedSources: [...SUPPORTED_IMPORT_SOURCES],
+  };
+}
+
+export function buildExtensionDeviceReadiness(
+  input: ExtensionDeviceReadinessInput | null,
+  state: ExtensionDeviceState = input ? 'available' : 'not_linked'
+): ExtensionDeviceReadinessResponse {
+  return {
+    object: 'go-extension-device-readiness',
+    state,
+    checkedAt: nowIso(),
+    directDeviceMutationFromExtension: false,
+    route: '/security/devices',
+    summary: {
+      totalDeviceCount: input?.totalDeviceCount ?? 0,
+      trustedDeviceCount: input?.trustedDeviceCount ?? 0,
+      verifyDevicesEnabled: input?.verifyDevicesEnabled ?? false,
+    },
   };
 }

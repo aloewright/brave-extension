@@ -12,6 +12,7 @@ export type GoVaultBackupState =
   | "not_linked"
   | "needs_reactivation";
 export type GoVaultImportState = "available" | "not_linked";
+export type GoVaultDeviceState = "available" | "not_linked";
 
 export interface GoVaultPublicStatus {
   object: "go-extension-status";
@@ -48,6 +49,7 @@ export interface GoVaultPublicStatus {
     session: string;
     backupStatus: string;
     importStatus: string;
+    deviceStatus: string;
   };
 }
 
@@ -118,6 +120,19 @@ export interface GoVaultImportStatus {
   supportedSources: string[];
 }
 
+export interface GoVaultDeviceReadiness {
+  object: "go-extension-device-readiness";
+  state: GoVaultDeviceState;
+  checkedAt: string;
+  directDeviceMutationFromExtension: false;
+  route: string;
+  summary: {
+    totalDeviceCount: number;
+    trustedDeviceCount: number;
+    verifyDevicesEnabled: boolean;
+  };
+}
+
 export interface GoVaultBridgeSnapshot {
   checkedAt: string;
   status: PasswordAppStatus;
@@ -125,6 +140,7 @@ export interface GoVaultBridgeSnapshot {
   session: GoVaultSessionStatus;
   backup: GoVaultBackupStatus;
   importExport: GoVaultImportStatus;
+  deviceReadiness: GoVaultDeviceReadiness;
 }
 
 // See docs/go-token-session-handoff.md. Authenticated extension bridge calls
@@ -174,6 +190,21 @@ function emptyImportStatus(): GoVaultImportStatus {
     directImportFromExtension: false,
     route: "/backup/import-export",
     supportedSources: [],
+  };
+}
+
+function emptyDeviceReadiness(): GoVaultDeviceReadiness {
+  return {
+    object: "go-extension-device-readiness",
+    state: "not_linked",
+    checkedAt: new Date().toISOString(),
+    directDeviceMutationFromExtension: false,
+    route: "/security/devices",
+    summary: {
+      totalDeviceCount: 0,
+      trustedDeviceCount: 0,
+      verifyDevicesEnabled: false,
+    },
   };
 }
 
@@ -247,6 +278,18 @@ export async function fetchGoExtensionImportStatus(
   );
 }
 
+export async function fetchGoExtensionDeviceReadiness(
+  baseUrl: string,
+  bearer?: string | null,
+): Promise<GoVaultDeviceReadiness> {
+  if (!GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED || !bearer) {
+    return emptyDeviceReadiness();
+  }
+  return fetchJsonWithTimeout<GoVaultDeviceReadiness>(
+    buildPasswordAppUrl(baseUrl, "/api/extension/device/status"),
+  );
+}
+
 function toPasswordAppStatus(
   baseUrl: string,
   publicStatus: GoVaultPublicStatus,
@@ -287,13 +330,15 @@ export async function checkGoVaultBridge(
       session: emptySessionStatus(),
       backup: emptyBackupStatus(),
       importExport: emptyImportStatus(),
+      deviceReadiness: emptyDeviceReadiness(),
     };
   }
 
-  const [session, backup, importExport] = await Promise.all([
+  const [session, backup, importExport, deviceReadiness] = await Promise.all([
     fetchGoExtensionSessionStatus(baseUrl, bearer).catch(() => emptySessionStatus()),
     fetchGoExtensionBackupStatus(baseUrl, bearer).catch(() => emptyBackupStatus()),
     fetchGoExtensionImportStatus(baseUrl, bearer).catch(() => emptyImportStatus()),
+    fetchGoExtensionDeviceReadiness(baseUrl, bearer).catch(() => emptyDeviceReadiness()),
   ]);
 
   return {
@@ -303,5 +348,6 @@ export async function checkGoVaultBridge(
     session,
     backup,
     importExport,
+    deviceReadiness,
   };
 }
