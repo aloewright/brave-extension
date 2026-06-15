@@ -129,6 +129,8 @@ export interface GoVaultBridgeSnapshot {
 
 // See docs/go-token-session-handoff.md. Authenticated extension bridge calls
 // stay disabled until a later review chooses a token handoff model.
+// If that review enables a capability token, the authenticated fetches below
+// must attach it as an Authorization header; do not switch to cookie credentials.
 export const GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED = false;
 
 function emptySessionStatus(): GoVaultSessionStatus {
