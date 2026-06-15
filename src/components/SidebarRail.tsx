@@ -30,6 +30,7 @@ const ICONS: Record<SectionId, LeoIconName> = {
   session: "inbox",
   passwords: "lock",
   email: "mail",
+  signal: "radio-checked",
   quickInfo: "avatar",
   perplexity: "search",
   tasks: "list-checks",

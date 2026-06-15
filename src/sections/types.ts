@@ -6,6 +6,7 @@ export type SectionId =
   | "session"
   | "passwords"
   | "email"
+  | "signal"
   | "quickInfo"
   // Perplexity is temporarily hidden while the remote-tab experiment is refined.
   | "perplexity"
@@ -37,6 +38,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "extensions", label: "Extensions" },
   { id: "session", label: "Session" },
   { id: "email", label: "Email" },
+  { id: "signal", label: "Signal" },
   { id: "quickInfo", label: "Contact Enrichment" },
   // { id: "perplexity", label: "Perplexity" },
   { id: "tasks", label: "Tasks" },

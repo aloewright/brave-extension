@@ -230,6 +230,10 @@ export interface Settings {
   hideRailQuickActions: boolean
   passwordManagerProvider: PasswordManagerProvider
   passwordAppUrl: string
+  signalEnabled: boolean
+  signalProfileLabel: string
+  signalBridgeRuntime: SignalBridgeRuntime
+  signalLastStatus: SignalLastStatus
   braveSearchApiKey: string
   dopplerProject: string
   dopplerConfig: string
@@ -251,6 +255,14 @@ export interface Settings {
 export type TtsVoice = "hyperion" | "thalia" | "andromeda" | "helena" | "apollo"
 export type TtsModel = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
 export type PasswordManagerProvider = "proton-pass" | "none" | "nodewarden-self-hosted"
+export type SignalBridgeRuntime = "auto" | "podman" | "docker" | "disabled"
+export type SignalLastStatus =
+  | "missing-runtime"
+  | "locked"
+  | "linking"
+  | "linked"
+  | "starting"
+  | "error"
 
 /** Status reported by the native host's mcp.status RPC. */
 export interface MCPStatus {
@@ -326,6 +338,10 @@ export const DEFAULT_SETTINGS: Settings = {
   hideRailQuickActions: false,
   passwordManagerProvider: "nodewarden-self-hosted",
   passwordAppUrl: "https://go.lazee.workers.dev",
+  signalEnabled: false,
+  signalProfileLabel: "Brave Dev Sidebar",
+  signalBridgeRuntime: "auto",
+  signalLastStatus: "locked",
   braveSearchApiKey: "",
   dopplerProject: "",
   dopplerConfig: "",
