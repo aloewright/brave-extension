@@ -42,6 +42,14 @@ interface OperationCard {
   path: string;
 }
 
+function operationAriaLabel(operation: OperationCard): string {
+  const prefix =
+    operation.label === "Next step"
+      ? operation.label
+      : `Open ${operation.label} status`;
+  return `${prefix}: ${operation.value}. ${operation.detail}`;
+}
+
 const VAULT_ROUTES: VaultRoute[] = [
   { label: "Vault", path: "/vault", icon: "lock", meta: "Items" },
   {
@@ -536,7 +544,7 @@ export function PasswordVaultSection() {
             <button
               key={operation.label}
               type="button"
-              aria-label={operation.label}
+              aria-label={operationAriaLabel(operation)}
               onClick={() => openRoute(operation.path)}
               className="min-w-0 rounded border border-border bg-card/25 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
             >
@@ -565,7 +573,7 @@ export function PasswordVaultSection() {
             <button
               key={route.path}
               type="button"
-              aria-label={route.label}
+              aria-label={`Open ${route.label}`}
               onClick={() => openRoute(route.path)}
               className="min-w-0 rounded border border-border bg-card/35 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
             >
