@@ -207,6 +207,17 @@ Acceptance:
 4. Lane D starts immediately with source-shape tests and expands once contracts land.
 5. Lane E waits for A-D and owns final build/deploy/smoke.
 
+## Token / Session Handoff Decision
+
+The decision record for whether the extension may ever receive an authenticated
+go credential is in `docs/go-token-session-handoff-design-review.md`.
+
+**Current selection: Option A — no token handoff.** The extension uses
+credentialless calls for the public status route and content-script session
+pulses for live state. Option C (cookie-authenticated bridge via
+`credentials: "include"`) is deferred pending CORS preconditions and a
+follow-up record.
+
 ## Deferred Work
 
 Explicit fill/copy is a later phase. Before that phase starts, write a separate
