@@ -22,6 +22,7 @@ import { MCPServer } from "./mcp-server.mjs"
 import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
 import { prepareNodePtyForGatekeeper, scrubSwiftToolchain } from "./installer.mjs"
 import { backupInstalledExtension, listExtensionBackups } from "./extension-backup.mjs"
+import { SignalBridgeManager } from "./signal-bridge.mjs"
 
 const __hostDir = dirname(fileURLToPath(import.meta.url))
 if (process.platform === "darwin") {
@@ -30,6 +31,9 @@ if (process.platform === "darwin") {
 }
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
+const signalBridge = new SignalBridgeManager({
+  eventSink: (event) => sendMessage(event)
+})
 
 const mcp = new MCPServer({
   logger: (line) => sendMessage({ type: "stderr", data: line })
@@ -623,6 +627,11 @@ function runCommand(backend, prompt, cwd) {
 async function main() {
   while (true) {
     const msg = await readMessage()
+
+    if (signalBridge.canHandle(msg.type)) {
+      sendMessage(await signalBridge.handleMessage(msg))
+      continue
+    }
 
     switch (msg.type) {
       case "exec": {

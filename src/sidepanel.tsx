@@ -9,6 +9,7 @@ import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
 import { PasswordVaultSection } from "./sections/passwords/PasswordVaultSection";
 import { EmailSection } from "./sections/email/EmailSection";
+import { SignalSection } from "./sections/signal/SignalSection";
 import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
 // import { PerplexitySection } from "./sections/perplexity/PerplexitySection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
@@ -123,6 +124,7 @@ function SidePanel() {
           </div>
           {active === "passwords" && <PasswordVaultSection />}
           {active === "email" && <EmailSection />}
+          {active === "signal" && <SignalSection />}
           {active === "quickInfo" && <QuickInfoSection />}
           {/* {active === "perplexity" && <PerplexitySection />} */}
           {active === "tasks" && <TasksSection />}
