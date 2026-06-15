@@ -29,7 +29,9 @@ The public status route is readable from:
 
 For extension-origin requests to `/api/extension/*`, CORS is credentialless.
 The extension should continue using `credentials: "omit"` unless a later
-token/session design review explicitly changes this model.
+token/session design review explicitly changes this model. The current decision
+record is [`go-token-session-handoff.md`](./go-token-session-handoff.md), which
+defers authenticated extension operations.
 
 Arbitrary extension origins are not granted CORS for `/api/extension/*`.
 Existing Bitwarden-compatible public routes such as `/api/version`,

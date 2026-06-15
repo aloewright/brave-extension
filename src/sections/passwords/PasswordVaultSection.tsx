@@ -176,7 +176,7 @@ function importDetail(importExport: GoVaultImportStatus | null): string {
 }
 
 function getGoVaultBridgeBearer(): string | null {
-  // Keep the extension read-only until an explicit go token handoff exists.
+  // See docs/go-token-session-handoff.md: no go token handoff exists yet.
   return null;
 }
 

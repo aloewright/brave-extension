@@ -6,6 +6,11 @@ Use the self-hosted `go` app at `https://go.lazee.workers.dev` as the active pas
 
 The Brave Dev Extension should not be the vault of record. It may expose a password tab for launch/status controls, but it must not inject passive password autofill, auto-submit login forms, or store decrypted vault passwords in extension storage.
 
+The token/session handoff decision is recorded in
+[`go-token-session-handoff.md`](./go-token-session-handoff.md). Current decision:
+no authenticated `go` credential is handed to, stored by, refreshed by, or
+replayed by the extension.
+
 ## What changed
 
 - The Passwords sidebar surface is a thin `go` launcher/status panel.
@@ -56,4 +61,6 @@ Before adding secret fill/copy UI:
 3. Add import/export from Proton or the prior Nodewarden instance.
 4. Add a one-time purge for any obsolete local cache keys.
 5. Build a thin extension client that cannot become the source of truth.
-6. Add manual test notes for lock, unlock, copy, fill, logout, and extension reload.
+6. Complete a separate token/session handoff review before authenticated
+   extension operations.
+7. Add manual test notes for lock, unlock, copy, fill, logout, and extension reload.

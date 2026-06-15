@@ -127,6 +127,12 @@ export interface GoVaultBridgeSnapshot {
   importExport: GoVaultImportStatus;
 }
 
+// See docs/go-token-session-handoff.md. Authenticated extension bridge calls
+// stay disabled until a later review chooses a token handoff model.
+// If that review enables a capability token, the authenticated fetches below
+// must attach it as an Authorization header; do not switch to cookie credentials.
+export const GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED = false;
+
 function emptySessionStatus(): GoVaultSessionStatus {
   return {
     object: "go-extension-session",
@@ -197,12 +203,6 @@ async function fetchJsonWithTimeout<T>(
   }
 }
 
-function authHeaders(bearer: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${bearer}`,
-  };
-}
-
 export async function fetchGoExtensionStatus(
   baseUrl: string,
 ): Promise<GoVaultPublicStatus> {
@@ -215,10 +215,11 @@ export async function fetchGoExtensionSessionStatus(
   baseUrl: string,
   bearer?: string | null,
 ): Promise<GoVaultSessionStatus> {
-  if (!bearer) return emptySessionStatus();
+  if (!GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED || !bearer) {
+    return emptySessionStatus();
+  }
   return fetchJsonWithTimeout<GoVaultSessionStatus>(
     buildPasswordAppUrl(baseUrl, "/api/extension/session"),
-    { headers: authHeaders(bearer) },
   );
 }
 
@@ -226,10 +227,11 @@ export async function fetchGoExtensionBackupStatus(
   baseUrl: string,
   bearer?: string | null,
 ): Promise<GoVaultBackupStatus> {
-  if (!bearer) return emptyBackupStatus();
+  if (!GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED || !bearer) {
+    return emptyBackupStatus();
+  }
   return fetchJsonWithTimeout<GoVaultBackupStatus>(
     buildPasswordAppUrl(baseUrl, "/api/extension/backup/status"),
-    { headers: authHeaders(bearer) },
   );
 }
 
@@ -237,10 +239,11 @@ export async function fetchGoExtensionImportStatus(
   baseUrl: string,
   bearer?: string | null,
 ): Promise<GoVaultImportStatus> {
-  if (!bearer) return emptyImportStatus();
+  if (!GO_VAULT_AUTHENTICATED_EXTENSION_BRIDGE_ENABLED || !bearer) {
+    return emptyImportStatus();
+  }
   return fetchJsonWithTimeout<GoVaultImportStatus>(
     buildPasswordAppUrl(baseUrl, "/api/extension/import/status"),
-    { headers: authHeaders(bearer) },
   );
 }
 
