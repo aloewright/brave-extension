@@ -19,6 +19,12 @@ import {
 } from "./lib/tab-collections";
 import { purgeLegacyPasswordStorage } from "./lib/password-strategy";
 import {
+  GO_VAULT_SESSION_STATUS_MESSAGE,
+  goVaultOriginFromUrl,
+  sanitizeGoVaultBrowserSessionStatus,
+  saveGoVaultBrowserSessionStatus,
+} from "./lib/go-vault-session-state";
+import {
   buildMailTwoFactorListUrl,
   buildMailTwoFactorThreadUrl,
   extractMailTwoFactorCodesFromText,
@@ -912,6 +918,28 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === GO_VAULT_SESSION_STATUS_MESSAGE) {
+    const senderOrigin = goVaultOriginFromUrl(sender.url);
+    const payload = sanitizeGoVaultBrowserSessionStatus(
+      message.payload,
+      senderOrigin,
+    );
+    if (!senderOrigin || !payload) {
+      sendResponse({ ok: false, error: "Invalid go session status." });
+      return;
+    }
+
+    saveGoVaultBrowserSessionStatus(payload)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
   if (message?.type === "consent:response") {
     handleConsentResponse(message as ConsentResponseMessage);
     sendResponse({ ok: true });
