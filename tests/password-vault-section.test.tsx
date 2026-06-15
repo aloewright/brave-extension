@@ -329,4 +329,32 @@ describe("PasswordVaultSection readiness UX", () => {
       cleanup();
     }
   });
+
+  it("fits inside a 420px sidepanel without horizontal overflow", async () => {
+    const { host, cleanup } = await renderPasswordVaultSection();
+    try {
+      const section = host.querySelector<HTMLElement>("[data-testid='passwords-section']");
+      expect(section).toBeTruthy();
+
+      // The root section must carry overflow-hidden so it cannot scroll wider than the panel.
+      expect(section!.className).toMatch(/overflow-hidden/);
+
+      // The inner scrollable area must suppress horizontal scroll.
+      const scrollArea = section!.querySelector<HTMLElement>(".overflow-y-auto");
+      expect(scrollArea).toBeTruthy();
+      expect(scrollArea!.className).toMatch(/overflow-x-hidden/);
+
+      // Every text node that could be wide must be inside a truncate container
+      // so text clips rather than expanding the column beyond 420px.
+      const truncatableLabels = Array.from(
+        section!.querySelectorAll<HTMLElement>(".text-xs.font-semibold, .text-sm.font-semibold"),
+      );
+      expect(truncatableLabels.length).toBeGreaterThan(0);
+      for (const el of truncatableLabels) {
+        expect(el.className, `"${el.textContent}" missing truncate`).toMatch(/truncate|line-clamp/);
+      }
+    } finally {
+      cleanup();
+    }
+  });
 });
