@@ -20,6 +20,11 @@ The next phase should deliver a read-only integration bridge that answers:
 This phase should not add passive autofill, auto-submit, local decrypted secret
 storage, background clipboard writes, or domain-based password matching.
 
+Authenticated `go` operations are gated by the decision record in
+[`go-token-session-handoff.md`](./go-token-session-handoff.md). The current
+decision is no token handoff: the extension may use public status and sanitized
+browser-session presence, but it must not receive or store a `go` credential.
+
 ## Non-Negotiable Boundary
 
 `go` is the vault of record. The extension may store:
