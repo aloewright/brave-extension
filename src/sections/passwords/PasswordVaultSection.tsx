@@ -160,8 +160,10 @@ function sessionRoute(
 function readinessLabel(
   checking: boolean,
   readiness: GoVaultReadinessState | null,
+  browserSession: GoVaultBrowserSessionStatus | null,
 ): string {
   if (checking) return "Checking go";
+  if (browserSession && !isFreshBrowserSession(browserSession)) return "Stale session";
   if (!readiness) return "Not checked";
   if (readiness.action === "offline") return "Offline";
   if (readiness.action === "configure") return "Bridge pending";
@@ -405,7 +407,7 @@ export function PasswordVaultSection() {
   const operations: OperationCard[] = [
     {
       label: "Next step",
-      value: readinessLabel(checking, readiness),
+      value: readinessLabel(checking, readiness, browserSession),
       detail: readinessDetail(readiness, browserSession),
       icon: readinessIcon(readiness),
       path: readiness?.vaultRoute ?? sessionRoute(bridge?.session ?? null, browserSession),
