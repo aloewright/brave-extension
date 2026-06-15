@@ -33,6 +33,14 @@ Settings exposes this as a visible Password strategy card:
 - The self-hosted password app URL defaults to `https://go.lazee.workers.dev` and can be changed for launch/status integration.
 - Legacy Nodewarden/password cache keys can be purged manually.
 
+## Token and session handoff design
+
+Before any authenticated extension-to-go communication lands, read the decision record:
+
+[docs/go-token-session-handoff-design.md](./go-token-session-handoff-design.md)
+
+The record documents four options (no handoff, capability token, session-cookie passthrough, route launching), their storage rules, lifetimes, revocation, failure modes, and Cloudflare Access interactions. The current decision is Option A (no token handoff). Authenticated routes remain gated behind the checklists in that document.
+
 ## Future extension fill/copy shape
 
 If extension fill/copy comes back, it should connect to `go` as a real self-hosted service, not as a plaintext browser-extension cache.

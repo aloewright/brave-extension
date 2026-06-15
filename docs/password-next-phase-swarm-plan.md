@@ -207,10 +207,20 @@ Acceptance:
 4. Lane D starts immediately with source-shape tests and expands once contracts land.
 5. Lane E waits for A-D and owns final build/deploy/smoke.
 
+## Token and Session Handoff Design
+
+The token/session handoff decision record is written and linked here:
+
+[docs/go-token-session-handoff-design.md](./go-token-session-handoff-design.md)
+
+**Current decision:** Option A (no token handoff). The extension calls only the
+unauthenticated public status endpoint with `credentials: "omit"`. Authenticated
+extension→go calls are gated behind the checklists in that document.
+
 ## Deferred Work
 
-Explicit fill/copy is a later phase. Before that phase starts, write a separate
-decision record for:
+Explicit fill/copy is a later phase. Before that phase starts, consult the
+token/session handoff design record for the decision on:
 
 - unlock model
 - token/session storage
