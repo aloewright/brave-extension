@@ -11,6 +11,7 @@ const MAX_LINKS = 200
 const MAX_IMAGES = 100
 const MAX_FETCH_BYTES = 1_500_000
 const MAX_DUE_JOBS_PER_TICK = 10
+const MAX_CRAWL_PAGES = 25
 
 type ScrapeSource = "extension" | "server" | "manual" | "cron"
 type ScrapeStatus = "ready" | "failed"
@@ -98,9 +99,14 @@ scrapes.post("/", async (c) => {
 })
 
 scrapes.post("/run", async (c) => {
-  const body = await c.req.json<{ url?: string }>().catch(() => null)
+  const body = await c.req.json<{ url?: string; crawl?: boolean; maxPages?: number }>().catch(() => null)
   if (!body?.url) {
     return c.json({ error: { code: "bad_request", message: "url required" } }, 400)
+  }
+  if (body.crawl) {
+    const runs = await crawlAndPersist(c.env, body.url, clampLimit(String(body.maxPages ?? ""), MAX_CRAWL_PAGES, MAX_CRAWL_PAGES))
+    const ready = runs.some((run) => run.status === "ready")
+    return c.json({ scrape: serializeRun(runs[0]!), scrapes: runs.map(serializeRun) }, ready ? 201 : 502)
   }
   const result = await fetchAndExtract(body.url, "server")
   const run = await persistScrapeRun(c.env, result)
@@ -254,6 +260,31 @@ async function runScrapeJob(env: Env, job: ScrapeJobRow, source: ScrapeSource, n
     )
     .run()
   return run
+}
+
+async function crawlAndPersist(env: Env, startUrl: string, maxPages: number): Promise<ScrapeRunRow[]> {
+  if (!isHttpUrl(startUrl)) {
+    return [await persistScrapeRun(env, failedPayload(startUrl, "server", "only http(s) URLs can be crawled", Date.now()))]
+  }
+  const queue = [canonicalScrapeUrl(startUrl)]
+  const seen = new Set<string>()
+  const runs: ScrapeRunRow[] = []
+  while (queue.length > 0 && runs.length < maxPages) {
+    const next = queue.shift()!
+    if (seen.has(next)) continue
+    seen.add(next)
+    const fetched = await fetchAndExtract(next, "server")
+    const run = await persistScrapeRun(env, fetched)
+    runs.push(run)
+    if (run.status !== "ready") continue
+    for (const link of safeJson<ScrapeLink[]>(run.links, [])) {
+      const candidate = canonicalScrapeUrl(link.href)
+      if (!candidate || seen.has(candidate) || queue.includes(candidate)) continue
+      if (isSubpageUrl(candidate, startUrl, run.final_url ?? run.url)) queue.push(candidate)
+      if (seen.size + queue.length >= maxPages) break
+    }
+  }
+  return runs.length > 0 ? runs : [await persistScrapeRun(env, failedPayload(startUrl, "server", "no crawlable pages found", Date.now()))]
 }
 
 async function fetchAndExtract(url: string, source: ScrapeSource): Promise<ScrapePayload & {
@@ -687,6 +718,36 @@ function absoluteUrl(value: string, baseUrl: string): string | null {
   } catch {
     return null
   }
+}
+
+function canonicalScrapeUrl(value: string): string {
+  try {
+    const parsed = new URL(value)
+    parsed.hash = ""
+    return parsed.href
+  } catch {
+    return value
+  }
+}
+
+function isSubpageUrl(candidate: string, startUrl: string, currentUrl: string): boolean {
+  try {
+    const candidateUrl = new URL(candidate)
+    const start = new URL(startUrl)
+    const current = new URL(currentUrl)
+    if (candidateUrl.origin !== start.origin) return false
+    if (candidateUrl.pathname === start.pathname) return true
+    return candidateUrl.pathname.startsWith(crawlPathPrefix(current.pathname || start.pathname))
+  } catch {
+    return false
+  }
+}
+
+function crawlPathPrefix(pathname: string): string {
+  if (!pathname || pathname === "/") return "/"
+  if (pathname.endsWith("/")) return pathname
+  const index = pathname.lastIndexOf("/")
+  return index <= 0 ? "/" : pathname.slice(0, index + 1)
 }
 
 function isHttpUrl(value: string): boolean {

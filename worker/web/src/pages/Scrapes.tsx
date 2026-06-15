@@ -6,6 +6,7 @@ import { StatusBadge } from "../components/StatusBadge"
 
 type ScheduleType = ScrapeJobRow["scheduleType"]
 type DownloadFormat = "json" | "text" | "html"
+type AdHocMode = "single" | "subpages"
 
 function formatDate(ms: number | null): string {
   if (!ms) return "Never"
@@ -170,6 +171,7 @@ export function Scrapes() {
   const [jobs, setJobs] = useState<ScrapeJobRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [runUrl, setRunUrl] = useState("")
+  const [runMode, setRunMode] = useState<AdHocMode>("single")
   const [jobUrl, setJobUrl] = useState("")
   const [jobTitle, setJobTitle] = useState("")
   const [scheduleType, setScheduleType] = useState<ScheduleType>("manual")
@@ -185,6 +187,14 @@ export function Scrapes() {
 
   function upsertRun(run: ScrapeRunRow) {
     setRuns((current) => current ? [run, ...current.filter((row) => row.id !== run.id)] : [run])
+  }
+
+  function upsertRuns(next: ScrapeRunRow[]) {
+    setRuns((current) => {
+      const existing = current ?? []
+      const ids = new Set(next.map((row) => row.id))
+      return [...next, ...existing.filter((row) => !ids.has(row.id))]
+    })
   }
 
   async function load() {
@@ -220,9 +230,13 @@ export function Scrapes() {
     setSubmittingRun(true)
     setError(null)
     try {
-      const { scrape } = await client.scrapes.runUrl(runUrl.trim())
-      upsertRun(scrape)
-      setSelectedRun(scrape)
+      const result = await client.scrapes.runUrl(runUrl.trim(), {
+        crawl: runMode === "subpages",
+        maxPages: runMode === "subpages" ? 25 : undefined
+      })
+      const scraped = result.scrapes ?? [result.scrape]
+      upsertRuns(scraped)
+      setSelectedRun(result.scrape)
       setRunUrl("")
     } catch (err) {
       setError((err as Error).message)
@@ -352,12 +366,26 @@ export function Scrapes() {
               className="rounded border border-fg/20 bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-muted focus:border-accent"
             />
           </div>
+          <div className="mt-4 flex flex-col gap-2">
+            <FieldLabel>Scrape mode</FieldLabel>
+            <select
+              value={runMode}
+              onChange={(event) => setRunMode(event.target.value as AdHocMode)}
+              className="rounded border border-fg/20 bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            >
+              <option value="single">Single page only</option>
+              <option value="subpages">Page and same-section subpages</option>
+            </select>
+            <p className="text-xs leading-5 text-muted">
+              Subpages mode follows same-origin links under the current docs section, capped at 25 pages.
+            </p>
+          </div>
           <button
             type="submit"
             disabled={submittingRun || !runUrl.trim()}
             className="mt-4 rounded bg-accent px-3 py-2 text-sm font-semibold text-bg disabled:opacity-50"
           >
-            {submittingRun ? "Scraping" : "Scrape URL"}
+            {submittingRun ? "Scraping" : runMode === "subpages" ? "Scrape URL + subpages" : "Scrape URL"}
           </button>
         </form>
 
