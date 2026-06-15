@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildExtensionBackupStatus,
   buildExtensionDeviceStatus,
@@ -7,6 +7,39 @@ import {
   type ExtensionBackupStatusResponse,
   type ExtensionDeviceStatusResponse,
 } from "../password-app/src/extension-bridge-contract";
+import type { Env } from "../password-app/src/types";
+
+// handlePublicExtensionStatus transitively imports notifications-hub which
+// uses the 'cloudflare:workers' runtime module unavailable in vitest. Mock the
+// durable module so the handler can be imported without a real CF environment.
+vi.mock("../password-app/src/durable/notifications-hub", () => ({
+  getOnlineUserDevices: vi.fn().mockResolvedValue([]),
+}));
+
+// Imported after vi.mock so the mock is in effect when the module loads.
+const { handlePublicExtensionStatus } = await import(
+  "../password-app/src/handlers/extension-bridge"
+);
+
+// Minimal D1Database stub — only implements the query used by getUserCount().
+function makeStubDb(userCount: number): D1Database {
+  return {
+    prepare: () => ({
+      first: async () => ({ count: userCount }),
+    }),
+  } as unknown as D1Database;
+}
+
+function makeStubEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    JWT_SECRET: "stub-jwt-secret-that-must-never-leak-in-response",
+    BOOTSTRAP_INVITE_CODE: "stub-invite-code-that-must-never-leak",
+    DB: makeStubDb(0),
+    NOTIFICATIONS_HUB: {} as DurableObjectNamespace,
+    BACKUP_TRANSFER_RUNNER: {} as DurableObjectNamespace,
+    ...overrides,
+  } as Env;
+}
 
 function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
   if (!value || typeof value !== "object") return keys;
@@ -196,6 +229,58 @@ describe("go extension bridge contract", () => {
     expect(serialized).not.toContain("vault-password");
     expect(serialized).not.toContain("backup-archive-bytes");
   });
+
+  // --- Handler-level tests (test the HTTP layer, not just the builder) ---
+
+  it("does not include the raw JWT_SECRET value in the /api/extension/status HTTP response", async () => {
+    const env = makeStubEnv({
+      JWT_SECRET: "stub-jwt-secret-that-must-never-leak-in-response",
+    });
+    const response = await handlePublicExtensionStatus(env);
+    const body = await response.text();
+    expect(body).not.toContain("stub-jwt-secret-that-must-never-leak-in-response");
+  });
+
+  it("does not include the raw BOOTSTRAP_INVITE_CODE value in the /api/extension/status HTTP response", async () => {
+    const env = makeStubEnv({
+      BOOTSTRAP_INVITE_CODE: "stub-invite-code-that-must-never-leak",
+    });
+    const response = await handlePublicExtensionStatus(env);
+    const body = await response.text();
+    expect(body).not.toContain("stub-invite-code-that-must-never-leak");
+  });
+
+  it("public status HTTP response contains only the documented top-level keys", async () => {
+    const response = await handlePublicExtensionStatus(makeStubEnv());
+    const body = await response.json() as Record<string, unknown>;
+
+    const EXPECTED_TOP_LEVEL_KEYS = new Set([
+      "object",
+      "ok",
+      "checkedAt",
+      "version",
+      "jwtUnsafeReason",
+      "jwtSecretMinLength",
+      "registrationInviteRequired",
+      "bridgeVersion",
+      "storagePolicy",
+      "capabilities",
+      "routes",
+      "apiRoutes",
+    ]);
+
+    const actualKeys = new Set(Object.keys(body));
+    const unexpected = [...actualKeys].filter((k) => !EXPECTED_TOP_LEVEL_KEYS.has(k));
+    expect(unexpected).toEqual([]);
+  });
+
+  it("public status HTTP response returns 200 with application/json content-type", async () => {
+    const response = await handlePublicExtensionStatus(makeStubEnv());
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("application/json");
+  });
+
+  // --- Authenticated builder tests ---
 
   it("sanitizes device readiness before returning it to the extension", () => {
     const response: ExtensionDeviceStatusResponse = buildExtensionDeviceStatus({
