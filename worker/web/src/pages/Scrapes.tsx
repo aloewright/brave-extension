@@ -174,6 +174,7 @@ export function Scrapes() {
   const [runMode, setRunMode] = useState<AdHocMode>("single")
   const [jobUrl, setJobUrl] = useState("")
   const [jobTitle, setJobTitle] = useState("")
+  const [jobSearch, setJobSearch] = useState("")
   const [scheduleType, setScheduleType] = useState<ScheduleType>("manual")
   const [intervalMinutes, setIntervalMinutes] = useState("60")
   const [cron, setCron] = useState("0 * * * *")
@@ -201,7 +202,7 @@ export function Scrapes() {
     setError(null)
     const [nextRuns, nextJobs] = await Promise.all([
       client.scrapes.listRuns({ limit: 100 }),
-      client.scrapes.listJobs()
+      client.scrapes.listJobs({ q: jobSearch.trim() || undefined })
     ])
     setRuns(nextRuns.scrapes)
     setJobs(nextJobs.jobs)
@@ -231,8 +232,7 @@ export function Scrapes() {
     setError(null)
     try {
       const result = await client.scrapes.runUrl(runUrl.trim(), {
-        crawl: runMode === "subpages",
-        maxPages: runMode === "subpages" ? 25 : undefined
+        crawl: runMode === "subpages"
       })
       const scraped = result.scrapes ?? [result.scrape]
       upsertRuns(scraped)
@@ -335,6 +335,18 @@ export function Scrapes() {
   if (error && (!runs || !jobs)) return <ErrorState message={error} />
   if (!runs || !jobs) return <Loading />
 
+  const normalizedJobSearch = jobSearch.trim().toLowerCase()
+  const filteredJobs = normalizedJobSearch
+    ? jobs.filter((job) => [
+      job.title,
+      job.url,
+      scheduleLabel(job),
+      job.lastStatus ?? "",
+      job.lastError ?? "",
+      hostLabel(job.url)
+    ].join(" ").toLowerCase().includes(normalizedJobSearch))
+    : jobs
+
   return (
     <div className="mx-auto max-w-6xl p-6">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -374,10 +386,10 @@ export function Scrapes() {
               className="rounded border border-fg/20 bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
             >
               <option value="single">Single page only</option>
-              <option value="subpages">Page and same-section subpages</option>
+              <option value="subpages">Page and same-origin link tree</option>
             </select>
             <p className="text-xs leading-5 text-muted">
-              Subpages mode follows same-origin links under the current docs section, capped at 25 pages.
+              Subpages mode recursively follows same-origin links discovered from the starting page.
             </p>
           </div>
           <button
@@ -459,12 +471,30 @@ export function Scrapes() {
       </section>
 
       <section className="mt-6">
-        <h2 className="mb-3 text-lg font-semibold">Jobs</h2>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Jobs</h2>
+            <p className="mt-1 text-xs text-muted">
+              {filteredJobs.length.toLocaleString()} of {jobs.length.toLocaleString()} jobs shown
+            </p>
+          </div>
+          <div className="flex min-w-64 flex-col gap-2">
+            <FieldLabel>Search jobs</FieldLabel>
+            <input
+              value={jobSearch}
+              onChange={(event) => setJobSearch(event.target.value)}
+              placeholder="Search title, URL, schedule, status..."
+              className="rounded border border-fg/20 bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-muted focus:border-accent"
+            />
+          </div>
+        </div>
         {jobs.length === 0 ? (
           <EmptyState message="No scrape jobs yet." />
+        ) : filteredJobs.length === 0 ? (
+          <EmptyState message="No scrape jobs match that search." />
         ) : (
           <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {jobs.map((job) => (
+            {filteredJobs.map((job) => (
               <li key={job.id} className="rounded-lg border border-fg/10 bg-surface p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

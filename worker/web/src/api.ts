@@ -217,8 +217,8 @@ export interface ApiClient {
     listRuns: (opts?: { jobId?: string; limit?: number; before?: number }) => Promise<{ scrapes: ScrapeRunRow[] }>
     getRun: (id: string) => Promise<{ scrape: ScrapeRunRow }>
     deleteRun: (id: string) => Promise<void>
-    runUrl: (url: string, opts?: { crawl?: boolean; maxPages?: number }) => Promise<{ scrape: ScrapeRunRow; scrapes?: ScrapeRunRow[] }>
-    listJobs: () => Promise<{ jobs: ScrapeJobRow[] }>
+    runUrl: (url: string, opts?: { crawl?: boolean }) => Promise<{ scrape: ScrapeRunRow; scrapes?: ScrapeRunRow[] }>
+    listJobs: (opts?: { q?: string; limit?: number }) => Promise<{ jobs: ScrapeJobRow[] }>
     createJob: (payload: ScrapeJobWrite) => Promise<{ job: ScrapeJobRow }>
     runJob: (id: string) => Promise<{ job: ScrapeJobRow; scrape: ScrapeRunRow }>
     deleteJob: (id: string) => Promise<void>
@@ -292,7 +292,7 @@ export function createApiClient(token: string, baseUrl = ""): ApiClient {
       getRun: (id) => request(`/api/scrapes/runs/${encodeURIComponent(id)}`),
       deleteRun: (id) => request(`/api/scrapes/runs/${encodeURIComponent(id)}`, { method: "DELETE" }),
       runUrl: (url, opts = {}) => request("/api/scrapes/run", { method: "POST", body: JSON.stringify({ url, ...opts }) }),
-      listJobs: () => request("/api/scrapes/jobs"),
+      listJobs: (opts = {}) => request(`/api/scrapes/jobs${qs({ q: opts.q, limit: opts.limit })}`),
       createJob: (payload) => request("/api/scrapes/jobs", { method: "POST", body: JSON.stringify(payload) }),
       runJob: (id) => request(`/api/scrapes/jobs/${encodeURIComponent(id)}/run`, { method: "POST" }),
       deleteJob: (id) => request(`/api/scrapes/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })

@@ -11,7 +11,6 @@ const MAX_LINKS = 200
 const MAX_IMAGES = 100
 const MAX_FETCH_BYTES = 1_500_000
 const MAX_DUE_JOBS_PER_TICK = 10
-const MAX_CRAWL_PAGES = 25
 
 type ScrapeSource = "extension" | "server" | "manual" | "cron"
 type ScrapeStatus = "ready" | "failed"
@@ -99,12 +98,12 @@ scrapes.post("/", async (c) => {
 })
 
 scrapes.post("/run", async (c) => {
-  const body = await c.req.json<{ url?: string; crawl?: boolean; maxPages?: number }>().catch(() => null)
+  const body = await c.req.json<{ url?: string; crawl?: boolean }>().catch(() => null)
   if (!body?.url) {
     return c.json({ error: { code: "bad_request", message: "url required" } }, 400)
   }
   if (body.crawl) {
-    const runs = await crawlAndPersist(c.env, body.url, clampLimit(String(body.maxPages ?? ""), MAX_CRAWL_PAGES, MAX_CRAWL_PAGES))
+    const runs = await crawlAndPersist(c.env, body.url)
     const ready = runs.some((run) => run.status === "ready")
     return c.json({ scrape: serializeRun(runs[0]!), scrapes: runs.map(serializeRun) }, ready ? 201 : 502)
   }
@@ -198,10 +197,13 @@ scrapes.post("/jobs", async (c) => {
 
 scrapes.get("/jobs", async (c) => {
   const limit = clampLimit(c.req.query("limit"), 50, 200)
+  const query = (c.req.query("q") ?? "").trim()
+  const where = query ? "WHERE title LIKE ? OR url LIKE ? OR schedule_type LIKE ? OR last_status LIKE ?" : ""
+  const binds = query ? Array(4).fill(`%${query}%`) : []
   const { results } = await c.env.DB.prepare(
-    "SELECT * FROM scrape_jobs ORDER BY created_at DESC LIMIT ?"
+    `SELECT * FROM scrape_jobs ${where} ORDER BY created_at DESC LIMIT ?`
   )
-    .bind(limit)
+    .bind(...binds, limit)
     .all<ScrapeJobRow>()
   return c.json({ jobs: (results ?? []).map(serializeJob) })
 })
@@ -262,14 +264,14 @@ async function runScrapeJob(env: Env, job: ScrapeJobRow, source: ScrapeSource, n
   return run
 }
 
-async function crawlAndPersist(env: Env, startUrl: string, maxPages: number): Promise<ScrapeRunRow[]> {
+async function crawlAndPersist(env: Env, startUrl: string): Promise<ScrapeRunRow[]> {
   if (!isHttpUrl(startUrl)) {
     return [await persistScrapeRun(env, failedPayload(startUrl, "server", "only http(s) URLs can be crawled", Date.now()))]
   }
   const queue = [canonicalScrapeUrl(startUrl)]
   const seen = new Set<string>()
   const runs: ScrapeRunRow[] = []
-  while (queue.length > 0 && runs.length < maxPages) {
+  while (queue.length > 0) {
     const next = queue.shift()!
     if (seen.has(next)) continue
     seen.add(next)
@@ -280,8 +282,7 @@ async function crawlAndPersist(env: Env, startUrl: string, maxPages: number): Pr
     for (const link of safeJson<ScrapeLink[]>(run.links, [])) {
       const candidate = canonicalScrapeUrl(link.href)
       if (!candidate || seen.has(candidate) || queue.includes(candidate)) continue
-      if (isSubpageUrl(candidate, startUrl, run.final_url ?? run.url)) queue.push(candidate)
-      if (seen.size + queue.length >= maxPages) break
+      if (isSubpageUrl(candidate, startUrl)) queue.push(candidate)
     }
   }
   return runs.length > 0 ? runs : [await persistScrapeRun(env, failedPayload(startUrl, "server", "no crawlable pages found", Date.now()))]
@@ -730,24 +731,19 @@ function canonicalScrapeUrl(value: string): string {
   }
 }
 
-function isSubpageUrl(candidate: string, startUrl: string, currentUrl: string): boolean {
+function isSubpageUrl(candidate: string, startUrl: string): boolean {
   try {
     const candidateUrl = new URL(candidate)
     const start = new URL(startUrl)
-    const current = new URL(currentUrl)
     if (candidateUrl.origin !== start.origin) return false
-    if (candidateUrl.pathname === start.pathname) return true
-    return candidateUrl.pathname.startsWith(crawlPathPrefix(current.pathname || start.pathname))
+    return !looksLikeStaticAssetPath(candidateUrl.pathname)
   } catch {
     return false
   }
 }
 
-function crawlPathPrefix(pathname: string): string {
-  if (!pathname || pathname === "/") return "/"
-  if (pathname.endsWith("/")) return pathname
-  const index = pathname.lastIndexOf("/")
-  return index <= 0 ? "/" : pathname.slice(0, index + 1)
+function looksLikeStaticAssetPath(pathname: string): boolean {
+  return /\.(?:avif|bmp|css|csv|gif|ico|jpe?g|js|json|map|mp3|mp4|pdf|png|svg|webm|webp|woff2?|zip)$/i.test(pathname)
 }
 
 function isHttpUrl(value: string): boolean {
