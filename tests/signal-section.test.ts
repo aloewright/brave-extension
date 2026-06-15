@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SECTIONS, type SectionId } from "../src/sections/types";
-import { SIGNAL_NATIVE_TYPES } from "../src/lib/signal-types";
+import { isSignalNativeResponse, SIGNAL_NATIVE_TYPES } from "../src/lib/signal-types";
 
 function source(path: string): string {
   return readFileSync(join(process.cwd(), path), "utf8");
@@ -47,6 +47,7 @@ describe("Signal section UI contract", () => {
       "signal.message.send",
       "signal.message.received",
       "signal.attachments.get",
+      "signal.error",
       "signal.lock",
       "signal.unlink",
     ]);
@@ -68,6 +69,7 @@ describe("Signal section UI contract", () => {
       expect(signalSource).toContain(`type: "${requestType}"`);
     }
     expect(signalSource).toContain('case "signal.message.received"');
+    expect(isSignalNativeResponse({ type: "signal.error", ok: false, error: "Nope" })).toBe(true);
   });
 
   it("keeps Signal message content out of extension storage", () => {
@@ -95,5 +97,14 @@ describe("Signal section UI contract", () => {
     expect(signalSource).toContain("content scripts");
     expect(signalSource).toContain("QR placeholder");
     expect(signalSource).toContain("Historical messages may not be available");
+  });
+
+  it("keeps Signal response edge cases from trapping the UI", () => {
+    const signalSource = source("src/sections/signal/SignalSection.tsx");
+
+    expect(signalSource).toContain("!body && !attachments?.length");
+    expect(signalSource).toContain("Number(trimmed)");
+    expect(signalSource).toContain("navigator.clipboard.writeText");
+    expect(signalSource).toContain("Could not copy Signal URI");
   });
 });

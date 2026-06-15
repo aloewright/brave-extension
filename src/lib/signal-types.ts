@@ -134,6 +134,13 @@ export type SignalNativeResponse =
       attachmentId?: string;
       url?: string;
       error?: string;
+    }
+  | {
+      type: "signal.error";
+      ok: false;
+      code?: string;
+      requestId?: string;
+      error: string;
     };
 
 export const SIGNAL_DEVICE_NAME = "Brave Dev Sidebar";
@@ -147,6 +154,7 @@ export const SIGNAL_NATIVE_TYPES = [
   "signal.message.send",
   "signal.message.received",
   "signal.attachments.get",
+  "signal.error",
   "signal.lock",
   "signal.unlink",
 ] as const;

@@ -39,7 +39,7 @@ function makeId(prefix) {
 
 function cleanString(value, fallback = "") {
   if (typeof value !== "string") return fallback
-  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim()
 }
 
 function boundedPreview(value) {
@@ -97,20 +97,21 @@ function normalizeAttachments(rawAttachments) {
 }
 
 export function normalizeSignalMessage(raw, fallback = {}) {
+  const safeFallback = fallback && typeof fallback === "object" ? fallback : {}
   const safe = redactedClone(raw || {})
   const dataMessage = dataMessageFrom(safe)
   const body =
     cleanString(safe.body) ||
     cleanString(safe.message) ||
     cleanString(dataMessage.message) ||
-    cleanString(fallback.body)
+    cleanString(safeFallback.body)
   const conversationId =
     cleanString(safe.conversationId) ||
     cleanString(safe.groupId) ||
     cleanString(dataMessage.groupInfo?.groupId) ||
-    cleanString(fallback.conversationId, "signal:unknown")
+    cleanString(safeFallback.conversationId, "signal:unknown")
   const direction =
-    safe.direction === "outgoing" || fallback.direction === "outgoing"
+    safe.direction === "outgoing" || safeFallback.direction === "outgoing"
       ? "outgoing"
       : "incoming"
   const attachments = normalizeAttachments(safe.attachments || dataMessage.attachments)
@@ -119,17 +120,17 @@ export function normalizeSignalMessage(raw, fallback = {}) {
     id:
       cleanString(safe.id) ||
       cleanString(safe.envelopeId) ||
-      cleanString(fallback.id, makeId("sigmsg")),
+      cleanString(safeFallback.id, makeId("sigmsg")),
     conversationId,
     direction,
     sender:
       direction === "outgoing"
         ? { name: "You", phoneNumber: "" }
-        : senderFrom(safe, cleanString(fallback.sender, "Signal")),
+        : senderFrom(safe, cleanString(safeFallback.sender, "Signal")),
     author:
       direction === "outgoing"
         ? "You"
-        : senderFrom(safe, cleanString(fallback.sender, "Signal")).name,
+        : senderFrom(safe, cleanString(safeFallback.sender, "Signal")).name,
     body,
     timestamp: safe.timestamp || safe.receivedAt || now(),
     receivedAt: Number(safe.receivedAt || safe.timestamp || now()),
@@ -139,8 +140,9 @@ export function normalizeSignalMessage(raw, fallback = {}) {
 }
 
 function normalizeConversation(raw, messages = []) {
+  const safeMessages = Array.isArray(messages) ? messages : []
   const safe = redactedClone(raw || {})
-  const last = safe.lastMessage || messages[messages.length - 1] || {}
+  const last = safe.lastMessage || safeMessages[safeMessages.length - 1] || {}
   const lastMessage = normalizeSignalMessage(last, {
     conversationId: safe.conversationId || safe.id,
     sender: safe.title || "Signal"
@@ -315,10 +317,12 @@ export class SignalBridgeManager {
   startLink(deviceName) {
     const name = cleanString(deviceName, this.profileLabel) || this.profileLabel
     const uri = `sgnl://linkdevice?uuid=${encodeURIComponent(makeId("link"))}&pub_key=fake-local-bridge`
+    const expiresAt = new Date(now() + 5 * 60_000).toISOString()
     this.pendingLink = {
       uri,
+      linkUri: uri,
       deviceName: name,
-      expiresAt: now() + 5 * 60_000
+      expiresAt
     }
     this.state = "linking"
     this.locked = false
@@ -363,8 +367,9 @@ export class SignalBridgeManager {
     const guard = this.requireLinked()
     if (guard) return guard
     const adapterRows = await this.adapter.listConversations()
-    const rows = adapterRows.length > 0
-      ? adapterRows.map((row) => normalizeConversation(row))
+    const adapterConversations = Array.isArray(adapterRows) ? adapterRows : []
+    const rows = adapterConversations.length > 0
+      ? adapterConversations.map((row) => normalizeConversation(row))
       : Array.from(this.localConversations.values())
     return { type: "signal.conversations.list", ok: true, conversations: rows }
   }
@@ -375,8 +380,9 @@ export class SignalBridgeManager {
     const id = cleanString(conversationId)
     if (!id) return { type: "signal.error", ok: false, code: "invalid-request", error: "conversationId is required." }
     const adapterRows = await this.adapter.listMessages(id)
-    const rows = adapterRows.length > 0
-      ? adapterRows.map((row) => normalizeSignalMessage(row, { conversationId: id }))
+    const adapterMessages = Array.isArray(adapterRows) ? adapterRows : []
+    const rows = adapterMessages.length > 0
+      ? adapterMessages.map((row) => normalizeSignalMessage(row, { conversationId: id }))
       : (this.localMessages.get(id) || [])
     return { type: "signal.messages.list", ok: true, conversationId: id, messages: rows }
   }

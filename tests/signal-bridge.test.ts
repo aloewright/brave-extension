@@ -44,7 +44,10 @@ describe("SignalBridgeManager", () => {
     expect(start.ok).toBe(true)
     expect(start.status.state).toBe("linking")
     expect(start.link.uri).toMatch(/^sgnl:\/\/linkdevice/)
+    expect(start.link.linkUri).toMatch(/^sgnl:\/\/linkdevice/)
     expect(start.link.deviceName).toBe("Test Sidebar")
+    expect(start.link.expiresAt).toEqual(expect.any(String))
+    expect(Date.parse(start.link.expiresAt)).toBeGreaterThan(Date.now())
 
     const finish = await manager.handleMessage({
       type: "signal.link.finish",
@@ -217,17 +220,60 @@ describe("SignalBridgeManager", () => {
     expectNoSecretLeak(event)
   })
 
+  it("tolerates null adapter rows by falling back to local bridge state", async () => {
+    const adapter = {
+      async listConversations() {
+        return null
+      },
+      async listMessages() {
+        return null
+      },
+      async sendMessage(conversationId, body) {
+        return { conversationId, body, direction: "outgoing" }
+      },
+      async getAttachment() {
+        return { available: false }
+      }
+    }
+    const manager = new SignalBridgeManager({ adapter })
+
+    await manager.handleMessage({ type: "signal.link.start", requestId: "start" })
+    await manager.handleMessage({ type: "signal.link.finish", requestId: "finish" })
+
+    const conversations = await manager.handleMessage({
+      type: "signal.conversations.list",
+      requestId: "conversations"
+    })
+    expect(conversations).toMatchObject({
+      type: "signal.conversations.list",
+      ok: true,
+      conversations: []
+    })
+
+    const messages = await manager.handleMessage({
+      type: "signal.messages.list",
+      requestId: "messages",
+      conversationId: "conversation-a"
+    })
+    expect(messages).toMatchObject({
+      type: "signal.messages.list",
+      ok: true,
+      conversationId: "conversation-a",
+      messages: []
+    })
+  })
+
   it("keeps the standalone message normalizer defensive against raw JSON-RPC fields", () => {
     const message = normalizeSignalMessage({
       id: "raw-a",
       conversationId: "conversation-a",
-      body: "plain text is allowed",
+      body: "plain text is allowed\nwith tabs\tand returns\r\nintact",
       accessToken: "token-123",
       profileKey: "profile-key",
       privateKey: "private-key"
-    })
+    }, null)
 
-    expect(message.body).toBe("plain text is allowed")
+    expect(message.body).toBe("plain text is allowed\nwith tabs\tand returns\r\nintact")
     expectNoSecretLeak(message)
   })
 })

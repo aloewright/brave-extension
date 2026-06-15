@@ -180,7 +180,8 @@ function normalizeMessage(input: Partial<SignalMessage>, index: number): SignalM
       ? input.conversationId
       : "";
   const body = typeof input.body === "string" ? input.body : "";
-  if (!conversationId || !body) return null;
+  const attachments = Array.isArray(input.attachments) ? input.attachments : undefined;
+  if (!conversationId || (!body && !attachments?.length)) return null;
   const direction = input.direction === "outgoing" ? "outgoing" : "incoming";
   return {
     id:
@@ -198,7 +199,7 @@ function normalizeMessage(input: Partial<SignalMessage>, index: number): SignalM
     timestamp: input.timestamp ?? new Date().toISOString(),
     direction,
     status: input.status,
-    attachments: input.attachments,
+    attachments,
   };
 }
 
@@ -225,7 +226,11 @@ function appendMessage(
 function toTime(value: string | number | undefined): number {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return 0;
-  const parsed = Date.parse(value);
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -552,9 +557,23 @@ export function SignalSection() {
   };
 
   const copyLink = async () => {
-    if (!linkSession?.linkUri || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(linkSession.linkUri);
-    setNotice("Signal linked-device URI copied.");
+    if (
+      !linkSession?.linkUri ||
+      typeof navigator === "undefined" ||
+      !navigator.clipboard
+    ) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(linkSession.linkUri);
+      setNotice("Signal linked-device URI copied.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `Could not copy Signal URI: ${error.message}`
+          : "Could not copy Signal URI.",
+      );
+    }
   };
 
   return (
