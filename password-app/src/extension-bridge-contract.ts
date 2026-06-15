@@ -11,6 +11,7 @@ export type ExtensionJwtUnsafeReason = 'missing' | 'default' | 'too_short' | nul
 export type ExtensionSessionState = 'authenticated' | 'not_linked';
 export type ExtensionBackupState = 'available' | 'not_admin' | 'not_linked' | 'needs_reactivation';
 export type ExtensionImportState = 'available' | 'not_linked';
+export type ExtensionDeviceState = 'available' | 'not_linked';
 
 export interface ExtensionPublicStatusInput {
   version: string;
@@ -54,6 +55,7 @@ export interface ExtensionPublicStatusResponse {
     session: '/api/extension/session';
     backupStatus: '/api/extension/backup/status';
     importStatus: '/api/extension/import/status';
+    deviceStatus: '/api/extension/device/status';
   };
 }
 
@@ -171,6 +173,7 @@ export function buildExtensionPublicStatus(input: ExtensionPublicStatusInput): E
       session: '/api/extension/session',
       backupStatus: '/api/extension/backup/status',
       importStatus: '/api/extension/import/status',
+      deviceStatus: '/api/extension/device/status',
     },
   };
 }
@@ -287,5 +290,43 @@ export function buildExtensionImportStatus(state: ExtensionImportState = 'availa
     directImportFromExtension: false,
     route: '/backup/import-export',
     supportedSources: [...SUPPORTED_IMPORT_SOURCES],
+  };
+}
+
+export interface ExtensionDeviceInput {
+  isTrusted: boolean;
+  hasPendingAuthRequest: boolean;
+  lastSeenAt: string | null;
+}
+
+export interface ExtensionDeviceStatusResponse {
+  object: 'go-extension-device-status';
+  state: ExtensionDeviceState;
+  checkedAt: string;
+  directMutationFromExtension: false;
+  route: '/security/devices';
+  summary: {
+    deviceCount: number;
+    trustedDeviceCount: number;
+    hasPendingAuthRequests: boolean;
+  };
+}
+
+export function buildExtensionDeviceStatus(
+  devices: ExtensionDeviceInput[] | null,
+  state: ExtensionDeviceState = devices ? 'available' : 'not_linked'
+): ExtensionDeviceStatusResponse {
+  const list = devices ?? [];
+  return {
+    object: 'go-extension-device-status',
+    state,
+    checkedAt: nowIso(),
+    directMutationFromExtension: false,
+    route: '/security/devices',
+    summary: {
+      deviceCount: list.length,
+      trustedDeviceCount: list.filter((d) => d.isTrusted).length,
+      hasPendingAuthRequests: list.some((d) => d.hasPendingAuthRequest),
+    },
   };
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExtensionBackupStatus,
+  buildExtensionDeviceStatus,
+  buildExtensionImportStatus,
   buildExtensionPublicStatus,
   type ExtensionBackupStatusResponse,
 } from "../password-app/src/extension-bridge-contract";
@@ -172,5 +174,97 @@ describe("go extension bridge contract", () => {
     expect(response.destinations[1].runtime.lastErrorSummary).toBe(
       "Backup failed. Open go for details.",
     );
+  });
+
+  describe("import status contract", () => {
+    it("asserts the extension cannot directly import vault ciphers", () => {
+      const response = buildExtensionImportStatus("available");
+
+      expect(response.directImportFromExtension).toBe(false);
+      expect(response.object).toBe("go-extension-import-status");
+      expect(response.route).toBe("/backup/import-export");
+    });
+
+    it("keeps import status free of credential-shaped fields", () => {
+      const response = buildExtensionImportStatus("available");
+      const keys = collectKeys(response);
+      const forbiddenKeyShape =
+        /(cipher|vault|password|credential|private.*key|secret.*key|access.*key|master.*key|token|passphrase)/i;
+      expect(
+        [...keys].filter((key) => forbiddenKeyShape.test(key)),
+      ).toEqual([]);
+    });
+
+    it("returns not_linked when unauthenticated", () => {
+      expect(buildExtensionImportStatus("not_linked")).toMatchObject({
+        state: "not_linked",
+        directImportFromExtension: false,
+      });
+    });
+  });
+
+  describe("device status contract", () => {
+    it("omits all encrypted key fields from the response", () => {
+      const response = buildExtensionDeviceStatus([
+        {
+          isTrusted: true,
+          hasPendingAuthRequest: false,
+          lastSeenAt: "2026-06-14T10:00:00.000Z",
+        },
+        {
+          isTrusted: false,
+          hasPendingAuthRequest: true,
+          lastSeenAt: null,
+        },
+      ]);
+
+      const serialized = JSON.stringify(response);
+      for (const forbidden of [
+        "encryptedUserKey",
+        "encryptedPublicKey",
+        "encryptedPrivateKey",
+        "sessionStamp",
+        "deviceIdentifier",
+      ]) {
+        expect(serialized).not.toContain(forbidden);
+      }
+
+      const keys = collectKeys(response);
+      const forbiddenKeyShape =
+        /(encrypted|privateKey|secretKey|accessKey|password|passphrase|credential|sessionStamp)/i;
+      expect(
+        [...keys].filter((key) => forbiddenKeyShape.test(key)),
+      ).toEqual([]);
+    });
+
+    it("asserts the extension cannot mutate device trust directly", () => {
+      const response = buildExtensionDeviceStatus([]);
+
+      expect(response.directMutationFromExtension).toBe(false);
+      expect(response.route).toBe("/security/devices");
+    });
+
+    it("computes trusted and pending counts from device inputs", () => {
+      const response = buildExtensionDeviceStatus([
+        { isTrusted: true, hasPendingAuthRequest: false, lastSeenAt: null },
+        { isTrusted: true, hasPendingAuthRequest: false, lastSeenAt: null },
+        { isTrusted: false, hasPendingAuthRequest: true, lastSeenAt: null },
+      ]);
+
+      expect(response.summary).toMatchObject({
+        deviceCount: 3,
+        trustedDeviceCount: 2,
+        hasPendingAuthRequests: true,
+      });
+    });
+
+    it("returns not_linked with empty summary when no devices are available", () => {
+      const response = buildExtensionDeviceStatus(null, "not_linked");
+
+      expect(response.state).toBe("not_linked");
+      expect(response.summary.deviceCount).toBe(0);
+      expect(response.summary.trustedDeviceCount).toBe(0);
+      expect(response.summary.hasPendingAuthRequests).toBe(false);
+    });
   });
 });
