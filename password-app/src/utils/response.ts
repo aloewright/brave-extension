@@ -18,12 +18,25 @@ const DEFAULT_CORS_HEADERS = [
   'X-NodeWarden-Web-Session',
 ];
 
+export const BRAVE_DEV_EXTENSION_ORIGIN = 'chrome-extension://gkhofjjpnilonbinehpkblmcflbclcoh';
+
 function isExtensionOrigin(origin: string): boolean {
   return (
     origin.startsWith('chrome-extension://')
     || origin.startsWith('moz-extension://')
     || origin.startsWith('safari-web-extension://')
   );
+}
+
+function isKnownBridgeExtensionOrigin(origin: string): boolean {
+  return origin === BRAVE_DEV_EXTENSION_ORIGIN;
+}
+
+function isExtensionBridgePath(path: string): boolean {
+  return path === '/api/extension/status'
+    || path === '/api/extension/session'
+    || path === '/api/extension/backup/status'
+    || path === '/api/extension/import/status';
 }
 
 function isWildcardCorsPath(path: string): boolean {
@@ -45,6 +58,11 @@ function getCorsPolicy(request: Request): { allowOrigin: string | null; allowCre
   }
   if (origin === url.origin) {
     return { allowOrigin: origin, allowCredentials: true };
+  }
+  if (isExtensionBridgePath(url.pathname)) {
+    return isKnownBridgeExtensionOrigin(origin)
+      ? { allowOrigin: origin, allowCredentials: false }
+      : { allowOrigin: null, allowCredentials: false };
   }
   if (isExtensionOrigin(origin)) {
     return { allowOrigin: origin, allowCredentials: true };
