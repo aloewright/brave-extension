@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExtensionBackupStatus,
+  buildExtensionPublicStatus,
   type ExtensionBackupStatusResponse,
 } from "../password-app/src/extension-bridge-contract";
 
@@ -18,6 +19,41 @@ function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
 }
 
 describe("go extension bridge contract", () => {
+  it("keeps public status free of credential-shaped fields and values", () => {
+    const response = buildExtensionPublicStatus({
+      version: "2026.6.15",
+      jwtUnsafeReason: null,
+      jwtSecretMinLength: 32,
+      registrationInviteRequired: true,
+    });
+
+    const serialized = JSON.stringify(response);
+    for (const forbiddenValue of [
+      "webdav-passphrase",
+      "r2-secret-key",
+      "master-password",
+      "refresh-token",
+      "cipher-payload",
+    ]) {
+      expect(serialized).not.toContain(forbiddenValue);
+    }
+
+    const keys = collectKeys(response);
+    const publicStatusAllowlist = new Set([
+      "extensionStoresVaultPasswords",
+      "decryptedSecretsStoredByExtension",
+      "jwtSecretMinLength",
+    ]);
+    const forbiddenKeyShape =
+      /(access.*token|refresh.*token|password|passphrase|cipher|credential|webdav|access.*key|secret.*key|private.*key|master.*key|^key$|destination|username|bucket|rootPath)/i;
+    expect(
+      [...keys].filter(
+        (key) =>
+          !publicStatusAllowlist.has(key) && forbiddenKeyShape.test(key),
+      ),
+    ).toEqual([]);
+  });
+
   it("represents backup reactivation as a renderable state", () => {
     expect(buildExtensionBackupStatus(null, "needs_reactivation")).toMatchObject({
       object: "go-extension-backup-status",
