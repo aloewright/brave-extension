@@ -22,7 +22,7 @@ const contentScripts = [
   {
     name: "go-vault-session",
     input: "src/contents/go-vault-session.ts",
-    matches: ["https://go.lazee.workers.dev/*"],
+    matches: ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
     run_at: "document_idle",
     all_frames: false,
   },

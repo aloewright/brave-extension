@@ -919,18 +919,24 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === GO_VAULT_SESSION_STATUS_MESSAGE) {
-    const senderOrigin = goVaultOriginFromUrl(sender.url);
-    const payload = sanitizeGoVaultBrowserSessionStatus(
-      message.payload,
-      senderOrigin,
-    );
-    if (!senderOrigin || !payload) {
-      sendResponse({ ok: false, error: "Invalid go session status." });
-      return;
-    }
+    (async () => {
+      const senderOrigin = goVaultOriginFromUrl(sender.url);
+      const settings = await getSettings();
+      const configuredOrigin = goVaultOriginFromUrl(settings.passwordAppUrl);
+      if (!senderOrigin || !configuredOrigin || senderOrigin !== configuredOrigin) {
+        return { ok: false, error: "Invalid go session status." };
+      }
 
-    saveGoVaultBrowserSessionStatus(payload)
-      .then(() => sendResponse({ ok: true }))
+      const payload = sanitizeGoVaultBrowserSessionStatus(
+        message.payload,
+        configuredOrigin,
+      );
+      if (!payload) return { ok: false, error: "Invalid go session status." };
+
+      await saveGoVaultBrowserSessionStatus(payload);
+      return { ok: true };
+    })()
+      .then((result) => sendResponse(result))
       .catch((err) =>
         sendResponse({
           ok: false,

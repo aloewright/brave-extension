@@ -42,7 +42,8 @@ describe("custom extension build path", () => {
     expect(script).toContain("inlineDynamicImports: true");
     expect(script).toContain("`content/${script.name}.js`");
     expect(script).toContain('name: "go-vault-session"');
-    expect(script).toContain('matches: ["https://go.lazee.workers.dev/*"]');
+    expect(script).toContain('"https://*/*"');
+    expect(script).toContain('"http://localhost/*"');
     expect(script).toContain('service_worker: "static/background/index.js"');
     expect(script).toContain('type: "module"');
   });

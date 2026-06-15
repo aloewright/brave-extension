@@ -16,9 +16,11 @@ export interface GoVaultBrowserSessionStatus {
   checkedAt: string;
 }
 
-const ALLOWED_ORIGINS = new Set(["https://go.lazee.workers.dev"]);
+const DEFAULT_ALLOWED_ORIGINS = new Set(["https://go.lazee.workers.dev"]);
 const MAX_EMAIL_LENGTH = 320;
 const MAX_ROUTE_LENGTH = 120;
+const DEFAULT_MAX_SESSION_AGE_MS = 10 * 60 * 1000;
+const DEFAULT_FUTURE_SKEW_MS = 60 * 1000;
 
 function safeString(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -52,8 +54,28 @@ function normalizeCheckedAt(value: unknown): string {
   return new Date(parsed).toISOString();
 }
 
-export function isAllowedGoVaultOrigin(origin: string | null): boolean {
-  return !!origin && ALLOWED_ORIGINS.has(origin);
+function isTrustedVaultOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && (
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isAllowedGoVaultOrigin(
+  origin: string | null,
+  expectedOrigin?: string | null,
+): boolean {
+  if (!origin) return false;
+  if (expectedOrigin) {
+    return origin === expectedOrigin && isTrustedVaultOrigin(origin);
+  }
+  return DEFAULT_ALLOWED_ORIGINS.has(origin);
 }
 
 export function goVaultOriginFromUrl(url: string | undefined): string | null {
@@ -75,8 +97,8 @@ export function sanitizeGoVaultBrowserSessionStatus(
   if (record.version !== 1) return null;
 
   const origin = normalizeOrigin(record.origin);
-  if (!isAllowedGoVaultOrigin(origin)) return null;
-  if (expectedOrigin && origin !== expectedOrigin) return null;
+  const normalizedExpectedOrigin = normalizeOrigin(expectedOrigin);
+  if (!isAllowedGoVaultOrigin(origin, normalizedExpectedOrigin)) return null;
 
   const state = record.state;
   if (state !== "signed_out" && state !== "locked" && state !== "unlocked") {
@@ -97,6 +119,33 @@ export function sanitizeGoVaultBrowserSessionStatus(
     route: normalizeRoute(record.route),
     checkedAt: normalizeCheckedAt(record.checkedAt),
   };
+}
+
+export function isFreshGoVaultBrowserSessionStatus(
+  session: GoVaultBrowserSessionStatus | null,
+  nowMs = Date.now(),
+  maxAgeMs = DEFAULT_MAX_SESSION_AGE_MS,
+  futureSkewMs = DEFAULT_FUTURE_SKEW_MS,
+): session is GoVaultBrowserSessionStatus {
+  if (!session) return false;
+  const checkedAt = Date.parse(session.checkedAt);
+  if (!Number.isFinite(checkedAt)) return false;
+  const ageMs = nowMs - checkedAt;
+  return ageMs >= -futureSkewMs && ageMs < maxAgeMs;
+}
+
+export function goVaultBrowserSessionRefreshDelayMs(
+  session: GoVaultBrowserSessionStatus | null,
+  nowMs = Date.now(),
+  maxAgeMs = DEFAULT_MAX_SESSION_AGE_MS,
+  futureSkewMs = DEFAULT_FUTURE_SKEW_MS,
+): number | null {
+  if (!session) return null;
+  const checkedAt = Date.parse(session.checkedAt);
+  if (!Number.isFinite(checkedAt)) return 0;
+  const ageMs = nowMs - checkedAt;
+  if (ageMs < -futureSkewMs || ageMs >= maxAgeMs) return 0;
+  return maxAgeMs - ageMs;
 }
 
 export async function saveGoVaultBrowserSessionStatus(

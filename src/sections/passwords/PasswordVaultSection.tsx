@@ -10,6 +10,8 @@ import {
 } from "../../lib/go-vault-client";
 import {
   GO_VAULT_SESSION_STATUS_STORAGE_KEY,
+  goVaultBrowserSessionRefreshDelayMs,
+  isFreshGoVaultBrowserSessionStatus,
   readGoVaultBrowserSessionStatus,
   type GoVaultBrowserSessionStatus,
 } from "../../lib/go-vault-session-state";
@@ -90,10 +92,7 @@ function sessionDetail(session: GoVaultSessionStatus | null): string {
 function isFreshBrowserSession(
   session: GoVaultBrowserSessionStatus | null,
 ): session is GoVaultBrowserSessionStatus {
-  if (!session) return false;
-  const checkedAt = Date.parse(session.checkedAt);
-  if (!Number.isFinite(checkedAt)) return false;
-  return Date.now() - checkedAt < 10 * 60 * 1000;
+  return isFreshGoVaultBrowserSessionStatus(session);
 }
 
 function browserSessionLabel(
@@ -286,6 +285,7 @@ export function PasswordVaultSection() {
 
   useEffect(() => {
     if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return;
+    let cancelled = false;
 
     const listener = (
       changes: Record<string, chrome.storage.StorageChange>,
@@ -293,12 +293,36 @@ export function PasswordVaultSection() {
     ) => {
       if (areaName !== "local") return;
       if (!changes[GO_VAULT_SESSION_STATUS_STORAGE_KEY]) return;
-      void readGoVaultBrowserSessionStatus(baseUrl).then(setBrowserSession);
+      void readGoVaultBrowserSessionStatus(baseUrl).then((next) => {
+        if (!cancelled) setBrowserSession(next);
+      });
     };
 
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(listener);
+    };
   }, [baseUrl]);
+
+  useEffect(() => {
+    const delayMs = goVaultBrowserSessionRefreshDelayMs(browserSession);
+    if (delayMs === null) return;
+
+    const timer = window.setTimeout(() => {
+      setBrowserSession((current) => {
+        if (
+          current?.origin !== browserSession?.origin ||
+          current?.checkedAt !== browserSession?.checkedAt
+        ) {
+          return current;
+        }
+        return null;
+      });
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [browserSession?.origin, browserSession?.checkedAt]);
 
   const openRoute = (path: string) => {
     try {
