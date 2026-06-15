@@ -15,6 +15,10 @@ import {
   readGoVaultBrowserSessionStatus,
   type GoVaultBrowserSessionStatus,
 } from "../../lib/go-vault-session-state";
+import {
+  deriveGoVaultReadiness,
+  type GoVaultReadinessState,
+} from "../../lib/go-vault-readiness";
 import { openExternalUrl } from "../../lib/open-url";
 import {
   PASSWORD_STRATEGY,
@@ -98,7 +102,8 @@ function isFreshBrowserSession(
 function browserSessionLabel(
   session: GoVaultBrowserSessionStatus | null,
 ): string {
-  if (!isFreshBrowserSession(session)) return "Not linked";
+  if (session && !isFreshBrowserSession(session)) return "Stale go tab";
+  if (!session) return "Not linked";
   if (session.state === "unlocked") return session.email || "Unlocked in go";
   if (session.state === "locked") return "Locked in go";
   return "Signed out";
@@ -107,7 +112,8 @@ function browserSessionLabel(
 function browserSessionDetail(
   session: GoVaultBrowserSessionStatus | null,
 ): string {
-  if (!isFreshBrowserSession(session)) return "Open go to sign in";
+  if (session && !isFreshBrowserSession(session)) return "Open go to refresh status";
+  if (!session) return "Open go to sign in";
   if (session.state === "unlocked") {
     return session.role === "admin" ? "Live admin go tab" : "Live go tab";
   }
@@ -138,9 +144,48 @@ function sessionRoute(
   if (session?.state === "authenticated") return "/vault";
   if (isFreshBrowserSession(browserSession)) {
     if (browserSession.state === "unlocked") return "/vault";
-    if (browserSession.state === "locked") return "/lock";
+    if (browserSession.state === "locked") return "/login";
   }
   return "/login";
+}
+
+function readinessLabel(
+  checking: boolean,
+  readiness: GoVaultReadinessState | null,
+): string {
+  if (checking) return "Checking go";
+  if (!readiness) return "Not checked";
+  if (readiness.action === "offline") return "Offline";
+  if (readiness.action === "configure") return "Bridge pending";
+  if (readiness.action === "sign_in") return "Sign in to go";
+  if (readiness.action === "unlock") return "Unlock in go";
+  return "Open vault";
+}
+
+function readinessDetail(
+  readiness: GoVaultReadinessState | null,
+  browserSession: GoVaultBrowserSessionStatus | null,
+): string {
+  if (browserSession && !isFreshBrowserSession(browserSession)) {
+    return "Go tab status expired";
+  }
+  if (!readiness) return "Run a status check";
+  if (readiness.action === "offline") return "Open go after service recovers";
+  if (readiness.action === "configure") return "Public bridge not deployed";
+  if (readiness.action === "sign_in") return "Authentication stays in go";
+  if (readiness.action === "unlock") return "Unlock inside the go app";
+  if (readiness.backupHealthy === false) return "Backup needs attention in go";
+  if (readiness.importAvailable) return "Route-only actions are ready";
+  return "Secrets stay inside go";
+}
+
+function readinessIcon(readiness: GoVaultReadinessState | null): LeoIconName {
+  if (!readiness) return "shield";
+  if (readiness.action === "offline") return "warning-triangle-outline";
+  if (readiness.action === "configure") return "settings";
+  if (readiness.action === "sign_in") return "avatar";
+  if (readiness.action === "unlock") return "lock";
+  return "check-normal";
 }
 
 function backupLabel(backup: GoVaultBackupStatus | null): string {
@@ -197,6 +242,12 @@ export function PasswordVaultSection() {
   const isGoProvider =
     settings?.passwordManagerProvider === "nodewarden-self-hosted";
   const status = bridge?.status ?? null;
+  const freshBrowserSession = isFreshBrowserSession(browserSession)
+    ? browserSession
+    : null;
+  const readiness = bridge
+    ? deriveGoVaultReadiness(bridge, freshBrowserSession)
+    : null;
 
   const refreshStatus = useCallback(async () => {
     if (!baseUrl || checking) return;
@@ -309,7 +360,7 @@ export function PasswordVaultSection() {
 
   useEffect(() => {
     const delayMs = goVaultBrowserSessionRefreshDelayMs(browserSession);
-    if (delayMs === null) return;
+    if (delayMs === null || delayMs <= 0) return;
 
     const timer = window.setTimeout(() => {
       setBrowserSession((current) => {
@@ -344,6 +395,13 @@ export function PasswordVaultSection() {
   if (!settings) return null;
 
   const operations: OperationCard[] = [
+    {
+      label: "Next step",
+      value: readinessLabel(checking, readiness),
+      detail: readinessDetail(readiness, browserSession),
+      icon: readinessIcon(readiness),
+      path: readiness?.vaultRoute ?? sessionRoute(bridge?.session ?? null, browserSession),
+    },
     {
       label: "Session",
       value: displaySessionLabel(bridge?.session ?? null, browserSession),

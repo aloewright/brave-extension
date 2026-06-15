@@ -86,6 +86,16 @@ export function deriveGoVaultReadiness(
         importAvailable: false,
       };
     }
+
+    if (browserSession.state === "unlocked" && snapshot.session.state === "not_linked") {
+      return {
+        action: "open_vault",
+        reachable: true,
+        vaultRoute,
+        backupHealthy: null,
+        importAvailable: false,
+      };
+    }
   }
 
   const apiSession = snapshot.session;
