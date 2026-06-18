@@ -20,6 +20,19 @@ export interface ExtensionPublicStatusInput {
   registrationInviteRequired: boolean;
 }
 
+/**
+ * Public status response — served unauthenticated at GET /api/extension/status.
+ *
+ * INVARIANTS (enforced by buildExtensionPublicStatus and tested in
+ * go-extension-bridge-contract.test.ts):
+ *   • No credential values: passwords, tokens, secret keys, passphrases.
+ *   • No credential-shaped field names: password, passphrase, secretAccessKey,
+ *     accessKeyId, webdav, cipher, destination, username, bucket, rootPath.
+ *   • jwtSecretMinLength is an integer threshold — not the secret itself.
+ *   • jwtUnsafeReason is a category string — not the raw JWT_SECRET env value.
+ *   • storagePolicy flags are compile-time false literals — the extension must
+ *     never store decrypted vault material or autofill passively.
+ */
 export interface ExtensionPublicStatusResponse {
   object: 'go-extension-status';
   ok: boolean;
@@ -169,6 +182,11 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Builds the unauthenticated public status payload for GET /api/extension/status.
+ * Only ever receives categorised/scalar inputs — the raw JWT_SECRET and
+ * BOOTSTRAP_INVITE_CODE env values are never passed in and cannot leak out.
+ */
 export function buildExtensionPublicStatus(input: ExtensionPublicStatusInput): ExtensionPublicStatusResponse {
   return {
     object: 'go-extension-status',

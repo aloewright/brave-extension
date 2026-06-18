@@ -5,6 +5,18 @@ import {
   handleCors,
 } from "../password-app/src/utils/response";
 
+// All paths served by the extension bridge handler — public + authenticated.
+const EXTENSION_BRIDGE_PATHS = [
+  "/api/extension/status",
+  "/api/extension/session",
+  "/api/extension/backup/status",
+  "/api/extension/import/status",
+  "/api/extension/devices/status",
+] as const;
+
+const ARBITRARY_EXTENSION_ORIGIN =
+  "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 function requestFor(path: string, origin?: string): Request {
   const headers = new Headers();
   if (origin) headers.set("Origin", origin);
@@ -32,7 +44,7 @@ describe("go extension bridge CORS", () => {
     const response = handleCors(
       requestFor(
         "/api/extension/status",
-        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ARBITRARY_EXTENSION_ORIGIN,
       ),
     );
 
@@ -61,5 +73,43 @@ describe("go extension bridge CORS", () => {
 
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it.each(EXTENSION_BRIDGE_PATHS)(
+    "grants known extension origin no-credentials CORS on %s",
+    (path) => {
+      const response = handleCors(
+        requestFor(path, BRAVE_DEV_EXTENSION_ORIGIN),
+      );
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+        BRAVE_DEV_EXTENSION_ORIGIN,
+      );
+      // credentials: false — bridge uses Bearer tokens, not cookies
+      expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    },
+  );
+
+  it.each(EXTENSION_BRIDGE_PATHS)(
+    "blocks arbitrary extension origin CORS on %s",
+    (path) => {
+      const response = handleCors(
+        requestFor(path, ARBITRARY_EXTENSION_ORIGIN),
+      );
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    },
+  );
+
+  it("includes X-NodeWarden-Acting-Device-Id in the allowed-headers list", () => {
+    const response = handleCors(
+      requestFor("/api/extension/devices/status", BRAVE_DEV_EXTENSION_ORIGIN),
+    );
+
+    const allowedHeaders = response.headers
+      .get("Access-Control-Allow-Headers")
+      ?.toLowerCase();
+    expect(allowedHeaders).toContain("x-nodewarden-acting-device-id");
   });
 });

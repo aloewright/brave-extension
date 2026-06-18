@@ -16,6 +16,9 @@ const DEFAULT_CORS_HEADERS = [
   'X-Device-Identifier',
   'X-Device-Name',
   'X-NodeWarden-Web-Session',
+  // Sent by the extension on /api/extension/devices/status to identify the
+  // calling device so the server can mark it as "current" in the summary.
+  'X-NodeWarden-Acting-Device-Id',
 ];
 
 export const BRAVE_DEV_EXTENSION_ORIGIN = 'chrome-extension://gkhofjjpnilonbinehpkblmcflbclcoh';
@@ -32,11 +35,30 @@ function isKnownBridgeExtensionOrigin(origin: string): boolean {
   return origin === BRAVE_DEV_EXTENSION_ORIGIN;
 }
 
+/**
+ * Paths served by the extension bridge.
+ *
+ * CORS policy for these paths (enforced in getCorsPolicy):
+ *   - Known extension origin (BRAVE_DEV_EXTENSION_ORIGIN): allowed,
+ *     credentials: false — the bridge uses Bearer tokens, not cookies.
+ *   - Any other extension origin: blocked (no ACAO header).
+ *   - Same-origin: allowed with credentials (standard web-app session).
+ *
+ * Public route: /api/extension/status — no authentication required.
+ *
+ * Authenticated routes (require Bearer JWT — behind design review until
+ * token/session semantics are finalised, see ALO-705):
+ *   /api/extension/session
+ *   /api/extension/backup/status
+ *   /api/extension/import/status
+ *   /api/extension/devices/status
+ */
 function isExtensionBridgePath(path: string): boolean {
   return path === '/api/extension/status'
     || path === '/api/extension/session'
     || path === '/api/extension/backup/status'
-    || path === '/api/extension/import/status';
+    || path === '/api/extension/import/status'
+    || path === '/api/extension/devices/status';
 }
 
 function isWildcardCorsPath(path: string): boolean {
