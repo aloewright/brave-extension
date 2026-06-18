@@ -62,4 +62,18 @@ describe("go extension bridge CORS", () => {
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
+
+  it("does not grant credentials to arbitrary extensions on authenticated extension routes", () => {
+    const arbitraryExtension = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    for (const path of [
+      "/api/extension/session",
+      "/api/extension/backup/status",
+      "/api/extension/import/status",
+      "/api/extension/devices/status",
+    ]) {
+      const response = handleCors(requestFor(path, arbitraryExtension));
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    }
+  });
 });
