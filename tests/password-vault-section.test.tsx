@@ -302,9 +302,36 @@ describe("PasswordVaultSection readiness UX", () => {
 
     const { host, cleanup } = await renderPasswordVaultSection();
     try {
+      expect(host.textContent).toContain("Stale session");
       expect(host.textContent).toContain("Stale go tab");
       expect(host.textContent).toContain("Go tab status expired");
       expect(host.textContent).toContain("Open go to refresh status");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("labels bridge-pending state when public status is absent but service is reachable", async () => {
+    mocks.checkGoVaultBridge.mockResolvedValue(makeBridge({ publicStatus: null }));
+
+    const { host, cleanup } = await renderPasswordVaultSection();
+    try {
+      expect(host.textContent).toContain("Bridge pending");
+      expect(host.textContent).toContain("Public bridge not deployed");
+      expect(host.textContent).not.toContain("Copy password");
+      expect(host.textContent).not.toContain("Unlock");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("panel section has overflow-hidden guard for 420px fit", async () => {
+    const { host, cleanup } = await renderPasswordVaultSection();
+    try {
+      const section = host.querySelector<HTMLElement>('[data-testid="passwords-section"]');
+      expect(section).toBeTruthy();
+      expect(section!.className).toContain("overflow-hidden");
+      expect(section!.querySelector(".overflow-x-hidden")).toBeTruthy();
     } finally {
       cleanup();
     }
