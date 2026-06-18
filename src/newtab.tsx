@@ -2,6 +2,7 @@ import {
   default as React,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -9,6 +10,8 @@ import {
 } from "react";
 import "./style.css";
 import "./lib/appearance-entry";
+import { useNativeHost } from "./hooks/useNativeHost";
+import { useSettings } from "./hooks/useSettings";
 import {
   backfillBuiltinQuickLinks,
   WORKSPACE_APPS,
@@ -22,6 +25,7 @@ import {
   sanitizeQuickLinks,
   type QuickLink,
 } from "./newtab-quick-links";
+import type { SystemSnapshot, SystemStopTarget } from "./types";
 
 const MAX_OPEN_TAB_ITEMS = 8;
 
@@ -501,6 +505,585 @@ interface BrowserShortcut {
   discarded?: boolean;
 }
 
+type NewTabPrimaryTab = "cloudflare" | "system" | "workspace" | "browser";
+type CloudflarePanelTab = "overview" | "zones" | "compute" | "analytics";
+
+interface CloudflareConfig {
+  accountId: string;
+  zoneId: string;
+}
+
+interface CloudflareAccount {
+  id: string;
+  name: string;
+  type?: string;
+}
+
+interface CloudflareZone {
+  id: string;
+  name: string;
+  status?: string;
+  paused?: boolean;
+  type?: string;
+  account?: {
+    id?: string;
+    name?: string;
+  };
+}
+
+interface CloudflareWorkerScript {
+  id: string;
+  created_on?: string;
+  deleted_on?: string | null;
+  modified_on?: string;
+  routes?: Array<{ id?: string; pattern?: string; script?: string }>;
+  status?: string;
+  has_assets?: boolean;
+  has_modules?: boolean;
+  usage_model?: string;
+  handlers?: string[];
+}
+
+interface CloudflarePagesDeployment {
+  id?: string;
+  aliases?: string[];
+  created_on?: string;
+  environment?: string;
+  is_skipped?: boolean;
+  latest_stage?: {
+    status?: string;
+  };
+  modified_on?: string;
+  status?: string;
+  url?: string;
+}
+
+interface CloudflarePagesProject {
+  id: string;
+  name: string;
+  canonical_deployment?: CloudflarePagesDeployment | null;
+  subdomain?: string;
+  created_on?: string;
+  deleted_on?: string | null;
+  latest_deployment?: CloudflarePagesDeployment | null;
+  status?: string;
+}
+
+interface CloudflareAnalyticsPoint {
+  hour: string;
+  visits: number;
+  bytes: number;
+}
+
+interface CloudflareDashboardData {
+  accounts: CloudflareAccount[];
+  zones: CloudflareZone[];
+  workers: CloudflareWorkerScript[];
+  pages: CloudflarePagesProject[];
+  analytics: CloudflareAnalyticsPoint[];
+  errors: string[];
+  loadedAt: number;
+}
+
+interface CloudflareApiResponse<T> {
+  success?: boolean;
+  result?: T;
+  errors?: Array<{ message?: string; code?: number }>;
+}
+
+interface CloudflareDashboardSessionCacheEntry {
+  authScope: string;
+  accountId: string;
+  zoneId: string;
+  data: CloudflareDashboardData;
+  savedAt: number;
+}
+
+type CloudflareAuth =
+  | { kind: "token"; token: string }
+  | { kind: "global-key"; email: string; key: string };
+
+const CLOUDFLARE_CONFIG_STORAGE_KEY = "newtab.cloudflare.config";
+const CLOUDFLARE_DASHBOARD_SESSION_STORAGE_KEY = "newtab.cloudflare.dashboard";
+const CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4";
+
+const CLOUDFLARE_SECRET_NAMES = [
+  "CLOUDFLARE_API_TOKEN",
+  "CF_API_TOKEN",
+  "CLOUDFLARE_TOKEN",
+  "CF_TOKEN",
+  "CLOUDFLARE_API_KEY",
+  "CF_API_KEY",
+  "CLOUDFLARE_GLOBAL_API_KEY",
+  "CF_GLOBAL_API_KEY",
+  "CLOUDFLARE_EMAIL",
+  "CF_EMAIL",
+  "CLOUDFLARE_API_EMAIL",
+  "CF_API_EMAIL",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CF_ACCOUNT_ID",
+  "CLOUDFLARE_ZONE_ID",
+  "CF_ZONE_ID",
+];
+
+const CLOUDFLARE_TOKEN_SECRET_NAMES = [
+  "CLOUDFLARE_API_TOKEN",
+  "CF_API_TOKEN",
+  "CLOUDFLARE_TOKEN",
+  "CF_TOKEN",
+];
+
+const CLOUDFLARE_GLOBAL_KEY_SECRET_NAMES = [
+  "CLOUDFLARE_API_KEY",
+  "CF_API_KEY",
+  "CLOUDFLARE_GLOBAL_API_KEY",
+  "CF_GLOBAL_API_KEY",
+];
+
+const CLOUDFLARE_EMAIL_SECRET_NAMES = [
+  "CLOUDFLARE_EMAIL",
+  "CF_EMAIL",
+  "CLOUDFLARE_API_EMAIL",
+  "CF_API_EMAIL",
+];
+
+const CLOUDFLARE_ACCOUNT_SECRET_NAMES = [
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CF_ACCOUNT_ID",
+];
+
+const CLOUDFLARE_ZONE_SECRET_NAMES = [
+  "CLOUDFLARE_ZONE_ID",
+  "CF_ZONE_ID",
+];
+
+const DEFAULT_CLOUDFLARE_CONFIG: CloudflareConfig = {
+  accountId: "",
+  zoneId: "",
+};
+
+const CLOUDFLARE_PRIMARY_TABS: Array<{
+  id: NewTabPrimaryTab;
+  label: string;
+}> = [
+  { id: "cloudflare", label: "Cloudflare" },
+  { id: "system", label: "System" },
+  { id: "workspace", label: "Workspace" },
+  { id: "browser", label: "Browser" },
+];
+
+const CLOUDFLARE_PANEL_TABS: Array<{
+  id: CloudflarePanelTab;
+  label: string;
+}> = [
+  { id: "overview", label: "Overview" },
+  { id: "zones", label: "Zones" },
+  { id: "compute", label: "Workers & Pages" },
+  { id: "analytics", label: "Analytics" },
+];
+
+function sanitizeCloudflareConfig(input: unknown): CloudflareConfig {
+  if (!input || typeof input !== "object") return DEFAULT_CLOUDFLARE_CONFIG;
+  const entry = input as Partial<CloudflareConfig>;
+  return {
+    accountId: typeof entry.accountId === "string" ? entry.accountId : "",
+    zoneId: typeof entry.zoneId === "string" ? entry.zoneId : "",
+  };
+}
+
+function isCloudflareDashboardData(input: unknown): input is CloudflareDashboardData {
+  if (!input || typeof input !== "object") return false;
+  const entry = input as Partial<CloudflareDashboardData>;
+  return (
+    Array.isArray(entry.accounts) &&
+    Array.isArray(entry.zones) &&
+    Array.isArray(entry.workers) &&
+    Array.isArray(entry.pages) &&
+    Array.isArray(entry.analytics) &&
+    Array.isArray(entry.errors) &&
+    typeof entry.loadedAt === "number"
+  );
+}
+
+function isCloudflareDashboardSessionCacheEntry(input: unknown): input is CloudflareDashboardSessionCacheEntry {
+  if (!input || typeof input !== "object") return false;
+  const entry = input as Partial<CloudflareDashboardSessionCacheEntry>;
+  return (
+    typeof entry.authScope === "string" &&
+    typeof entry.accountId === "string" &&
+    typeof entry.zoneId === "string" &&
+    typeof entry.savedAt === "number" &&
+    isCloudflareDashboardData(entry.data)
+  );
+}
+
+function cloudflareAuthScope(auth: CloudflareAuth) {
+  return auth.kind === "global-key"
+    ? `global-key:${auth.email.trim().toLowerCase()}`
+    : "token";
+}
+
+function cloudflareDashboardCacheMatches(
+  entry: CloudflareDashboardSessionCacheEntry,
+  config: CloudflareConfig,
+  auth: CloudflareAuth,
+) {
+  if (entry.authScope !== cloudflareAuthScope(auth)) return false;
+  const accountId = config.accountId.trim();
+  const zoneId = config.zoneId.trim();
+  return (
+    (!accountId || !entry.accountId || entry.accountId === accountId) &&
+    (!zoneId || !entry.zoneId || entry.zoneId === zoneId)
+  );
+}
+
+async function cloudflareDashboardSessionStorageKey() {
+  try {
+    if (typeof chrome !== "undefined" && chrome.windows?.getCurrent) {
+      const currentWindow = await chrome.windows.getCurrent();
+      if (typeof currentWindow.id === "number") {
+        return `${CLOUDFLARE_DASHBOARD_SESSION_STORAGE_KEY}.${currentWindow.id}`;
+      }
+    }
+  } catch {
+    /* fall through to a tab-agnostic extension session key */
+  }
+  return CLOUDFLARE_DASHBOARD_SESSION_STORAGE_KEY;
+}
+
+async function readCloudflareDashboardSessionCache(
+  config: CloudflareConfig,
+  auth: CloudflareAuth,
+) {
+  const storageKey = await cloudflareDashboardSessionStorageKey();
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage?.session) {
+      const result = await chrome.storage.session.get(storageKey);
+      const entry = result?.[storageKey];
+      if (
+        isCloudflareDashboardSessionCacheEntry(entry) &&
+        cloudflareDashboardCacheMatches(entry, config, auth)
+      ) {
+        return entry.data;
+      }
+    }
+  } catch {
+    /* ignore corrupt or unavailable extension session cache */
+  }
+
+  return null;
+}
+
+async function writeCloudflareDashboardSessionCache(
+  config: CloudflareConfig,
+  auth: CloudflareAuth,
+  data: CloudflareDashboardData,
+) {
+  const storageKey = await cloudflareDashboardSessionStorageKey();
+  const entry: CloudflareDashboardSessionCacheEntry = {
+    authScope: cloudflareAuthScope(auth),
+    accountId: config.accountId.trim() || data.accounts[0]?.id || "",
+    zoneId: config.zoneId.trim() || data.zones[0]?.id || "",
+    data,
+    savedAt: Date.now(),
+  };
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage?.session) {
+      await chrome.storage.session.set({ [storageKey]: entry });
+    }
+  } catch {
+    /* ignore unavailable extension session cache */
+  }
+}
+
+function pickSecretValue(secrets: Record<string, string>, names: string[]): string {
+  const direct = names
+    .map((name) => secrets[name])
+    .find((value) => typeof value === "string" && value.trim().length > 0);
+  if (direct) return direct.trim();
+
+  const normalized = Object.entries(secrets).reduce<Record<string, string>>(
+    (acc, [key, value]) => {
+      acc[key.trim().toUpperCase()] = value;
+      return acc;
+    },
+    {},
+  );
+  for (const name of names) {
+    const hit = normalized[name.trim().toUpperCase()];
+    if (typeof hit === "string" && hit.trim().length > 0) return hit.trim();
+  }
+  return "";
+}
+
+function cloudflareHeaders(auth: CloudflareAuth) {
+  if (auth.kind === "global-key") {
+    return {
+      "X-Auth-Email": auth.email,
+      "X-Auth-Key": auth.key,
+      "Content-Type": "application/json",
+    };
+  }
+  return {
+    Authorization: `Bearer ${auth.token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+function cloudflareErrorMessage(prefix: string, payload: CloudflareApiResponse<unknown>) {
+  const detail =
+    payload.errors
+      ?.map((error) => error.message || `Cloudflare error ${error.code}`)
+      .filter(Boolean)
+      .join("; ") || "Unknown Cloudflare API error";
+  return `${prefix}: ${detail}`;
+}
+
+async function cloudflareGet<T>(
+  path: string,
+  auth: CloudflareAuth,
+  params?: Record<string, string>,
+): Promise<T> {
+  const url = new URL(`${CLOUDFLARE_API_BASE}${path}`);
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value) url.searchParams.set(key, value);
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: cloudflareHeaders(auth),
+  });
+  const payload = (await response.json()) as CloudflareApiResponse<T>;
+  if (!response.ok || payload.success === false) {
+    throw new Error(cloudflareErrorMessage(path, payload));
+  }
+  return payload.result as T;
+}
+
+async function cloudflareGraphql<T>(
+  auth: CloudflareAuth,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(`${CLOUDFLARE_API_BASE}/graphql`, {
+    method: "POST",
+    headers: cloudflareHeaders(auth),
+    body: JSON.stringify({ query, variables }),
+  });
+  const payload = (await response.json()) as {
+    data?: T;
+    errors?: Array<{ message?: string }>;
+  };
+  if (!response.ok || payload.errors?.length) {
+    const detail =
+      payload.errors?.map((error) => error.message).filter(Boolean).join("; ") ||
+      "Unknown Cloudflare GraphQL error";
+    throw new Error(`Analytics: ${detail}`);
+  }
+  return payload.data as T;
+}
+
+function cloudflareDashboardUrl(accountId?: string, path = "") {
+  const cleanPath = path.replace(/^\/+/, "");
+  return accountId
+    ? `https://dash.cloudflare.com/${accountId}/${cleanPath}`
+    : "https://dash.cloudflare.com";
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${(value / 1024 ** index).toLocaleString(undefined, {
+    maximumFractionDigits: index === 0 ? 0 : 1,
+  })} ${units[index]}`;
+}
+
+function formatShortDate(value?: string) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function dateSortValue(value?: string) {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sumAnalytics(data: CloudflareAnalyticsPoint[]) {
+  return data.reduce(
+    (total, point) => ({
+      visits: total.visits + point.visits,
+      bytes: total.bytes + point.bytes,
+    }),
+    { visits: 0, bytes: 0 },
+  );
+}
+
+function isDeletedCloudflareResource(resource: { deleted_on?: string | null; status?: string }) {
+  if (resource.deleted_on) return true;
+  const status = resource.status?.trim().toLowerCase();
+  return status ? ["deleted", "deleting", "archived", "disabled"].includes(status) : false;
+}
+
+function isActiveWorkerScript(worker: CloudflareWorkerScript) {
+  if (!worker.id?.trim() || isDeletedCloudflareResource(worker)) return false;
+  return true;
+}
+
+function isUsablePagesDeployment(deployment?: CloudflarePagesDeployment | null) {
+  if (!deployment?.id || deployment.is_skipped) return false;
+  const status = (deployment.latest_stage?.status || deployment.status || "").trim().toLowerCase();
+  if (!status) return true;
+  return ["success", "active"].includes(status);
+}
+
+function getActivePagesDeployment(project: CloudflarePagesProject) {
+  const deployments = [project.canonical_deployment, project.latest_deployment];
+  return deployments.find(isUsablePagesDeployment) ?? null;
+}
+
+function isActivePagesProject(project: CloudflarePagesProject) {
+  if (!project.id?.trim() || !project.name?.trim() || isDeletedCloudflareResource(project)) {
+    return false;
+  }
+  return Boolean(getActivePagesDeployment(project));
+}
+
+function cloudflarePagesProjectUpdatedAt(project: CloudflarePagesProject) {
+  const deployment = getActivePagesDeployment(project);
+  return deployment?.modified_on || deployment?.created_on || project.created_on;
+}
+
+async function loadCloudflareDashboard(
+  config: CloudflareConfig,
+  auth: CloudflareAuth | null,
+): Promise<CloudflareDashboardData> {
+  if (!auth) throw new Error("Load Cloudflare credentials from Doppler first.");
+
+  const errors: string[] = [];
+  let accounts: CloudflareAccount[] = [];
+  let zones: CloudflareZone[] = [];
+  let workers: CloudflareWorkerScript[] = [];
+  let pages: CloudflarePagesProject[] = [];
+  let analytics: CloudflareAnalyticsPoint[] = [];
+
+  try {
+    accounts = await cloudflareGet<CloudflareAccount[]>("/accounts", auth, {
+      per_page: "50",
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Could not load accounts.");
+  }
+
+  const accountId =
+    config.accountId.trim() ||
+    accounts.find((account) => account.id)?.id ||
+    "";
+
+  try {
+    zones = await cloudflareGet<CloudflareZone[]>("/zones", auth, {
+      ...(accountId ? { "account.id": accountId } : {}),
+      per_page: "50",
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Could not load zones.");
+  }
+
+  if (accountId) {
+    try {
+      workers = (
+        await cloudflareGet<CloudflareWorkerScript[]>(
+          `/accounts/${encodeURIComponent(accountId)}/workers/scripts`,
+          auth,
+        )
+      ).filter(isActiveWorkerScript);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Could not load Workers.");
+    }
+
+    try {
+      pages = (
+        await cloudflareGet<CloudflarePagesProject[]>(
+          `/accounts/${encodeURIComponent(accountId)}/pages/projects`,
+          auth,
+        )
+      ).filter(isActivePagesProject);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Could not load Pages projects.");
+    }
+  }
+
+  const zoneId = config.zoneId.trim() || zones.find((zone) => zone.id)?.id || "";
+  if (zoneId) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const until = new Date().toISOString();
+    try {
+      const data = await cloudflareGraphql<{
+        viewer?: {
+          zones?: Array<{
+            httpRequestsAdaptiveGroups?: Array<{
+              sum?: { visits?: number; edgeResponseBytes?: number };
+              dimensions?: { datetimeHour?: string };
+            }>;
+          }>;
+        };
+      }>(
+        auth,
+        `query NewtabZoneAnalytics($zoneTag: String!, $filter: ZoneHttpRequestsAdaptiveGroupsFilter_Input!) {
+          viewer {
+            zones(filter: { zoneTag: $zoneTag }) {
+              httpRequestsAdaptiveGroups(limit: 24, filter: $filter) {
+                sum {
+                  visits
+                  edgeResponseBytes
+                }
+                dimensions {
+                  datetimeHour
+                }
+              }
+            }
+          }
+        }`,
+        {
+          zoneTag: zoneId,
+          filter: {
+            datetime_geq: since,
+            datetime_leq: until,
+          },
+        },
+      );
+      analytics =
+        data.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups
+          ?.map((point) => ({
+            hour: point.dimensions?.datetimeHour ?? "",
+            visits: point.sum?.visits ?? 0,
+            bytes: point.sum?.edgeResponseBytes ?? 0,
+          }))
+          .sort((a, b) => a.hour.localeCompare(b.hour)) ?? [];
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Could not load analytics.");
+    }
+  }
+
+  return {
+    accounts,
+    zones,
+    workers,
+    pages,
+    analytics,
+    errors,
+    loadedAt: Date.now(),
+  };
+}
+
 function AppIcon({
   name,
   className = "workspace-app-card__icon",
@@ -784,6 +1367,11 @@ function useBrowserShortcuts() {
 
 function BraveSearchForm() {
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const search = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -799,8 +1387,10 @@ function BraveSearchForm() {
     <form className="newtab-search" role="search" onSubmit={search}>
       <SearchIcon className="newtab-search__icon" />
       <input
+        ref={inputRef}
         aria-label="Search Brave"
         autoComplete="off"
+        autoFocus
         className="newtab-search__input"
         name="q"
         onChange={(event) => setQuery(event.currentTarget.value)}
@@ -1064,6 +1654,8 @@ export function QuickLinks({
                 className="newtab-quick-link"
                 href={link.url}
                 aria-label={link.label}
+                rel="noopener noreferrer"
+                target="_blank"
                 title={link.label}
               >
                 <AppIcon name={link.icon} className="newtab-quick-link__icon" />
@@ -1357,6 +1949,8 @@ export function AppCard({
         href={app.url}
         aria-label={app.name}
         draggable={false}
+        rel="noopener noreferrer"
+        target="_blank"
       >
         <span className="workspace-app-card__mark" aria-hidden="true">
           <AppIcon name={app.icon} />
@@ -1376,6 +1970,8 @@ export function AppCard({
               className="workspace-app-card__quick-link"
               draggable={false}
               href={link.url}
+              rel="noopener noreferrer"
+              target="_blank"
             >
               {link.label}
             </a>
@@ -1703,7 +2299,13 @@ function BrowserShortcutItem({
   }
 
   return (
-    <a className="newtab-shortcut" href={item.url} title={item.url}>
+    <a
+      className="newtab-shortcut"
+      href={item.url}
+      rel="noopener noreferrer"
+      target="_blank"
+      title={item.url}
+    >
       {content}
     </a>
   );
@@ -1848,21 +2450,874 @@ function applyIconOverrides(
   });
 }
 
+function SegmentedTabs<T extends string>({
+  tabs,
+  active,
+  onChange,
+  className = "",
+  ariaLabel,
+}: {
+  tabs: Array<{ id: T; label: string }>;
+  active: T;
+  onChange: (tab: T) => void;
+  className?: string;
+  ariaLabel: string;
+}) {
+  return (
+    <div className={`newtab-tabs ${className}`} role="tablist" aria-label={ariaLabel}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.id}
+          className="newtab-tabs__tab"
+          onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CloudflareConfigForm({
+  config,
+  accounts,
+  zones,
+  onChange,
+  onRefresh,
+  onLoadSecrets,
+  loading,
+  loadingSecrets,
+  authLoaded,
+  authKind,
+  dopplerConnected,
+  secretStatus,
+}: {
+  config: CloudflareConfig;
+  accounts: CloudflareAccount[];
+  zones: CloudflareZone[];
+  onChange: (config: CloudflareConfig) => void;
+  onRefresh: () => void;
+  onLoadSecrets: () => void;
+  loading: boolean;
+  loadingSecrets: boolean;
+  authLoaded: boolean;
+  authKind: CloudflareAuth["kind"] | null;
+  dopplerConnected: boolean;
+  secretStatus: string | null;
+}) {
+  const update = (patch: Partial<CloudflareConfig>) => onChange({ ...config, ...patch });
+  return (
+    <section className="cloudflare-config" aria-label="Cloudflare API configuration">
+      <div className="cloudflare-config__secret">
+        <span>Doppler secrets</span>
+        <button
+          type="button"
+          className="cloudflare-config__secondary"
+          onClick={onLoadSecrets}
+          disabled={loadingSecrets || !dopplerConnected}
+        >
+          {loadingSecrets ? "Loading" : "Load from Doppler"}
+        </button>
+        <p>
+          {secretStatus ||
+            (authLoaded
+              ? `Cloudflare ${authKind === "global-key" ? "global key" : "token"} loaded.`
+              : "Cloudflare credentials not loaded.")}
+        </p>
+      </div>
+      <label className="cloudflare-config__field">
+        <span>Account</span>
+        <select
+          value={config.accountId}
+          onChange={(event) => update({ accountId: event.currentTarget.value })}
+        >
+          <option value="">Auto</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={config.accountId}
+          placeholder="Account ID"
+          onChange={(event) => update({ accountId: event.currentTarget.value })}
+        />
+      </label>
+      <label className="cloudflare-config__field">
+        <span>Analytics zone</span>
+        <select
+          value={config.zoneId}
+          onChange={(event) => update({ zoneId: event.currentTarget.value })}
+        >
+          <option value="">Auto</option>
+          {zones.map((zone) => (
+            <option key={zone.id} value={zone.id}>
+              {zone.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        className="cloudflare-config__refresh"
+        onClick={onRefresh}
+        disabled={loading || !authLoaded}
+      >
+        {loading ? "Loading" : "Refresh"}
+      </button>
+    </section>
+  );
+}
+
+function CloudflareStatCard({
+  label,
+  value,
+  meta,
+  href,
+}: {
+  label: string;
+  value: string;
+  meta: string;
+  href?: string;
+}) {
+  const body = (
+    <>
+      <span className="cloudflare-stat__label">{label}</span>
+      <strong className="cloudflare-stat__value">{value}</strong>
+      <span className="cloudflare-stat__meta">{meta}</span>
+    </>
+  );
+  if (href) {
+    return (
+      <a
+        className="cloudflare-stat"
+        href={href}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        {body}
+      </a>
+    );
+  }
+  return <div className="cloudflare-stat">{body}</div>;
+}
+
+function CloudflareStatusPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "ok" | "warn" }) {
+  return <span className={`cloudflare-pill cloudflare-pill--${tone}`}>{children}</span>;
+}
+
+function CloudflareEmpty({ children }: { children: ReactNode }) {
+  return <p className="cloudflare-empty">{children}</p>;
+}
+
+function CloudflareResourceRow({
+  icon,
+  title,
+  meta,
+  status,
+  href,
+}: {
+  icon: WorkspaceAppIcon;
+  title: string;
+  meta: string;
+  status?: ReactNode;
+  href?: string;
+}) {
+  const content = (
+    <>
+      <span className="cloudflare-resource-row__mark" aria-hidden="true">
+        <AppIcon name={icon} />
+      </span>
+      <span className="cloudflare-resource-row__body">
+        <strong>{title}</strong>
+        <span>{meta}</span>
+      </span>
+      {status ? <span className="cloudflare-resource-row__status">{status}</span> : null}
+    </>
+  );
+
+  if (href) {
+    return (
+      <a
+        className="cloudflare-resource-row"
+        href={href}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        {content}
+      </a>
+    );
+  }
+  return <div className="cloudflare-resource-row">{content}</div>;
+}
+
+function CloudflareOverview({
+  data,
+  accountId,
+}: {
+  data: CloudflareDashboardData | null;
+  accountId: string;
+}) {
+  const analyticsTotal = sumAnalytics(data?.analytics ?? []);
+  const zones = data?.zones ?? [];
+  const activeZones = zones.filter((zone) => zone.status === "active").length;
+  return (
+    <div className="cloudflare-overview">
+      <div className="cloudflare-stats-grid">
+        <CloudflareStatCard
+          label="Accounts"
+          value={formatCount(data?.accounts.length ?? 0)}
+          meta="visible to this token"
+          href={cloudflareDashboardUrl(accountId)}
+        />
+        <CloudflareStatCard
+          label="Zones"
+          value={formatCount(data?.zones.length ?? 0)}
+          meta={`${formatCount(activeZones)} active`}
+          href={cloudflareDashboardUrl(accountId, "domains/overview")}
+        />
+        <CloudflareStatCard
+          label="Workers"
+          value={formatCount(data?.workers.length ?? 0)}
+          meta="uploaded scripts"
+          href={cloudflareDashboardUrl(accountId, "workers-and-pages")}
+        />
+        <CloudflareStatCard
+          label="Pages"
+          value={formatCount(data?.pages.length ?? 0)}
+          meta="projects"
+          href={cloudflareDashboardUrl(accountId, "workers-and-pages/pages")}
+        />
+        <CloudflareStatCard
+          label="Visits"
+          value={formatCount(analyticsTotal.visits)}
+          meta="last 24 hours"
+        />
+        <CloudflareStatCard
+          label="Data"
+          value={formatBytes(analyticsTotal.bytes)}
+          meta="edge response bytes"
+        />
+      </div>
+      <section className="cloudflare-panel-card">
+        <div className="cloudflare-panel-card__header">
+          <h3>Recent resources</h3>
+          <span>{data ? new Date(data.loadedAt).toLocaleTimeString() : "Not loaded"}</span>
+        </div>
+        <div className="cloudflare-resource-list">
+          {(data?.zones ?? []).slice(0, 3).map((zone) => (
+            <CloudflareResourceRow
+              key={zone.id}
+              icon="hero:globe-alt"
+              title={zone.name}
+              meta={zone.account?.name || zone.type || "Zone"}
+              href={cloudflareDashboardUrl(accountId, `${zone.name}`)}
+              status={<CloudflareStatusPill tone={zone.status === "active" ? "ok" : "warn"}>{zone.status || "unknown"}</CloudflareStatusPill>}
+            />
+          ))}
+          {(data?.workers ?? []).slice(0, 3).map((worker) => (
+            <CloudflareResourceRow
+              key={worker.id}
+              icon="phosphor:code"
+              title={worker.id}
+              meta={`Updated ${formatShortDate(worker.modified_on || worker.created_on)}`}
+              href={cloudflareDashboardUrl(accountId, `workers/services/view/${worker.id}/production/metrics`)}
+              status={<CloudflareStatusPill>{worker.usage_model || "standard"}</CloudflareStatusPill>}
+            />
+          ))}
+          {!data || (data.zones.length === 0 && data.workers.length === 0) ? (
+            <CloudflareEmpty>Add a token and refresh to list Cloudflare resources.</CloudflareEmpty>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CloudflareZonesPanel({ data, accountId }: { data: CloudflareDashboardData | null; accountId: string }) {
+  const zones = data?.zones ?? [];
+  return (
+    <section className="cloudflare-panel-card">
+      <div className="cloudflare-panel-card__header">
+        <h3>Zones</h3>
+        <span>{formatCount(zones.length)}</span>
+      </div>
+      <div className="cloudflare-resource-list">
+        {zones.length ? (
+          zones.map((zone) => (
+            <CloudflareResourceRow
+              key={zone.id}
+              icon="hero:globe-alt"
+              title={zone.name}
+              meta={`${zone.account?.name || "Cloudflare"} · ${zone.paused ? "paused" : zone.type || "full"}`}
+              href={cloudflareDashboardUrl(accountId, `${zone.name}`)}
+              status={<CloudflareStatusPill tone={zone.status === "active" ? "ok" : "warn"}>{zone.status || "unknown"}</CloudflareStatusPill>}
+            />
+          ))
+        ) : (
+          <CloudflareEmpty>No zones returned for this token.</CloudflareEmpty>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CloudflareComputePanel({ data, accountId }: { data: CloudflareDashboardData | null; accountId: string }) {
+  const workers = data?.workers ?? [];
+  const pages = data?.pages ?? [];
+  const resources = [
+    ...workers.map((worker) => {
+      const updatedAt = worker.modified_on || worker.created_on;
+      return {
+        id: `worker:${worker.id}`,
+        icon: "phosphor:code" as WorkspaceAppIcon,
+        title: worker.id,
+        meta: `Worker · updated ${formatShortDate(updatedAt)} · ${worker.handlers?.join(", ") || "default export"}`,
+        href: cloudflareDashboardUrl(accountId, `workers/services/view/${worker.id}/production/metrics`),
+        status: <CloudflareStatusPill>{worker.usage_model || "standard"}</CloudflareStatusPill>,
+        updatedAt,
+      };
+    }),
+    ...pages.map((project) => {
+      const deployment = getActivePagesDeployment(project);
+      const updatedAt = cloudflarePagesProjectUpdatedAt(project);
+      return {
+        id: `pages:${project.id}`,
+        icon: "lucide:monitor" as WorkspaceAppIcon,
+        title: project.name,
+        meta: `Pages · ${project.subdomain || deployment?.url || "project"} · deployed ${formatShortDate(updatedAt)}`,
+        href: cloudflareDashboardUrl(accountId, `workers-and-pages/pages/view/${project.name}`),
+        status: <CloudflareStatusPill tone="ok">{deployment?.environment || "production"}</CloudflareStatusPill>,
+        updatedAt,
+      };
+    }),
+  ].sort((a, b) => dateSortValue(b.updatedAt) - dateSortValue(a.updatedAt));
+
+  return (
+    <div className="cloudflare-compute-scroll">
+      <section className="cloudflare-panel-card cloudflare-compute-card">
+        <div className="cloudflare-panel-card__header">
+          <h3>Workers & Pages</h3>
+          <span>
+            {formatCount(workers.length)} Workers · {formatCount(pages.length)} Pages
+          </span>
+        </div>
+        <div className="cloudflare-resource-list">
+          {resources.length ? (
+            resources.map((resource) => (
+              <CloudflareResourceRow
+                key={resource.id}
+                icon={resource.icon}
+                title={resource.title}
+                meta={resource.meta}
+                href={resource.href}
+                status={resource.status}
+              />
+            ))
+          ) : (
+            <CloudflareEmpty>No active Workers or Pages projects returned for this account.</CloudflareEmpty>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CloudflareAnalyticsPanel({ data }: { data: CloudflareDashboardData | null }) {
+  const points = data?.analytics ?? [];
+  const total = sumAnalytics(points);
+  const maxVisits = Math.max(...points.map((point) => point.visits), 1);
+  return (
+    <section className="cloudflare-panel-card">
+      <div className="cloudflare-panel-card__header">
+        <h3>Analytics</h3>
+        <span>{formatCount(total.visits)} visits · {formatBytes(total.bytes)}</span>
+      </div>
+      {points.length ? (
+        <div className="cloudflare-chart" aria-label="Hourly visits for the selected zone">
+          {points.map((point) => (
+            <div key={point.hour} className="cloudflare-chart__bar-wrap">
+              <span
+                className="cloudflare-chart__bar"
+                style={{ height: `${Math.max(8, (point.visits / maxVisits) * 100)}%` }}
+                title={`${new Date(point.hour).toLocaleTimeString([], { hour: "numeric" })}: ${formatCount(point.visits)} visits`}
+              />
+              <span className="cloudflare-chart__label">
+                {new Date(point.hour).toLocaleTimeString([], { hour: "numeric" })}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <CloudflareEmpty>Select a zone and refresh to load HTTP analytics.</CloudflareEmpty>
+      )}
+    </section>
+  );
+}
+
+function CloudflareDashboard({
+  config,
+  authFingerprint,
+  authKind,
+  dopplerConnected,
+  loadingSecrets,
+  secretStatus,
+  getAuth,
+  onLoadSecrets,
+  onConfigChange,
+}: {
+  config: CloudflareConfig;
+  authFingerprint: string;
+  authKind: CloudflareAuth["kind"] | null;
+  dopplerConnected: boolean;
+  loadingSecrets: boolean;
+  secretStatus: string | null;
+  getAuth: () => CloudflareAuth | null;
+  onLoadSecrets: () => void;
+  onConfigChange: (config: CloudflareConfig) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<CloudflarePanelTab>("overview");
+  const [data, setData] = useState<CloudflareDashboardData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const autoRefreshTokenRef = useRef("");
+
+  const effectiveAccountId =
+    config.accountId.trim() || data?.accounts.find((account) => account.id)?.id || "";
+
+  const applyDashboardData = (next: CloudflareDashboardData) => {
+    setData(next);
+    const accountId = config.accountId.trim() || next.accounts[0]?.id || "";
+    const zoneId = config.zoneId.trim() || next.zones[0]?.id || "";
+    if (
+      (!config.accountId.trim() && accountId) ||
+      (!config.zoneId.trim() && zoneId)
+    ) {
+      onConfigChange({ accountId, zoneId });
+    }
+  };
+
+  const refresh = async ({ force = false }: { force?: boolean } = {}) => {
+    const auth = getAuth();
+    if (!auth) return;
+    setLoading(true);
+    setError(null);
+    try {
+      if (!force) {
+        const cached = await readCloudflareDashboardSessionCache(config, auth);
+        if (cached) {
+          applyDashboardData(cached);
+          return;
+        }
+      }
+      const next = await loadCloudflareDashboard(config, auth);
+      applyDashboardData(next);
+      await writeCloudflareDashboardSessionCache(config, auth, next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cloudflare refresh failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authFingerprint) return;
+    const refreshKey = `${authFingerprint}:${config.accountId.trim()}:${config.zoneId.trim()}`;
+    if (autoRefreshTokenRef.current === refreshKey) return;
+    autoRefreshTokenRef.current = refreshKey;
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 450);
+    return () => window.clearTimeout(timer);
+    // Saved config is restored asynchronously from chrome.storage; debounce avoids
+    // firing API requests while a new token is being pasted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authFingerprint, config.accountId, config.zoneId]);
+
+  const panel =
+    activeTab === "overview" ? (
+      <CloudflareOverview data={data} accountId={effectiveAccountId} />
+    ) : activeTab === "zones" ? (
+      <CloudflareZonesPanel data={data} accountId={effectiveAccountId} />
+    ) : activeTab === "compute" ? (
+      <CloudflareComputePanel data={data} accountId={effectiveAccountId} />
+    ) : (
+      <CloudflareAnalyticsPanel data={data} />
+    );
+
+  return (
+    <section className="cloudflare-dashboard" aria-label="Cloudflare resources and stats">
+      <CloudflareConfigForm
+        config={config}
+        accounts={data?.accounts ?? []}
+        zones={data?.zones ?? []}
+        onChange={onConfigChange}
+        onRefresh={() => void refresh({ force: true })}
+        onLoadSecrets={onLoadSecrets}
+        loading={loading}
+        loadingSecrets={loadingSecrets}
+        authLoaded={!!authFingerprint}
+        authKind={authKind}
+        dopplerConnected={dopplerConnected}
+        secretStatus={secretStatus}
+      />
+      {error ? <p className="cloudflare-message cloudflare-message--error">{error}</p> : null}
+      {data?.errors.length ? (
+        <div className="cloudflare-message" role="status">
+          {data.errors.slice(0, 3).map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      ) : null}
+      <SegmentedTabs<CloudflarePanelTab>
+        tabs={CLOUDFLARE_PANEL_TABS}
+        active={activeTab}
+        onChange={setActiveTab}
+        className="newtab-tabs--nested"
+        ariaLabel="Cloudflare sections"
+      />
+      {panel}
+    </section>
+  );
+}
+
+function formatSystemSnapshotTime(value?: string) {
+  if (!value) return "Not loaded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not loaded";
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+function SystemResourceRow({
+  icon,
+  title,
+  meta,
+  status,
+  href,
+  stopLabel,
+  stopping,
+  onStop,
+}: {
+  icon: WorkspaceAppIcon;
+  title: string;
+  meta: string;
+  status?: ReactNode;
+  href?: string;
+  stopLabel?: string;
+  stopping?: boolean;
+  onStop?: () => void;
+}) {
+  return (
+    <div className="system-resource-row">
+      <span className="cloudflare-resource-row__mark" aria-hidden="true">
+        <AppIcon name={icon} />
+      </span>
+      <span className="cloudflare-resource-row__body">
+        <strong>{title}</strong>
+        <span>{meta}</span>
+      </span>
+      <span className="system-resource-row__actions">
+        {status}
+        {href ? (
+          <a
+            className="system-resource-row__link"
+            href={href}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Open
+          </a>
+        ) : null}
+        {onStop ? (
+          <button
+            type="button"
+            className="system-resource-row__stop"
+            onClick={onStop}
+            disabled={stopping}
+          >
+            {stopping ? "Stopping" : stopLabel || "Stop"}
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function SystemDashboard({
+  connected,
+  error,
+  loading,
+  snapshot,
+  stoppingKey,
+  onRefresh,
+  onStop,
+}: {
+  connected: boolean;
+  error: string | null;
+  loading: boolean;
+  snapshot: SystemSnapshot | null;
+  stoppingKey: string | null;
+  onRefresh: () => void;
+  onStop: (target: SystemStopTarget, pid: number, label: string) => void;
+}) {
+  const servers = snapshot?.servers ?? [];
+  const ports = snapshot?.ports ?? [];
+  const daemons = snapshot?.daemons ?? [];
+  const runningDaemons = daemons.filter((daemon) => daemon.state === "running");
+
+  return (
+    <section className="system-dashboard" aria-label="Local daemons, servers, and ports">
+      <div className="system-toolbar">
+        <div>
+          <h2>Local System</h2>
+          <p>{connected ? `Last scan ${formatSystemSnapshotTime(snapshot?.collectedAt)}` : "Native host is not connected."}</p>
+        </div>
+        <button
+          type="button"
+          className="cloudflare-config__refresh"
+          onClick={onRefresh}
+          disabled={loading || !connected}
+        >
+          {loading ? "Scanning" : "Refresh"}
+        </button>
+      </div>
+
+      {error ? <p className="cloudflare-message cloudflare-message--error">{error}</p> : null}
+      {snapshot?.errors?.length ? (
+        <div className="cloudflare-message" role="status">
+          {snapshot.errors.slice(0, 3).map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="cloudflare-stats-grid system-stats-grid">
+        <CloudflareStatCard
+          label="Daemons"
+          value={formatCount(runningDaemons.length)}
+          meta={`${formatCount(daemons.length)} loaded`}
+        />
+        <CloudflareStatCard
+          label="Servers"
+          value={formatCount(servers.length)}
+          meta="listening processes"
+        />
+        <CloudflareStatCard
+          label="Open Ports"
+          value={formatCount(ports.length)}
+          meta="listening TCP sockets"
+        />
+      </div>
+
+      <div className="system-panel-grid">
+        <section className="cloudflare-panel-card system-panel-card">
+          <div className="cloudflare-panel-card__header">
+            <h3>Servers Up</h3>
+            <span>{formatCount(servers.length)}</span>
+          </div>
+          <div className="cloudflare-resource-list system-scroll-list">
+            {servers.length ? (
+              servers.slice(0, 18).map((server) => (
+                <SystemResourceRow
+                  key={`${server.pid}:${server.command}`}
+                  icon="cloud"
+                  title={server.command}
+                  meta={`PID ${server.pid} · ports ${server.ports.map((port) => port.port).join(", ")}`}
+                  href={server.urls[0]}
+                  stopping={stoppingKey === `server:${server.pid}`}
+                  onStop={() => onStop("server", server.pid, server.command)}
+                  status={<CloudflareStatusPill>{formatCount(server.ports.length)}</CloudflareStatusPill>}
+                />
+              ))
+            ) : (
+              <CloudflareEmpty>No listening servers found.</CloudflareEmpty>
+            )}
+          </div>
+        </section>
+
+        <section className="cloudflare-panel-card system-panel-card">
+          <div className="cloudflare-panel-card__header">
+            <h3>Open Ports</h3>
+            <span>{formatCount(ports.length)}</span>
+          </div>
+          <div className="cloudflare-resource-list system-scroll-list">
+            {ports.length ? (
+              ports.slice(0, 32).map((port) => (
+                <SystemResourceRow
+                  key={`${port.pid}:${port.address}:${port.port}`}
+                  icon="phosphor:terminal-window"
+                  title={`${port.address}:${port.port}`}
+                  meta={`${port.command} · PID ${port.pid}`}
+                  href={port.url}
+                  status={<CloudflareStatusPill>TCP</CloudflareStatusPill>}
+                />
+              ))
+            ) : (
+              <CloudflareEmpty>No listening TCP ports found.</CloudflareEmpty>
+            )}
+          </div>
+        </section>
+
+        <section className="cloudflare-panel-card system-panel-card">
+          <div className="cloudflare-panel-card__header">
+            <h3>Daemons Running</h3>
+            <span>{formatCount(runningDaemons.length)}</span>
+          </div>
+          <div className="cloudflare-resource-list system-scroll-list">
+            {daemons.length ? (
+              daemons.slice(0, 40).map((daemon) => (
+                <SystemResourceRow
+                  key={`${daemon.label}:${daemon.pid ?? "loaded"}`}
+                  icon="lucide:zap"
+                  title={daemon.label}
+                  meta={daemon.pid === null ? `loaded · status ${daemon.status ?? "unknown"}` : `PID ${daemon.pid} · status ${daemon.status ?? "unknown"}`}
+                  stopping={daemon.pid !== null && stoppingKey === `daemon:${daemon.pid}`}
+                  onStop={
+                    daemon.pid === null
+                      ? undefined
+                      : () => onStop("daemon", daemon.pid, daemon.label)
+                  }
+                  status={
+                    <CloudflareStatusPill tone={daemon.state === "running" ? "ok" : "neutral"}>
+                      {daemon.state}
+                    </CloudflareStatusPill>
+                  }
+                />
+              ))
+            ) : (
+              <CloudflareEmpty>No launchd jobs returned.</CloudflareEmpty>
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function NewTabWorkspace() {
   const { tabs, history, clearHistory, toggleKeepActive } = useBrowserShortcuts();
+  const { settings } = useSettings();
+  const [primaryTab, setPrimaryTab] = useState<NewTabPrimaryTab>("cloudflare");
   const [apps, setApps] = useState<WorkspaceApp[]>(() => WORKSPACE_APPS);
   const [quickLinks, setQuickLinks] = useState<QuickLink[]>(() =>
     DEFAULT_QUICK_LINKS.slice(),
   );
+  const [cloudflareConfig, setCloudflareConfig] = useState<CloudflareConfig>(
+    DEFAULT_CLOUDFLARE_CONFIG,
+  );
+  const cloudflareAuthRef = useRef<CloudflareAuth | null>(null);
+  const [cloudflareAuthKind, setCloudflareAuthKind] = useState<CloudflareAuth["kind"] | null>(null);
+  const [cloudflareAuthVersion, setCloudflareAuthVersion] = useState(0);
+  const [cloudflareSecretStatus, setCloudflareSecretStatus] = useState<string | null>(null);
+  const [loadingCloudflareSecrets, setLoadingCloudflareSecrets] = useState(false);
+  const cloudflareSecretRequestedRef = useRef(false);
+  const [systemSnapshot, setSystemSnapshot] = useState<SystemSnapshot | null>(null);
+  const [systemSnapshotLoading, setSystemSnapshotLoading] = useState(false);
+  const [systemSnapshotError, setSystemSnapshotError] = useState<string | null>(null);
+  const [systemStopKey, setSystemStopKey] = useState<string | null>(null);
+  const systemSnapshotRequestedRef = useRef(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [editingApp, setEditingApp] = useState<WorkspaceApp | null>(null);
+  const nativeHost = useNativeHost({
+    onDopplerRpcResult: (msg) => {
+      if (msg.type !== "doppler.secrets.download") return;
+      setLoadingCloudflareSecrets(false);
+      if (!msg.ok) {
+        setCloudflareSecretStatus(`Doppler: ${msg.error || "failed to load secrets"}`);
+        return;
+      }
+
+      const secrets = msg.secrets || {};
+      const apiToken = pickSecretValue(secrets, CLOUDFLARE_TOKEN_SECRET_NAMES);
+      const globalKey = pickSecretValue(secrets, CLOUDFLARE_GLOBAL_KEY_SECRET_NAMES);
+      const email = pickSecretValue(secrets, CLOUDFLARE_EMAIL_SECRET_NAMES);
+      const accountId = pickSecretValue(secrets, CLOUDFLARE_ACCOUNT_SECRET_NAMES);
+      const zoneId = pickSecretValue(secrets, CLOUDFLARE_ZONE_SECRET_NAMES);
+
+      if (globalKey && email) {
+        cloudflareAuthRef.current = { kind: "global-key", key: globalKey, email };
+        setCloudflareAuthKind("global-key");
+        setCloudflareAuthVersion((version) => version + 1);
+      } else if (apiToken) {
+        cloudflareAuthRef.current = { kind: "token", token: apiToken };
+        setCloudflareAuthKind("token");
+        setCloudflareAuthVersion((version) => version + 1);
+      }
+      if (accountId || zoneId) {
+        persistCloudflareConfig({
+          accountId: accountId || cloudflareConfig.accountId,
+          zoneId: zoneId || cloudflareConfig.zoneId,
+        });
+      }
+      setCloudflareSecretStatus(
+        globalKey && email
+          ? `Doppler loaded global key${accountId || zoneId ? `, ${[
+              accountId ? "account" : null,
+              zoneId ? "zone" : null,
+            ]
+              .filter(Boolean)
+              .join(", ")}` : ""}.`
+          : apiToken
+          ? `Doppler loaded ${[
+              "token",
+              accountId ? "account" : null,
+              zoneId ? "zone" : null,
+            ]
+              .filter(Boolean)
+              .join(", ")}.`
+          : globalKey && !email
+            ? "Doppler: Cloudflare API key found, but email secret is missing."
+            : "Doppler: Cloudflare credentials not found.",
+      );
+    },
+    onError: (error) => {
+      if (loadingCloudflareSecrets) {
+        setLoadingCloudflareSecrets(false);
+        setCloudflareSecretStatus(error);
+      }
+      if (systemSnapshotLoading) {
+        setSystemSnapshotLoading(false);
+        setSystemSnapshotError(error);
+      }
+      if (systemStopKey) {
+        setSystemStopKey(null);
+        setSystemSnapshotError(error);
+      }
+    },
+    onSystemSnapshot: (msg) => {
+      setSystemSnapshotLoading(false);
+      if (!msg.ok || !msg.snapshot) {
+        setSystemSnapshotError(msg.error || "System snapshot failed.");
+        return;
+      }
+      setSystemSnapshot(msg.snapshot);
+      setSystemSnapshotError(null);
+    },
+    onSystemStop: (msg) => {
+      setSystemStopKey(null);
+      if (!msg.ok) {
+        setSystemSnapshotError(msg.error || "Could not stop process.");
+        return;
+      }
+      if (msg.snapshot) setSystemSnapshot(msg.snapshot);
+      setSystemSnapshotError(null);
+    },
+  });
 
   useEffect(() => {
     let live = true;
     try {
+      const newtabStorageKeys = [...WORKSPACE_APP_STORAGE_KEYS, QUICK_LINKS_STORAGE_KEY];
       chrome.storage.local.get(
-        [...WORKSPACE_APP_STORAGE_KEYS, QUICK_LINKS_STORAGE_KEY],
+        [
+          ...newtabStorageKeys,
+          CLOUDFLARE_CONFIG_STORAGE_KEY,
+        ],
         (result) => {
           if (!live) return;
           const customs = sanitizeCustomApps(result?.[CUSTOM_APPS_STORAGE_KEY]);
@@ -1895,6 +3350,9 @@ function NewTabWorkspace() {
             setApps(withIconOverrides);
           }
           setQuickLinks(sanitizeQuickLinks(result?.[QUICK_LINKS_STORAGE_KEY]));
+          setCloudflareConfig(
+            sanitizeCloudflareConfig(result?.[CLOUDFLARE_CONFIG_STORAGE_KEY]),
+          );
         },
       );
     } catch {
@@ -1913,6 +3371,83 @@ function NewTabWorkspace() {
       /* ignore */
     }
   };
+
+  const persistCloudflareConfig = (next: CloudflareConfig) => {
+    setCloudflareConfig(next);
+    try {
+      chrome.storage.local.set({ [CLOUDFLARE_CONFIG_STORAGE_KEY]: next });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const loadCloudflareSecrets = () => {
+    if (!nativeHost.connected) {
+      setCloudflareSecretStatus("Native host is not connected.");
+      return;
+    }
+    setLoadingCloudflareSecrets(true);
+    setCloudflareSecretStatus("Loading Cloudflare secrets from Doppler...");
+    const sent = nativeHost.dopplerSecretsDownload({
+      project: settings?.dopplerProject.trim() || undefined,
+      config: settings?.dopplerConfig.trim() || undefined,
+      scope: settings?.dopplerScope.trim() || "/",
+      secrets: CLOUDFLARE_SECRET_NAMES,
+      silent: true,
+    });
+    if (!sent) {
+      setLoadingCloudflareSecrets(false);
+      setCloudflareSecretStatus("Native host bridge is not connected.");
+    }
+  };
+
+  useEffect(() => {
+    if (cloudflareSecretRequestedRef.current) return;
+    if (!nativeHost.connected || !settings) return;
+    cloudflareSecretRequestedRef.current = true;
+    loadCloudflareSecrets();
+  }, [nativeHost.connected, settings]);
+
+  const loadSystemSnapshot = () => {
+    if (!nativeHost.connected) {
+      setSystemSnapshotError("Native host is not connected.");
+      return;
+    }
+    setSystemSnapshotLoading(true);
+    setSystemSnapshotError(null);
+    const sent = nativeHost.systemSnapshot();
+    if (!sent) {
+      setSystemSnapshotLoading(false);
+      setSystemSnapshotError("Native host bridge is not connected.");
+    }
+  };
+
+  const stopSystemTarget = (target: SystemStopTarget, pid: number, label: string) => {
+    const noun = target === "daemon" ? "daemon" : "server";
+    const name = label || `PID ${pid}`;
+    if (!window.confirm(`Stop ${noun} "${name}"?\n\nThis sends SIGTERM to PID ${pid}.`)) {
+      return;
+    }
+    if (!nativeHost.connected) {
+      setSystemSnapshotError("Native host is not connected.");
+      return;
+    }
+    setSystemStopKey(`${target}:${pid}`);
+    setSystemSnapshotError(null);
+    const sent = nativeHost.systemStop(target, pid, label);
+    if (!sent) {
+      setSystemStopKey(null);
+      setSystemSnapshotError("Native host bridge is not connected.");
+    }
+  };
+
+  useEffect(() => {
+    if (primaryTab !== "system") return;
+    if (systemSnapshotRequestedRef.current || systemSnapshot) return;
+    if (!nativeHost.connected) return;
+    systemSnapshotRequestedRef.current = true;
+    loadSystemSnapshot();
+  }, [primaryTab, nativeHost.connected, systemSnapshot]);
 
   const persistOrder = (next: WorkspaceApp[]) => {
     setApps(next);
@@ -2107,67 +3642,110 @@ function NewTabWorkspace() {
         <BraveSearchForm />
         <QuickLinks links={quickLinks} onChange={persistQuickLinks} />
 
-        <header className="newtab-workspace__header">
-          <span className="newtab-workspace__count">{apps.length} links</span>
-        </header>
+        <SegmentedTabs<NewTabPrimaryTab>
+          tabs={CLOUDFLARE_PRIMARY_TABS}
+          active={primaryTab}
+          onChange={setPrimaryTab}
+          ariaLabel="New tab sections"
+        />
 
-        <section className="newtab-app-groups" aria-label="Workspace apps">
-          <div
-            className="newtab-app-grid newtab-app-grid--workspace"
-            aria-label="Workspace apps"
-          >
-            {apps.map((app, i) => (
-              <AppCard
-                key={app.url}
-                app={app}
-                drag={makeDrag(i)}
-                onEdit={setEditingApp}
-                onRemove={removeApp}
-              />
-            ))}
-            <button
-              type="button"
-              className="workspace-app-card workspace-app-card--add"
-              onClick={addCustomApp}
-              aria-label="Add new link"
-            >
-              <span className="workspace-app-card__mark" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  className="workspace-app-card__icon"
-                  aria-hidden="true"
+        {primaryTab === "cloudflare" ? (
+          <CloudflareDashboard
+            config={cloudflareConfig}
+            authFingerprint={
+              cloudflareAuthKind
+                ? `${cloudflareAuthKind}:${cloudflareAuthVersion}`
+                : ""
+            }
+            authKind={cloudflareAuthKind}
+            dopplerConnected={nativeHost.connected}
+            loadingSecrets={loadingCloudflareSecrets}
+            secretStatus={cloudflareSecretStatus}
+            getAuth={() => cloudflareAuthRef.current}
+            onLoadSecrets={loadCloudflareSecrets}
+            onConfigChange={persistCloudflareConfig}
+          />
+        ) : null}
+
+        {primaryTab === "system" ? (
+          <SystemDashboard
+            connected={nativeHost.connected}
+            error={systemSnapshotError}
+            loading={systemSnapshotLoading}
+            snapshot={systemSnapshot}
+            stoppingKey={systemStopKey}
+            onRefresh={loadSystemSnapshot}
+            onStop={stopSystemTarget}
+          />
+        ) : null}
+
+        {primaryTab === "workspace" ? (
+          <>
+            <header className="newtab-workspace__header">
+              <span className="newtab-workspace__count">{apps.length} links</span>
+            </header>
+
+            <section className="newtab-app-groups" aria-label="Workspace apps">
+              <div
+                className="newtab-app-grid newtab-app-grid--workspace"
+                aria-label="Workspace apps"
+              >
+                {apps.map((app, i) => (
+                  <AppCard
+                    key={app.url}
+                    app={app}
+                    drag={makeDrag(i)}
+                    onEdit={setEditingApp}
+                    onRemove={removeApp}
+                  />
+                ))}
+                <button
+                  type="button"
+                  className="workspace-app-card workspace-app-card--add"
+                  onClick={addCustomApp}
+                  aria-label="Add new link"
                 >
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </span>
-              <span className="workspace-app-card__body">
-                <span className="workspace-app-card__name">Add link</span>
-              </span>
-            </button>
-          </div>
-        </section>
+                  <span className="workspace-app-card__mark" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      className="workspace-app-card__icon"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </span>
+                  <span className="workspace-app-card__body">
+                    <span className="workspace-app-card__name">Add link</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+          </>
+        ) : null}
 
-        <section className="newtab-panels" aria-label="Browser shortcuts">
-          <BrowserPanel
-            title="Open Tabs"
-            emptyText="No open web tabs."
-            items={tabs}
-            onToggleKeepActive={toggleKeepActive}
-          />
-          <BrowserPanel
-            title="History"
-            emptyText="No history yet."
-            items={history}
-            scroll
-            onClear={clearHistory}
-            clearLabel="Clear all"
-            clearConfirm="Delete all browser history? This cannot be undone."
-          />
-        </section>
+        {primaryTab === "browser" ? (
+          <section className="newtab-panels" aria-label="Browser shortcuts">
+            <BrowserPanel
+              title="Open Tabs"
+              emptyText="No open web tabs."
+              items={tabs}
+              onToggleKeepActive={toggleKeepActive}
+            />
+            <BrowserPanel
+              title="History"
+              emptyText="No history yet."
+              items={history}
+              scroll
+              onClear={clearHistory}
+              clearLabel="Clear all"
+              clearConfirm="Delete all browser history? This cannot be undone."
+            />
+          </section>
+        ) : null}
       </main>
       {editingApp ? (
         <EditAppModal

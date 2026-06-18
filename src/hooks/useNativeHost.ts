@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { CLIBackend, DopplerStatus, MCPStatus, NativeHostResponse } from "../types"
+import type { CLIBackend, DopplerStatus, MCPStatus, NativeHostResponse, SystemSnapshot, SystemStopTarget } from "../types"
 
 interface UseNativeHostOptions {
   onStdout?: (data: string, pid: number, backend?: CLIBackend) => void
@@ -20,6 +20,21 @@ interface UseNativeHostOptions {
     defaults?: { project: string; config: string; scope?: string }
     secrets?: Record<string, string>
     silent?: boolean
+  }) => void
+  onSystemSnapshot?: (msg: {
+    type: "system.snapshot"
+    ok: boolean
+    snapshot?: SystemSnapshot
+    error?: string
+  }) => void
+  onSystemStop?: (msg: {
+    type: "system.stop"
+    ok: boolean
+    pid?: number
+    label?: string
+    target?: SystemStopTarget
+    snapshot?: SystemSnapshot
+    error?: string
   }) => void
   onPtyData?: (sessionId: string, data: string) => void
   onPtyExit?: (sessionId: string, exitCode: number, signal?: number) => void
@@ -45,6 +60,11 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
   optsRef.current = opts
 
   useEffect(() => {
+    if (typeof chrome === "undefined" || !chrome.runtime?.connect) {
+      setConnected(false)
+      return
+    }
+
     const port = chrome.runtime.connect({ name: "ai-dev-sidebar" })
     portRef.current = port
 
@@ -115,6 +135,10 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
           ptype === "doppler.secrets.download"
         ) {
           optsRef.current.onDopplerRpcResult?.(payload as any)
+        } else if (ptype === "system.snapshot") {
+          optsRef.current.onSystemSnapshot?.(payload as any)
+        } else if (ptype === "system.stop") {
+          optsRef.current.onSystemStop?.(payload as any)
         }
 
         // mcp responses come back with type "mcp" — payload.data is JSON
@@ -296,6 +320,11 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     ) => send({ type: "doppler.secrets.download", ...(opts || {}) }),
     [send]
   )
+  const systemSnapshot = useCallback(() => send({ type: "system.snapshot" }), [send])
+  const systemStop = useCallback(
+    (target: SystemStopTarget, pid: number, label?: string) => send({ type: "system.stop", target, pid, label }),
+    [send]
+  )
 
   return {
     connected,
@@ -321,6 +350,8 @@ export function useNativeHost(opts: UseNativeHostOptions = {}) {
     dopplerStatus,
     dopplerLogin,
     dopplerSetDefaults,
-    dopplerSecretsDownload
+    dopplerSecretsDownload,
+    systemSnapshot,
+    systemStop
   }
 }

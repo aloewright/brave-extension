@@ -57,21 +57,61 @@ export interface ScrapeResult {
 }
 
 export interface NativeHostMessage {
-  type: "exec" | "exec-oneshot" | "exec-raw" | "stream" | "kill" | "cwd" | "config" | "mcp" | "reset-backend" | "session-status"
+  type: "exec" | "exec-oneshot" | "exec-raw" | "stream" | "kill" | "cwd" | "config" | "mcp" | "reset-backend" | "session-status" | "system.snapshot" | "system.stop"
   command?: string
   args?: string[]
   cwd?: string
   pid?: number
+  label?: string
+  target?: SystemStopTarget
   backend?: CLIBackend
   data?: any
 }
 
 export interface NativeHostResponse {
-  type: "stdout" | "stderr" | "exit" | "error" | "cwd" | "config" | "mcp" | "session-started" | "session-ended" | "session-reset" | "session-status"
+  type: "stdout" | "stderr" | "exit" | "error" | "cwd" | "config" | "mcp" | "session-started" | "session-ended" | "session-reset" | "session-status" | "system.snapshot" | "system.stop"
   data: string
   pid?: number
   code?: number
   backend?: CLIBackend
+  ok?: boolean
+  snapshot?: SystemSnapshot
+  error?: string
+  label?: string
+  target?: SystemStopTarget
+}
+
+export type SystemStopTarget = "server" | "daemon"
+
+export interface SystemPortInfo {
+  pid: number
+  command: string
+  address: string
+  port: number
+  protocol: "tcp"
+  url?: string
+}
+
+export interface SystemServerInfo {
+  pid: number
+  command: string
+  ports: SystemPortInfo[]
+  urls: string[]
+}
+
+export interface SystemDaemonInfo {
+  pid: number | null
+  status: number | null
+  label: string
+  state: "running" | "loaded"
+}
+
+export interface SystemSnapshot {
+  collectedAt: string
+  ports: SystemPortInfo[]
+  servers: SystemServerInfo[]
+  daemons: SystemDaemonInfo[]
+  errors?: string[]
 }
 
 import type { CaptureSaveLocation } from "./lib/capture-destination"
@@ -209,6 +249,11 @@ export interface Settings {
   ttsModel: TtsModel
   ttsVoice: TtsVoice
   ttsCartesiaVoiceId: string
+  // Kokoro (mlx-audio) runs as a local server reachable directly from this
+  // machine; its voice + base URL are kept independent of the Worker-routed
+  // models above. See offscreen.tsx for why Kokoro bypasses /api/tts.
+  ttsKokoroVoice: string
+  ttsKokoroBaseUrl: string
   ttsPlaybackRate: number
   /** @deprecated since Phase 5 — kept for one release while users migrate. */
   cloudosSyncEnabled: boolean
@@ -253,7 +298,7 @@ export interface Settings {
 }
 
 export type TtsVoice = "hyperion" | "thalia" | "andromeda" | "helena" | "apollo"
-export type TtsModel = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic"
+export type TtsModel = "frontier-aura" | "dynamic-audio-gen" | "cartesia-sonic" | "kokoro-m4"
 export type PasswordManagerProvider = "proton-pass" | "none" | "nodewarden-self-hosted"
 export type SignalBridgeRuntime = "auto" | "podman" | "docker" | "disabled"
 export type SignalLastStatus =
@@ -322,6 +367,8 @@ export const DEFAULT_SETTINGS: Settings = {
   ttsModel: "frontier-aura",
   ttsVoice: "hyperion",
   ttsCartesiaVoiceId: "694f9389-aac1-45b6-b726-9d9369183238",
+  ttsKokoroVoice: "af_heart",
+  ttsKokoroBaseUrl: "http://100.64.125.66:8082",
   ttsPlaybackRate: 1,
   cloudosSyncEnabled: false,
   cloudosNotesUrl: "https://notes.pdx.software/api/notes",

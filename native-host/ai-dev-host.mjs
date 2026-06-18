@@ -624,6 +624,221 @@ function runCommand(backend, prompt, cwd) {
   sendMessage({ type: "started", pid, data: "", backend })
 }
 
+function runInspectionCommand(command, args, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" }
+    })
+    let stdout = ""
+    let stderr = ""
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM")
+      finish({ ok: false, stdout, stderr: stderr || `${command} timed out` })
+    }, timeoutMs)
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString()
+    })
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString()
+    })
+    proc.on("error", (err) => {
+      finish({ ok: false, stdout, stderr: err.message })
+    })
+    proc.on("close", (code) => {
+      finish({ ok: code === 0 || stdout.length > 0, stdout, stderr, code })
+    })
+  })
+}
+
+function urlForListeningPort(address, port) {
+  const cleanAddress = String(address || "").replace(/^\[|\]$/g, "")
+  if (!cleanAddress || cleanAddress === "*" || cleanAddress === "0.0.0.0" || cleanAddress === "::") {
+    return `http://127.0.0.1:${port}`
+  }
+  if (cleanAddress.includes(":")) return `http://[${cleanAddress}]:${port}`
+  return `http://${cleanAddress}:${port}`
+}
+
+function parseLsofName(name) {
+  const trimmed = String(name || "").trim()
+  const portMatch = trimmed.match(/:(\d+)(?:\s|$)/)
+  if (!portMatch) return null
+  const port = Number(portMatch[1])
+  if (!Number.isInteger(port) || port <= 0) return null
+  const address = trimmed.slice(0, trimmed.lastIndexOf(`:${port}`)) || "*"
+  return { address, port }
+}
+
+function parseListeningPorts(lsofOutput) {
+  const ports = []
+  const seen = new Set()
+  let current = { pid: 0, command: "" }
+
+  for (const rawLine of String(lsofOutput || "").split(/\r?\n/)) {
+    if (!rawLine) continue
+    const field = rawLine[0]
+    const value = rawLine.slice(1)
+    if (field === "p") {
+      current = { pid: Number(value) || 0, command: "" }
+    } else if (field === "c") {
+      current.command = value
+    } else if (field === "n") {
+      const parsed = parseLsofName(value)
+      if (!parsed || !current.pid) continue
+      const key = `${current.pid}:${parsed.address}:${parsed.port}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      ports.push({
+        pid: current.pid,
+        command: current.command || "unknown",
+        address: parsed.address,
+        port: parsed.port,
+        protocol: "tcp",
+        url: urlForListeningPort(parsed.address, parsed.port)
+      })
+    }
+  }
+
+  return ports.sort((a, b) => a.port - b.port || a.command.localeCompare(b.command))
+}
+
+function groupListeningServers(ports) {
+  const grouped = new Map()
+  for (const port of ports) {
+    const key = `${port.pid}:${port.command}`
+    const entry = grouped.get(key) || {
+      pid: port.pid,
+      command: port.command,
+      ports: [],
+      urls: []
+    }
+    entry.ports.push(port)
+    if (port.url && !entry.urls.includes(port.url)) entry.urls.push(port.url)
+    grouped.set(key, entry)
+  }
+  return [...grouped.values()].sort(
+    (a, b) => a.ports[0].port - b.ports[0].port || a.command.localeCompare(b.command)
+  )
+}
+
+function parseLaunchctlDaemons(output) {
+  return String(output || "")
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return null
+      const parts = trimmed.split(/\s+/)
+      if (parts.length < 3) return null
+      const [pidText, statusText, ...labelParts] = parts
+      const pid = /^\d+$/.test(pidText) ? Number(pidText) : null
+      const status = /^-?\d+$/.test(statusText) ? Number(statusText) : null
+      const label = labelParts.join(" ")
+      if (!label) return null
+      return {
+        pid,
+        status,
+        label,
+        state: pid === null ? "loaded" : "running"
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.state !== b.state) return a.state === "running" ? -1 : 1
+      return a.label.localeCompare(b.label)
+    })
+}
+
+async function buildSystemSnapshot() {
+  const errors = []
+  const [lsofResult, launchctlResult] = await Promise.all([
+    runInspectionCommand("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]),
+    process.platform === "darwin"
+      ? runInspectionCommand("launchctl", ["list"])
+      : Promise.resolve({ ok: true, stdout: "", stderr: "" })
+  ])
+
+  if (!lsofResult.ok && lsofResult.stderr) errors.push(`lsof: ${lsofResult.stderr.trim()}`)
+  if (!launchctlResult.ok && launchctlResult.stderr) errors.push(`launchctl: ${launchctlResult.stderr.trim()}`)
+
+  const ports = parseListeningPorts(lsofResult.stdout)
+  return {
+    collectedAt: new Date().toISOString(),
+    ports,
+    servers: groupListeningServers(ports),
+    daemons: parseLaunchctlDaemons(launchctlResult.stdout),
+    errors
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function stopSystemTarget(msg) {
+  const pid = Number(msg.pid)
+  const target = msg.target === "daemon" ? "daemon" : "server"
+  const label = typeof msg.label === "string" ? msg.label : ""
+
+  if (!Number.isInteger(pid) || pid <= 1) {
+    return {
+      type: "system.stop",
+      ok: false,
+      target,
+      pid: Number.isFinite(pid) ? pid : undefined,
+      label,
+      error: "A valid running process PID is required.",
+      data: ""
+    }
+  }
+
+  if (pid === process.pid || pid === process.ppid) {
+    return {
+      type: "system.stop",
+      ok: false,
+      target,
+      pid,
+      label,
+      error: "Refusing to stop the native host or browser process.",
+      data: ""
+    }
+  }
+
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch (err) {
+    return {
+      type: "system.stop",
+      ok: false,
+      target,
+      pid,
+      label,
+      error: err.message || `Could not stop PID ${pid}.`,
+      data: ""
+    }
+  }
+
+  await delay(500)
+  return {
+    type: "system.stop",
+    ok: true,
+    target,
+    pid,
+    label,
+    snapshot: await buildSystemSnapshot(),
+    data: ""
+  }
+}
+
 async function main() {
   while (true) {
     const msg = await readMessage()
@@ -684,6 +899,20 @@ async function main() {
 
       case "session-status": {
         sendMessage({ type: "session-status", data: JSON.stringify(hasSession) })
+        break
+      }
+
+      case "system.snapshot": {
+        try {
+          sendMessage({ type: "system.snapshot", ok: true, snapshot: await buildSystemSnapshot(), data: "" })
+        } catch (err) {
+          sendMessage({ type: "system.snapshot", ok: false, error: err.message, data: "" })
+        }
+        break
+      }
+
+      case "system.stop": {
+        sendMessage(await stopSystemTarget(msg))
         break
       }
 
