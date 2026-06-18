@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
+  // React's index.js loads the production bundle when process.env.NODE_ENV is
+  // 'production', which strips act() and breaks component tests. Force the
+  // development bundle so act() is available in happy-dom tests.
+  define: {
+    "process.env.NODE_ENV": JSON.stringify("development"),
+  },
   test: {
     environment: "happy-dom",
     globals: true,
