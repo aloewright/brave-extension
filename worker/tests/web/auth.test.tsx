@@ -26,6 +26,21 @@ function mockFetch401() {
   ))
 }
 
+function mockFetchSequence(...statuses: number[]) {
+  vi.stubGlobal("fetch", vi.fn(async () => {
+    const status = statuses.shift() ?? 401
+    return new Response(
+      status === 200
+        ? JSON.stringify({ conversations: [] })
+        : JSON.stringify({ error: { code: "unauthorized", message: "bad" } }),
+      {
+        status,
+        headers: { "content-type": "application/json" }
+      }
+    )
+  }))
+}
+
 describe("TokenGate", () => {
   beforeEach(() => {
     localStorage.clear()
@@ -37,16 +52,17 @@ describe("TokenGate", () => {
     localStorage.clear()
   })
 
-  it("renders the login form when no token is stored", () => {
+  it("renders the login form when no token is stored", async () => {
+    mockFetch401()
     render(<TokenGate><Inside /></TokenGate>)
-    expect(screen.getByPlaceholderText("paste token")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByPlaceholderText("paste token")).toBeInTheDocument())
     expect(screen.queryByTestId("token")).toBeNull()
   })
 
   it("accepts a valid token, stores it, and reveals the children", async () => {
-    mockFetchSuccess()
+    mockFetchSequence(401, 200)
     render(<TokenGate><Inside /></TokenGate>)
-    fireEvent.change(screen.getByPlaceholderText("paste token"), { target: { value: "abc" } })
+    fireEvent.change(await screen.findByPlaceholderText("paste token"), { target: { value: "abc" } })
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }))
     await waitFor(() => expect(screen.getByTestId("token")).toHaveTextContent("abc"))
     expect(readStoredToken()).toBe("abc")
@@ -55,10 +71,17 @@ describe("TokenGate", () => {
   it("surfaces a friendly message on 401 and keeps the form rendered", async () => {
     mockFetch401()
     render(<TokenGate><Inside /></TokenGate>)
-    fireEvent.change(screen.getByPlaceholderText("paste token"), { target: { value: "bad" } })
+    fireEvent.change(await screen.findByPlaceholderText("paste token"), { target: { value: "bad" } })
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }))
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/isn't accepted/))
     expect(screen.queryByTestId("token")).toBeNull()
+    expect(readStoredToken()).toBe("")
+  })
+
+  it("reveals children when the same-origin OAuth cookie authenticates", async () => {
+    mockFetchSuccess()
+    render(<TokenGate><Inside /></TokenGate>)
+    await waitFor(() => expect(screen.getByTestId("token")).toHaveTextContent(""))
     expect(readStoredToken()).toBe("")
   })
 

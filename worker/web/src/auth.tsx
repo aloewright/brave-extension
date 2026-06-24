@@ -36,19 +36,57 @@ export function storeToken(token: string): void {
 
 export function TokenGate({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string>(() => readStoredToken())
+  const [cookieAuthed, setCookieAuthed] = useState(false)
+  const [cookieProbeDone, setCookieProbeDone] = useState(false)
+  const oauthError = new URL(window.location.href).searchParams.get("oauth_error")
 
   const signOut = useCallback(() => {
     storeToken("")
     setToken("")
+    setCookieAuthed(false)
+    void fetch("/auth/fly/logout", { redirect: "manual" })
   }, [])
 
   const client = useMemo(() => createApiClient(token), [token])
 
   const value = useMemo<AuthContextValue>(() => ({ token, client, signOut }), [token, client, signOut])
 
-  if (!token) {
+  useEffect(() => {
+    if (token) {
+      setCookieProbeDone(true)
+      return
+    }
+    let cancelled = false
+    async function probeCookie() {
+      try {
+        await createApiClient("").conversations.list({ limit: 1 })
+        if (cancelled) return
+        setCookieAuthed(true)
+        if (oauthError) window.history.replaceState({}, "", "/")
+      } catch {
+        if (!cancelled) setCookieAuthed(false)
+      } finally {
+        if (!cancelled) setCookieProbeDone(true)
+      }
+    }
+    void probeCookie()
+    return () => {
+      cancelled = true
+    }
+  }, [oauthError, token])
+
+  if (!token && !cookieProbeDone) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-sm text-muted">
+        Checking session…
+      </div>
+    )
+  }
+
+  if (!token && !cookieAuthed) {
     return (
       <LoginForm
+        oauthError={oauthError}
         onSubmit={(t) => {
           storeToken(t)
           setToken(t)
@@ -60,7 +98,13 @@ export function TokenGate({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
+function LoginForm({
+  oauthError,
+  onSubmit
+}: {
+  oauthError: string | null
+  onSubmit: (token: string) => void
+}) {
   const [value, setValue] = useState("")
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,17 +132,34 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
     }
   }
 
+  async function loginWithFly() {
+    setError(null)
+    window.location.assign("/auth/fly/start")
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm flex flex-col gap-4">
         <h1 className="text-xl font-semibold">txt.fly.pm</h1>
         <p className="text-sm text-muted">
-          Enter your <code className="font-mono text-fg">X-Sidebar-Token</code> to continue.
+          Sign in with fly.pm or enter your <code className="font-mono text-fg">X-Sidebar-Token</code>.
         </p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={loginWithFly}
+          className="rounded bg-accent px-3 py-2 text-bg font-medium disabled:opacity-50"
+        >
+          Continue with fly.pm
+        </button>
+        <div className="flex items-center gap-3 text-xs text-muted">
+          <span className="h-px flex-1 bg-fg/15" />
+          <span>or</span>
+          <span className="h-px flex-1 bg-fg/15" />
+        </div>
         <input
           type="password"
           aria-label="X-Sidebar-Token"
-          autoFocus
           autoComplete="current-password"
           spellCheck={false}
           value={value}
@@ -109,11 +170,11 @@ function LoginForm({ onSubmit }: { onSubmit: (token: string) => void }) {
         <button
           type="submit"
           disabled={pending || !value.trim()}
-          className="rounded bg-accent px-3 py-2 text-bg font-medium disabled:opacity-50"
+          className="rounded border border-fg/20 px-3 py-2 text-fg font-medium disabled:opacity-50"
         >
           {pending ? "Checking…" : "Sign in"}
         </button>
-        {error && <div className="text-sm text-red-400" role="alert">{error}</div>}
+        {(error || oauthError) && <div className="text-sm text-red-400" role="alert">{error || oauthError}</div>}
       </form>
     </div>
   )

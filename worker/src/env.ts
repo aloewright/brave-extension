@@ -17,6 +17,8 @@ export interface Env {
   /** AI Gateway auth token for protected provider-native Gateway fetches. */
   AI_GATEWAY_TOKEN?: string
   CF_AIG_TOKEN?: string
+  FLY_OAUTH_ISSUER?: string
+  FLY_OAUTH_CLIENT_ID?: string
 }
 
 // Workers AI model ids used by the Worker.
