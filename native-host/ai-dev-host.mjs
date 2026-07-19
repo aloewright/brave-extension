@@ -22,7 +22,7 @@ import { MCPServer } from "./mcp-server.mjs"
 import { mirrorStart, mirrorChunk, mirrorFinish } from "./recorder-mirror.mjs"
 import { prepareNodePtyForGatekeeper, scrubSwiftToolchain } from "./installer.mjs"
 import { backupInstalledExtension, listExtensionBackups } from "./extension-backup.mjs"
-import { SignalBridgeManager } from "./signal-bridge.mjs"
+import { SignalBridgeManager, SignalCliJsonRpcAdapter } from "./signal-bridge.mjs"
 
 const __hostDir = dirname(fileURLToPath(import.meta.url))
 if (process.platform === "darwin") {
@@ -32,6 +32,8 @@ if (process.platform === "darwin") {
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
 const signalBridge = new SignalBridgeManager({
+  adapter: new SignalCliJsonRpcAdapter(),
+  runtime: { kind: "signal-cli", container: "launch-agent" },
   eventSink: (event) => sendMessage(event)
 })
 
@@ -201,8 +203,12 @@ function ensureStdinListener() {
       }
     }
   })
-  // If stdin closes, the extension disconnected — exit gracefully.
-  process.stdin.on("end", () => process.exit(0))
+  // If stdin closes, the extension disconnected. Stop child processes before
+  // exiting so signal-cli cannot retain the profile lock across host reloads.
+  process.stdin.on("end", () => {
+    signalBridge.dispose()
+    process.exit(0)
+  })
 }
 
 function readMessage() {
