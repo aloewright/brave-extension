@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import QRCode from "qrcode";
 import { cx, LeoBadge, LeoButton, LeoIcon } from "../../components/leo";
 import {
   isSignalNativeResponse,
@@ -103,7 +104,7 @@ function normalizeStatus(value: Partial<SignalBridgeStatus> | undefined): Signal
 function statusDetailForState(state: SignalBridgeState): string {
   switch (state) {
     case "missing-runtime":
-      return "Install the supported container runtime before linking.";
+      return "Install signal-cli before linking this device.";
     case "unlinked":
       return "No Signal device is linked to this local bridge.";
     case "locked":
@@ -343,6 +344,7 @@ export function SignalSection() {
   const [composer, setComposer] = useState("");
   const [busy, setBusy] = useState<BusyAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const handleSignalResponse = useCallback((payload: SignalNativeResponse) => {
     if ("ok" in payload && payload.ok === false) {
@@ -523,6 +525,38 @@ export function SignalSection() {
   }, [bridgeError]);
 
   useEffect(() => {
+    let active = true;
+    if (!linkSession?.linkUri) {
+      setQrDataUrl(null);
+      return () => {
+        active = false;
+      };
+    }
+    void QRCode.toDataURL(linkSession.linkUri, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 280,
+      color: { dark: "#111111", light: "#ffffff" },
+    })
+      .then((value) => {
+        if (active) setQrDataUrl(value);
+      })
+      .catch((error) => {
+        if (active) {
+          setQrDataUrl(null);
+          setNotice(
+            error instanceof Error
+              ? `Could not render Signal QR code: ${error.message}`
+              : "Could not render Signal QR code.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [linkSession?.linkUri]);
+
+  useEffect(() => {
     if (!selectedConversationId) return;
     sendNative(
       { type: "signal.messages.list", conversationId: selectedConversationId },
@@ -612,7 +646,7 @@ export function SignalSection() {
               <div className="flex min-w-0 items-center gap-2">
                 <LeoIcon name="shield" size={16} className="shrink-0 text-primary" />
                 <span className="truncate text-sm font-semibold text-fg">
-                  Hardened local device
+                  Local Signal device
                 </span>
               </div>
               <p className="mt-1 text-[11px] leading-5 text-fg/50">
@@ -640,11 +674,9 @@ export function SignalSection() {
             className="mt-3 rounded border border-warning/25 bg-warning/10 px-2 py-2 text-[11px] leading-5 text-fg/60"
             data-testid="signal-security-note"
           >
-            Signal is linked as a local device. Account keys, decrypted messages,
-            attachments, and send operations stay inside the native bridge and
-            its encrypted container profile; this tab keeps conversation content
-            in memory only and does not sync it to extension storage, cloud APIs,
-            AI features, or content scripts.
+            Signal is linked through the local signal-cli profile. This tab keeps
+            conversation content in memory only and does not sync it to extension
+            storage, cloud APIs, AI features, or content scripts.
           </p>
         </div>
 
@@ -678,9 +710,16 @@ export function SignalSection() {
             <div className="mt-3 rounded border border-dashed border-border bg-bg/35 p-3">
               {linkSession ? (
                 <div className="space-y-2">
-                  <div className="flex min-h-28 items-center justify-center rounded border border-border bg-bg/50 px-3 py-4 text-center text-[11px] leading-5 text-fg/45">
-                    QR placeholder for the linked-device URI. Scan from Signal
-                    mobile once the native bridge supplies rendered QR data.
+                  <div className="flex min-h-28 items-center justify-center rounded border border-border bg-white p-3 text-center text-[11px] leading-5 text-black/60">
+                    {qrDataUrl ? (
+                      <img
+                        src={qrDataUrl}
+                        alt="Signal linked-device QR code"
+                        className="h-auto w-full max-w-56"
+                      />
+                    ) : (
+                      "Rendering Signal linked-device QR code…"
+                    )}
                   </div>
                   <input
                     readOnly
@@ -710,6 +749,9 @@ export function SignalSection() {
                       Finish link
                     </LeoButton>
                   </div>
+                  <p className="text-[10px] leading-4 text-fg/45">
+                    On your phone, open Signal → Settings → Linked devices → Link new device, then scan this code. Do not open the URI as a web page.
+                  </p>
                 </div>
               ) : (
                 <p className="text-[11px] leading-5 text-fg/45">

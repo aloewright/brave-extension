@@ -1,9 +1,35 @@
 import { describe, expect, it } from "vitest"
+import { EventEmitter } from "node:events"
+import { PassThrough } from "node:stream"
 import {
   FakeSignalJsonRpcAdapter,
+  SignalCliJsonRpcAdapter,
   SignalBridgeManager,
   normalizeSignalMessage
 } from "../native-host/signal-bridge.mjs"
+
+function signalCliProcess(responses: Record<string, unknown>) {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: { write: (line: string) => boolean }
+    stdout: PassThrough
+    exitCode: number | null
+  }
+  child.stdout = new PassThrough()
+  child.exitCode = null
+  child.stdin = {
+    write(line: string) {
+      const request = JSON.parse(line)
+      queueMicrotask(() => {
+        child.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: responses[request.method] })}\n`
+        )
+      })
+      return true
+    }
+  }
+  queueMicrotask(() => child.emit("spawn"))
+  return child
+}
 
 function expectNoSecretLeak(value: unknown) {
   const json = JSON.stringify(value)
@@ -12,6 +38,68 @@ function expectNoSecretLeak(value: unknown) {
 }
 
 describe("SignalBridgeManager", () => {
+  it("writes JSON-RPC requests directly to a socket transport", async () => {
+    const adapter = new SignalCliJsonRpcAdapter({
+      prepareCommandImpl: () => {},
+      useLaunchAgent: false
+    })
+    adapter.process = {
+      destroyed: false,
+      write(line: string) {
+        const request = JSON.parse(line)
+        queueMicrotask(() => {
+          adapter.handleStdout(`${JSON.stringify({ id: request.id, result: { pong: true } })}\n`)
+        })
+      }
+    }
+
+    await expect(adapter.rpc("ping")).resolves.toEqual({ pong: true })
+  })
+
+  it("uses signal-cli JSON-RPC to create a real linked-device URI", async () => {
+    const linkUri = "sgnl://linkdevice?uuid=real-link&pub_key=real-public-key"
+    const adapter = new SignalCliJsonRpcAdapter({
+      dataDir: "/tmp/test-signal-cli-profile",
+      prepareCommandImpl: () => {},
+      useLaunchAgent: false,
+      execFileImpl: (_command: string, _args: string[], _options: unknown, callback: Function) => {
+        queueMicrotask(() => callback(null, JSON.stringify([{ number: "+15555550123" }]), ""))
+      },
+      spawnImpl: () => signalCliProcess({
+        startLink: { deviceLinkUri: linkUri },
+        finishLink: { deviceLinkUri: linkUri },
+      })
+    })
+    const manager = new SignalBridgeManager({ adapter, seedFakeConversation: false })
+
+    const start = await manager.handleMessage({
+      type: "signal.link.start",
+      requestId: "real-start",
+      deviceName: "Brave Dev Sidebar"
+    })
+    expect(start.ok).toBe(true)
+    expect(start.link.linkUri).toBe(linkUri)
+    expect(start.link.linkUri).not.toContain("fake-local-bridge")
+
+    const finish = await manager.handleMessage({
+      type: "signal.link.finish",
+      requestId: "real-finish",
+      deviceName: "Brave Dev Sidebar"
+    })
+    expect(finish.ok).toBe(true)
+    expect(finish.status.state).toBe("linked")
+    expect(finish.status.account.identifier).toBe("+15555550123")
+
+    const restartedManager = new SignalBridgeManager({ adapter, seedFakeConversation: false })
+    const restored = await restartedManager.handleMessage({
+      type: "signal.status",
+      requestId: "real-status"
+    })
+    expect(restored.ok).toBe(true)
+    expect(restored.status.state).toBe("linked")
+    expect(restored.status.account.identifier).toBe("+15555550123")
+  })
+
   it("reports fake-runtime status with hardened container metadata", async () => {
     const manager = new SignalBridgeManager({ homeDir: "/tmp/test-home" })
 

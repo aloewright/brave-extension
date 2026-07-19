@@ -93,9 +93,11 @@ describe("Signal section UI contract", () => {
     expect(signalSource).toContain('data-testid="signal-message-list"');
     expect(signalSource).toContain('data-testid="signal-composer"');
     expect(signalSource).toContain("Local linked-device bridge");
-    expect(signalSource).toContain("encrypted container profile");
+    expect(signalSource).toContain("local signal-cli profile");
     expect(signalSource).toContain("content scripts");
-    expect(signalSource).toContain("QR placeholder");
+    expect(signalSource).toContain('import QRCode from "qrcode"');
+    expect(signalSource).toContain("Signal linked-device QR code");
+    expect(signalSource).toContain("Do not open the URI as a web page");
     expect(signalSource).toContain("Historical messages may not be available");
   });
 
