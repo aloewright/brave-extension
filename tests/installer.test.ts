@@ -42,6 +42,19 @@ import {
 } from "../native-host/installer.mjs"
 
 describe("installer pure helpers", () => {
+  it("installs the browser-executable host wrapper outside the source checkout", () => {
+    const source = readFileSync(
+      join(process.cwd(), "scripts", "install-native-host.mjs"),
+      "utf8"
+    )
+
+    expect(source).toContain('join(homedir(), ".ai-dev-sidebar")')
+    expect(source).toContain('join(wrapperDir, "ai-dev-host.sh")')
+    expect(source).not.toContain(
+      'resolve(join(__dirname, "..", "native-host", "ai-dev-host.sh"))'
+    )
+  })
+
   describe("mergeMcpEntry / removeMcpEntry", () => {
     it("merges into empty config", () => {
       const out = mergeMcpEntry({}, buildClaudeEntry(8473))

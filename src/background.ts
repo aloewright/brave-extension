@@ -594,8 +594,17 @@ function untrackActivePtySession(sessionId: string) {
   reconcileTerminalKeepAlive();
 }
 
-function connectNativeHost() {
+function connectNativeHost({ force = false }: { force?: boolean } = {}) {
   if (nativePort) return nativePort;
+  // A user-initiated request is stronger evidence than the retry timer. If a
+  // PTY/chat action arrives while a delayed reconnect is pending, try now
+  // instead of returning null and manufacturing a "host not connected"
+  // error. This also lets an already-installed host recover immediately after
+  // Brave has retained failure state from an earlier missing/stale manifest.
+  if (force && reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   // Backoff gate: while a scheduled retry is pending, every external caller
   // (offscreen keepalive ping, sendToNative, NATIVE_STATUS, etc.) would
   // otherwise create a parallel port that immediately disconnects — the
@@ -607,6 +616,7 @@ function connectNativeHost() {
   // matches the heartbeat alarm period, so heartbeat-initiated retries
   // pass through and reset the failure streak.
   if (
+    !force &&
     reconnectFailures > RECONNECT_MAX_FAILURES &&
     Date.now() - lastDisconnectAt < 30_000
   ) {
@@ -764,7 +774,10 @@ function sendNativeFailureToSidebars(msg: any, error: string) {
 }
 
 function sendToNative(msg: any) {
-  const port = connectNativeHost();
+  // This path is reached only for an explicit sidebar request. It must bypass
+  // background heartbeat backoff so clicking "Open Terminal" performs a real
+  // connection attempt rather than immediately returning a synthetic error.
+  const port = connectNativeHost({ force: true });
   if (port && postToNative(port, msg)) return;
   sendNativeFailureToSidebars(
     msg,

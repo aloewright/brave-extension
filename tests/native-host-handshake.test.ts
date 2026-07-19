@@ -59,6 +59,23 @@ describe("native host sidepanel handshake", () => {
     expect(terminalSource).toContain("pendingData");
   });
 
+  it("lets interactive native requests bypass a pending background reconnect", () => {
+    const backgroundSource = readFileSync(
+      join(process.cwd(), "src/background.ts"),
+      "utf8",
+    );
+
+    expect(backgroundSource).toContain(
+      "function connectNativeHost({ force = false }",
+    );
+    expect(backgroundSource).toContain(
+      "if (force && reconnectTimer !== null)",
+    );
+    expect(backgroundSource).toContain(
+      "const port = connectNativeHost({ force: true });",
+    );
+  });
+
   it("waits for MCP startup before reporting status from the native host", () => {
     const hostSource = readFileSync(
       join(process.cwd(), "native-host/ai-dev-host.mjs"),
