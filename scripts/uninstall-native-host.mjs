@@ -5,7 +5,7 @@
  *   node scripts/uninstall-native-host.mjs [--purge-recordings]
  *
  * - Removes native messaging manifests from all browser dirs.
- * - Removes ~/.config/ai-dev-sidebar/{mcp-token,env,claude}.
+ * - Removes ~/.config/ai-dev-sidebar/{mcp-token,env,claude,native-host}.
  * - Strips ai-dev-sidebar from ~/.claude.json (preserves siblings).
  * - Removes the marker-guarded PATH block from ~/.zshrc / ~/.bashrc.
  * - Optionally removes ~/.config/ai-dev-sidebar/recordings/ with --purge-recordings.
@@ -21,7 +21,8 @@ import {
   setTerminalPath,
   removeTokenAndEnv,
   unregisterClaudeJson,
-  configDir
+  configDir,
+  removeNativeHostLauncher
 } from "../native-host/installer.mjs"
 
 const purgeRecordings = process.argv.includes("--purge-recordings")
@@ -57,6 +58,13 @@ for (const d of manifestDirs) {
 // Token + env
 removeTokenAndEnv()
 console.log(`✓ Removed token + env from ~/.config/ai-dev-sidebar`)
+
+const nativeHostLauncher = removeNativeHostLauncher()
+if (nativeHostLauncher.error) {
+  console.warn(`⚠  Could not remove ${nativeHostLauncher.path}: ${nativeHostLauncher.error}`)
+} else {
+  console.log(`${nativeHostLauncher.changed ? "✓" : "·"} ${nativeHostLauncher.path}`)
+}
 
 // ~/.claude.json entry
 try {

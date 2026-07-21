@@ -27,7 +27,6 @@ import { SignalBridgeManager } from "./signal-bridge.mjs"
 const __hostDir = dirname(fileURLToPath(import.meta.url))
 if (process.platform === "darwin") {
   prepareNodePtyForGatekeeper(__hostDir)
-  scrubSwiftToolchain({ nativeHostDir: __hostDir })
 }
 
 const ptyManager = new PTYManager((msg) => sendMessage(msg))
