@@ -50,7 +50,7 @@ describe("installer pure helpers", () => {
   describe("mergeMcpEntry / removeMcpEntry", () => {
     it("merges into empty config", () => {
       const out = mergeMcpEntry({}, buildClaudeEntry(8473))
-      expect(out.mcpServers["ai-dev-sidebar"]).toEqual({
+      expect(out.mcpServers["Brave Extension MCP"]).toEqual({
         type: "sse",
         url: "http://127.0.0.1:8473/sse",
         headers: { Authorization: "Bearer ${AI_DEV_MCP_TOKEN}" }
@@ -65,7 +65,23 @@ describe("installer pure helpers", () => {
       const out = mergeMcpEntry(existing, buildClaudeEntry(8473))
       expect(out.someTopKey).toBe("x")
       expect(out.mcpServers.other).toEqual({ type: "stdio", command: "foo" })
-      expect(out.mcpServers["ai-dev-sidebar"]).toBeDefined()
+      expect(out.mcpServers["Brave Extension MCP"]).toBeDefined()
+    })
+
+    it("migrates the legacy ai-dev-sidebar title to Brave Extension MCP", () => {
+      const existing = {
+        mcpServers: {
+          keep: { command: "x" },
+          "ai-dev-sidebar": buildClaudeEntry(8473)
+        }
+      }
+      const out = mergeMcpEntry(existing, buildClaudeEntry(8473))
+      // Legacy key gone, new title present, unrelated siblings untouched.
+      expect(out.mcpServers["ai-dev-sidebar"]).toBeUndefined()
+      expect(out.mcpServers["Brave Extension MCP"]).toBeDefined()
+      expect(out.mcpServers.keep).toEqual({ command: "x" })
+      // Input is not mutated.
+      expect(existing.mcpServers["ai-dev-sidebar"]).toBeDefined()
     })
 
     it("does not mutate input on merge", () => {
@@ -192,7 +208,7 @@ describe("installer fs helpers (sandboxed home)", () => {
     expect(isRegistered(fakeHome)).toBe(true)
     const cfg1 = JSON.parse(readFileSync(claudeJsonPath(fakeHome), "utf-8"))
     expect(cfg1.mcpServers.other).toBeDefined()
-    expect(cfg1.mcpServers["ai-dev-sidebar"].url).toContain(":8473/sse")
+    expect(cfg1.mcpServers["Brave Extension MCP"].url).toContain(":8473/sse")
     expect(cfg1.top).toBe(1)
 
     unregisterClaudeJson(fakeHome)
@@ -216,12 +232,12 @@ describe("installer fs helpers (sandboxed home)", () => {
     expect(isRegistered(fakeHome)).toBe(false)
     const cfg = JSON.parse(readFileSync(resolved, "utf-8"))
     expect(cfg.mcpServers.sibling).toEqual({ command: "node" })
-    expect(cfg.mcpServers["ai-dev-sidebar"].url).toContain(":8474/sse")
+    expect(cfg.mcpServers["Brave Extension MCP"].url).toContain(":8474/sse")
 
     unregisterClaudeJson(fakeHome, customConfig)
     const removed = JSON.parse(readFileSync(resolved, "utf-8"))
     expect(removed.mcpServers.sibling).toEqual({ command: "node" })
-    expect(removed.mcpServers["ai-dev-sidebar"]).toBeUndefined()
+    expect(removed.mcpServers["Brave Extension MCP"]).toBeUndefined()
   })
 
   it("re-running register is idempotent", () => {

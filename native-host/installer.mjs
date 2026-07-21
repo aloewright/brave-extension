@@ -12,14 +12,19 @@
  *   - Toggling terminal-path on/off is a clean round-trip.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from "fs"
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, chmodSync, unlinkSync, renameSync } from "fs"
 import { homedir } from "os"
 import { join, dirname, resolve as resolvePath } from "path"
 import { randomBytes } from "crypto"
 import { spawnSync as defaultSpawnSync } from "child_process"
 
 export const HOST_NAME = "com.aidev.sidebar"
-export const MCP_SERVER_ID = "ai-dev-sidebar"
+// User-facing title of the MCP server as it appears in ~/.claude.json and the
+// `claude` `/mcp` list. Renamed to the universal "Brave Extension MCP" brand;
+// LEGACY_MCP_SERVER_IDS are migrated away on the next register/unregister so a
+// stale duplicate never lingers alongside the new title.
+export const MCP_SERVER_ID = "Brave Extension MCP"
+export const LEGACY_MCP_SERVER_IDS = ["ai-dev-sidebar"]
 export const RC_MARKER_BEGIN = "# >>> ai-dev-sidebar terminal path >>>"
 export const RC_MARKER_END = "# <<< ai-dev-sidebar terminal path <<<"
 
@@ -72,6 +77,10 @@ export function buildClaudeEntry(port) {
 export function mergeMcpEntry(existing, ourEntry, id = MCP_SERVER_ID) {
   const cfg = existing && typeof existing === "object" ? { ...existing } : {}
   cfg.mcpServers = { ...(cfg.mcpServers || {}) }
+  // Migrate off any legacy title so the server never appears twice in /mcp.
+  for (const legacy of LEGACY_MCP_SERVER_IDS) {
+    if (legacy !== id) delete cfg.mcpServers[legacy]
+  }
   cfg.mcpServers[id] = ourEntry
   return cfg
 }
@@ -86,6 +95,8 @@ export function removeMcpEntry(existing, id = MCP_SERVER_ID) {
   if (!cfg.mcpServers || typeof cfg.mcpServers !== "object") return cfg
   const next = { ...cfg.mcpServers }
   delete next[id]
+  // Also purge any legacy title left over from before the rename.
+  for (const legacy of LEGACY_MCP_SERVER_IDS) delete next[legacy]
   if (Object.keys(next).length === 0) {
     delete cfg.mcpServers
   } else {
@@ -392,16 +403,42 @@ export function generateToken() {
   return randomBytes(32).toString("hex")
 }
 
+/**
+ * Write `dest` atomically: write a sibling temp file then rename over the
+ * target. rename(2) is atomic on the same filesystem, so a client sourcing the
+ * env file (or reading the token) never observes a half-written value during a
+ * host restart or token rotation.
+ */
+function atomicWrite(dest, contents, mode) {
+  const tmp = `${dest}.tmp-${process.pid}`
+  writeFileSync(tmp, contents, { mode })
+  try { chmodSync(tmp, mode) } catch {}
+  renameSync(tmp, dest)
+}
+
 export function writeTokenAndEnv(token, port, home = homedir()) {
   ensureDir(configDir(home))
-  writeFileSync(tokenPath(home), token, { mode: 0o600 })
-  try { chmodSync(tokenPath(home), 0o600) } catch {}
-  writeFileSync(
+  atomicWrite(tokenPath(home), token, 0o600)
+  atomicWrite(
     envPath(home),
     `AI_DEV_MCP_URL=http://127.0.0.1:${port}\nAI_DEV_MCP_TOKEN=${token}\n`,
-    { mode: 0o600 }
+    0o600
   )
-  try { chmodSync(envPath(home), 0o600) } catch {}
+}
+
+/**
+ * Read the bearer token currently on disk — the exact value clients receive via
+ * the env file. The live MCP server accepts this in addition to its in-memory
+ * token so a brief restart/rotation overlap can't 401 an already-issued token.
+ * Returns null if the file is missing/unreadable.
+ */
+export function readCurrentToken(home = homedir()) {
+  try {
+    const t = readFileSync(tokenPath(home), "utf-8").trim()
+    return t || null
+  } catch {
+    return null
+  }
 }
 
 export function removeTokenAndEnv(home = homedir()) {
@@ -409,6 +446,50 @@ export function removeTokenAndEnv(home = homedir()) {
     if (existsSync(p)) {
       try { unlinkSync(p) } catch {}
     }
+  }
+}
+
+// ── Single-instance lock ─────────────────────────────────────────────────
+//
+// The browser can spawn more than one native host. Without coordination, a
+// second instance that lands on a non-canonical port used to clobber the shared
+// env file / ~/.claude.json to point at itself, then die — leaving the live
+// canonical instance holding a token nobody had. The lock records which pid
+// owns the shared state so a second instance defers instead of clobbering.
+
+export function lockPath(home = homedir()) {
+  return join(configDir(home), "host.lock")
+}
+
+export function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    // Signal 0 performs error checking without delivering a signal.
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM means the process exists but is owned by another user.
+    return err && err.code === "EPERM"
+  }
+}
+
+export function readHostLock(home = homedir()) {
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath(home), "utf-8"))
+    if (parsed && typeof parsed.pid === "number") return parsed
+  } catch {}
+  return null
+}
+
+export function writeHostLock(pid, port, home = homedir()) {
+  ensureDir(configDir(home))
+  atomicWrite(lockPath(home), JSON.stringify({ pid, port }), 0o600)
+}
+
+export function removeHostLock(home = homedir()) {
+  const p = lockPath(home)
+  if (existsSync(p)) {
+    try { unlinkSync(p) } catch {}
   }
 }
 

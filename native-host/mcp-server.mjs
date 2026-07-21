@@ -28,7 +28,13 @@ import {
   writeTokenAndEnv,
   generateToken,
   hasTerminalPath,
-  setTerminalPath as installerSetTerminalPath
+  setTerminalPath as installerSetTerminalPath,
+  readCurrentToken,
+  readHostLock,
+  writeHostLock,
+  removeHostLock,
+  isPidAlive,
+  MCP_SERVER_ID
 } from "./installer.mjs"
 import { DOM_TOOL_DEFS, buildReferenceTools } from "./tool-defs/dom-tools.mjs"
 import { LIBRARY_TOOL_DEFS } from "./tool-defs/library-tools.mjs"
@@ -116,9 +122,28 @@ export class MCPServer {
       throw new Error("MCP server: no free port in 8473..8483")
     }
 
-    writeTokenAndEnv(this.token, this.port)
-    this._registerWithClaudeJson()
-    this.log(`[mcp] listening on http://127.0.0.1:${this.port} (token rotated ${nowIso()})`)
+    // Only one instance owns the shared state (~/.config/ai-dev-sidebar/{env,
+    // mcp-token} and ~/.claude.json). We claim it when we hold the canonical
+    // port, or when no other live instance currently owns it. A duplicate that
+    // fell through to a non-canonical port defers instead — so it can never
+    // repoint the env file / claude.json at itself and then die, which is what
+    // stranded the live server with a token nobody had.
+    const canonicalPort = PORT_RANGE[0]
+    const lock = readHostLock()
+    const liveOwner = lock && lock.pid !== process.pid && isPidAlive(lock.pid)
+    if (this.port === canonicalPort || !liveOwner) {
+      writeTokenAndEnv(this.token, this.port)
+      this._registerWithClaudeJson()
+      writeHostLock(process.pid, this.port)
+      this._ownsSharedState = true
+      this.log(`[mcp] listening on http://127.0.0.1:${this.port} (token rotated ${nowIso()})`)
+    } else {
+      this._ownsSharedState = false
+      this.log(
+        `[mcp] listening on http://127.0.0.1:${this.port}; deferring shared-state ` +
+        `write to live owner pid ${lock.pid} on :${lock.port}`
+      )
+    }
   }
 
   // ── Public APIs for host RPCs ─────────────────────────────────────────
@@ -209,6 +234,12 @@ export class MCPServer {
     this.sseClients.clear()
     this.httpServer?.close()
     this.httpServer = null
+    // Release the lock only if we still hold it — never clobber a newer owner's.
+    if (this._ownsSharedState) {
+      const lock = readHostLock()
+      if (lock && lock.pid === process.pid) removeHostLock()
+      this._ownsSharedState = false
+    }
   }
 
   ptyEnv() {
@@ -225,7 +256,7 @@ export class MCPServer {
     // placeholder is intentional — Claude expands env refs at connect time.
     try {
       installerRegister(this.port, undefined, configPath)
-      this.log(`[mcp] registered ai-dev-sidebar in ${configPath}`)
+      this.log(`[mcp] registered ${MCP_SERVER_ID} in ${configPath}`)
     } catch (err) {
       this.log(`[mcp] WARN: cannot write ${configPath}: ${err.message}`)
     }
@@ -235,7 +266,17 @@ export class MCPServer {
   _authOk(req) {
     const hdr = req.headers["authorization"] || ""
     const prefix = "Bearer "
-    return hdr.startsWith(prefix) && hdr.slice(prefix.length) === this.token
+    if (!hdr.startsWith(prefix)) return false
+    const presented = hdr.slice(prefix.length)
+    if (!presented) return false
+    if (presented === this.token) return true
+    // Defense-in-depth: also accept the token currently on disk — the exact
+    // value clients read from the shared env file. This only costs a read when
+    // the in-memory token didn't match (drift / restart / rotation overlap),
+    // never on the hot path. rotateToken() rewrites the file too, so a rotated-
+    // out token still matches neither and is correctly rejected.
+    const disk = readCurrentToken()
+    return !!disk && presented === disk
   }
 
   _onRequest(req, res) {
