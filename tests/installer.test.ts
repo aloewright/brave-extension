@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "fs"
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "fs"
+import { spawnSync } from "child_process"
 import { tmpdir } from "os"
-import { join } from "path"
+import { join, resolve } from "path"
 import {
   mergeMcpEntry,
   removeMcpEntry,
@@ -9,6 +10,7 @@ import {
   removeRcBlock,
   buildClaudeEntry,
   buildWrapperScript,
+  buildNativeHostLauncherScript,
   RC_MARKER_BEGIN,
   RC_MARKER_END,
   applyRcBlock,
@@ -22,6 +24,9 @@ import {
   tokenPath,
   envPath,
   wrapperPath,
+  nativeHostLauncherPath,
+  writeNativeHostLauncher,
+  removeNativeHostLauncher,
   claudeJsonPath,
   resolveClaudeConfigPath,
   findNativeArtifacts,
@@ -45,7 +50,7 @@ describe("installer pure helpers", () => {
   describe("mergeMcpEntry / removeMcpEntry", () => {
     it("merges into empty config", () => {
       const out = mergeMcpEntry({}, buildClaudeEntry(8473))
-      expect(out.mcpServers["ai-dev-sidebar"]).toEqual({
+      expect(out.mcpServers["Brave Extension MCP"]).toEqual({
         type: "sse",
         url: "http://127.0.0.1:8473/sse",
         headers: { Authorization: "Bearer ${AI_DEV_MCP_TOKEN}" }
@@ -60,7 +65,23 @@ describe("installer pure helpers", () => {
       const out = mergeMcpEntry(existing, buildClaudeEntry(8473))
       expect(out.someTopKey).toBe("x")
       expect(out.mcpServers.other).toEqual({ type: "stdio", command: "foo" })
-      expect(out.mcpServers["ai-dev-sidebar"]).toBeDefined()
+      expect(out.mcpServers["Brave Extension MCP"]).toBeDefined()
+    })
+
+    it("migrates the legacy ai-dev-sidebar title to Brave Extension MCP", () => {
+      const existing = {
+        mcpServers: {
+          keep: { command: "x" },
+          "ai-dev-sidebar": buildClaudeEntry(8473)
+        }
+      }
+      const out = mergeMcpEntry(existing, buildClaudeEntry(8473))
+      // Legacy key gone, new title present, unrelated siblings untouched.
+      expect(out.mcpServers["ai-dev-sidebar"]).toBeUndefined()
+      expect(out.mcpServers["Brave Extension MCP"]).toBeDefined()
+      expect(out.mcpServers.keep).toEqual({ command: "x" })
+      // Input is not mutated.
+      expect(existing.mcpServers["ai-dev-sidebar"]).toBeDefined()
     })
 
     it("does not mutate input on merge", () => {
@@ -153,6 +174,21 @@ describe("installer pure helpers", () => {
       expect(script).toContain('[ "$p" = "$OUR_DIR" ] && continue')
     })
   })
+
+  describe("buildNativeHostLauncherScript", () => {
+    it("records Node and checkout paths without relying on browser PATH", () => {
+      const script = buildNativeHostLauncherScript(
+        "/opt/Node Runtime/bin/node",
+        "/Users/test/Brave Extension/native-host/ai-dev-host.mjs"
+      )
+      expect(script).toMatch(/^#!\/bin\/bash/)
+      expect(script).toContain("HOST_DIR='/Users/test/Brave Extension/native-host'")
+      expect(script).toContain(
+        "exec '/opt/Node Runtime/bin/node' '/Users/test/Brave Extension/native-host/ai-dev-host.mjs' \"$@\""
+      )
+      expect(script).toContain("com.apple.quarantine")
+    })
+  })
 })
 
 describe("installer fs helpers (sandboxed home)", () => {
@@ -172,7 +208,7 @@ describe("installer fs helpers (sandboxed home)", () => {
     expect(isRegistered(fakeHome)).toBe(true)
     const cfg1 = JSON.parse(readFileSync(claudeJsonPath(fakeHome), "utf-8"))
     expect(cfg1.mcpServers.other).toBeDefined()
-    expect(cfg1.mcpServers["ai-dev-sidebar"].url).toContain(":8473/sse")
+    expect(cfg1.mcpServers["Brave Extension MCP"].url).toContain(":8473/sse")
     expect(cfg1.top).toBe(1)
 
     unregisterClaudeJson(fakeHome)
@@ -196,12 +232,12 @@ describe("installer fs helpers (sandboxed home)", () => {
     expect(isRegistered(fakeHome)).toBe(false)
     const cfg = JSON.parse(readFileSync(resolved, "utf-8"))
     expect(cfg.mcpServers.sibling).toEqual({ command: "node" })
-    expect(cfg.mcpServers["ai-dev-sidebar"].url).toContain(":8474/sse")
+    expect(cfg.mcpServers["Brave Extension MCP"].url).toContain(":8474/sse")
 
     unregisterClaudeJson(fakeHome, customConfig)
     const removed = JSON.parse(readFileSync(resolved, "utf-8"))
     expect(removed.mcpServers.sibling).toEqual({ command: "node" })
-    expect(removed.mcpServers["ai-dev-sidebar"]).toBeUndefined()
+    expect(removed.mcpServers["Brave Extension MCP"]).toBeUndefined()
   })
 
   it("re-running register is idempotent", () => {
@@ -263,6 +299,49 @@ describe("installer fs helpers (sandboxed home)", () => {
 
   it("removeTokenAndEnv is safe when files absent", () => {
     expect(() => removeTokenAndEnv(fakeHome)).not.toThrow()
+  })
+
+  it("native-host launcher install is idempotent and removable", () => {
+    const input = {
+      nodeBin: "/opt/homebrew/bin/node",
+      hostScript: "/repo/native-host/ai-dev-host.mjs",
+      home: fakeHome
+    }
+    const first = writeNativeHostLauncher(input)
+    expect(first).toEqual({ path: nativeHostLauncherPath(fakeHome), changed: true })
+    expect(readFileSync(first.path, "utf-8")).toContain("/repo/native-host/ai-dev-host.mjs")
+
+    const second = writeNativeHostLauncher(input)
+    expect(second).toEqual({ path: first.path, changed: false })
+
+    expect(removeNativeHostLauncher(fakeHome)).toEqual({ path: first.path, changed: true })
+    expect(existsSync(first.path)).toBe(false)
+    expect(removeNativeHostLauncher(fakeHome)).toEqual({ path: first.path, changed: false })
+  })
+
+  it("native-host launcher removal reports a real unlink failure", () => {
+    const path = nativeHostLauncherPath(fakeHome)
+    mkdirSync(path, { recursive: true })
+    const result = removeNativeHostLauncher(fakeHome)
+    expect(result.changed).toBe(false)
+    expect(result.error).toMatch(/(directory|permitted|denied)/i)
+    expect(existsSync(path)).toBe(true)
+  })
+
+  it("legacy launcher discovers a vite-plus Node runtime", () => {
+    const fakeNode = join(fakeHome, ".vite-plus/js_runtime/node/99.0.0/bin/node")
+    mkdirSync(join(fakeNode, ".."), { recursive: true })
+    writeFileSync(fakeNode, "#!/bin/bash\nprintf '%s\\n' \"$@\"\n")
+    chmodSync(fakeNode, 0o755)
+
+    const launcher = resolve(__dirname, "../native-host/ai-dev-host.sh")
+    const result = spawnSync(launcher, ["--probe"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: fakeHome, AI_DEV_SIDEBAR_NODE: "" }
+    })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain(resolve(__dirname, "../native-host/ai-dev-host.mjs"))
+    expect(result.stdout).toContain("--probe")
   })
 })
 
