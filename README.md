@@ -126,6 +126,10 @@ pnpm test:coverage  # vitest + v8 coverage (60% line / 50% branch floor)
 pnpm test:e2e       # playwright e2e suite
 ```
 
+`pnpm install-host` writes its machine-specific launcher to
+`~/.config/ai-dev-sidebar/native-host`. The launcher records the active Node
+binary and checkout path without modifying tracked repository files.
+
 ### macOS: "Apple could not verify '<name>' is free of malware" (ALO-472)
 
 `pnpm install`, `pnpm install-host`, `pnpm dev`, and `pnpm build` all strip

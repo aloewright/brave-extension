@@ -100,4 +100,32 @@ describe("MCP token rotation", () => {
     expect(readFileSync(tokenFile, "utf-8").trim()).toBe(server.token)
     expect(readFileSync(envFile, "utf-8")).toContain(server.token)
   })
+
+  it("records a host.lock owned by the current pid on start", () => {
+    if (!server) return
+    const lockFile = join(tmpHome, ".config", "ai-dev-sidebar", "host.lock")
+    expect(existsSync(lockFile)).toBe(true)
+    const lock = JSON.parse(readFileSync(lockFile, "utf-8"))
+    expect(lock.pid).toBe(process.pid)
+    expect(lock.port).toBe(server.port)
+  })
+
+  it("accepts the on-disk token even when the in-memory token drifts", async () => {
+    if (!server) return
+    // Simulate a restart/rotation overlap: the live process holds a stale
+    // in-memory token while the shared env/token file (what clients read) has
+    // the current one. Auth must still succeed against the on-disk token.
+    const diskToken = readFileSync(
+      join(tmpHome, ".config", "ai-dev-sidebar", "mcp-token"),
+      "utf-8"
+    ).trim()
+    const savedInMemory = server.token
+    server.token = "stale-in-memory-token-not-on-disk"
+    try {
+      expect(await healthz(server.port, diskToken)).toBe(200)
+      expect(await healthz(server.port, "totally-wrong")).toBe(401)
+    } finally {
+      server.token = savedInMemory
+    }
+  })
 })
