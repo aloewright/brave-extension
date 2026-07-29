@@ -43,6 +43,7 @@ import {
   NODE_PTY_GATEKEEPER_HINT,
   inspectNativeArtifact,
   browserPreferencePaths,
+  browserDataRoots,
   findExtensionIdInBrowserPreferences
 } from "../native-host/installer.mjs"
 
@@ -366,6 +367,21 @@ describe("browser extension ID discovery", () => {
     mkdirSync(profileDir, { recursive: true })
     writeFileSync(join(profileDir, "Secure Preferences"), "{}")
 
+    expect(browserPreferencePaths(fakeHome, "darwin")).toContain(join(profileDir, "Secure Preferences"))
+  })
+
+  it("covers non-stock Brave channels like Brave Origin", () => {
+    const braveSoftware = join(fakeHome, "Library", "Application Support", "BraveSoftware")
+    const originRoot = join(braveSoftware, "Brave-Origin")
+    const profileDir = join(originRoot, "Profile 1")
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(originRoot, "Local State"), "{}")
+    // Updater/crash dirs under BraveSoftware are not user-data roots.
+    mkdirSync(join(braveSoftware, "Brave-Browser-Updater"), { recursive: true })
+
+    const roots = browserDataRoots(fakeHome, "darwin")
+    expect(roots).toContain(originRoot)
+    expect(roots).not.toContain(join(braveSoftware, "Brave-Browser-Updater"))
     expect(browserPreferencePaths(fakeHome, "darwin")).toContain(join(profileDir, "Secure Preferences"))
   })
 

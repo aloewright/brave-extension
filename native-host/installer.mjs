@@ -506,21 +506,48 @@ function existingProfileDirs(root) {
   return [...dirs]
 }
 
+/**
+ * Chromium user-data roots to scan for the extension and install the native
+ * messaging manifest into. Every BraveSoftware/* subdir is a separate Brave
+ * channel (Brave-Browser, Brave-Origin, Brave-Origin-Beta,
+ * Brave-Browser-Development, …) with its own profiles and its own
+ * NativeMessagingHosts dir — a manifest installed under Brave-Browser is
+ * invisible to Brave Origin, which shows up as "Native host not connected".
+ * So enumerate the channels present instead of hardcoding one.
+ */
+export function browserDataRoots(home = homedir(), platform = process.platform) {
+  const braveParent =
+    platform === "darwin"
+      ? join(home, "Library", "Application Support", "BraveSoftware")
+      : join(home, ".config", "BraveSoftware")
+  // Always include stock Brave/Chrome/Chromium so a fresh machine still works.
+  const roots =
+    platform === "darwin"
+      ? [
+          join(braveParent, "Brave-Browser"),
+          join(home, "Library", "Application Support", "Google", "Chrome"),
+          join(home, "Library", "Application Support", "Chromium")
+        ]
+      : [
+          join(braveParent, "Brave-Browser"),
+          join(home, ".config", "google-chrome"),
+          join(home, ".config", "chromium")
+        ]
+  try {
+    for (const entry of readdirSync(braveParent, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const root = join(braveParent, entry.name)
+      // A user-data root, not an updater/crash dir.
+      if (existsSync(join(root, "Local State")) || existsSync(join(root, "Default"))) {
+        roots.push(root)
+      }
+    }
+  } catch {}
+  return [...new Set(roots)]
+}
+
 export function browserPreferencePaths(home = homedir(), platform = process.platform) {
-  const roots = []
-  if (platform === "darwin") {
-    roots.push(
-      join(home, "Library", "Application Support", "BraveSoftware", "Brave-Browser"),
-      join(home, "Library", "Application Support", "Google", "Chrome"),
-      join(home, "Library", "Application Support", "Chromium")
-    )
-  } else if (platform === "linux") {
-    roots.push(
-      join(home, ".config", "BraveSoftware", "Brave-Browser"),
-      join(home, ".config", "google-chrome"),
-      join(home, ".config", "chromium")
-    )
-  }
+  const roots = platform === "darwin" || platform === "linux" ? browserDataRoots(home, platform) : []
 
   const paths = []
   for (const root of roots) {

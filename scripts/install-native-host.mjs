@@ -25,7 +25,8 @@ import {
   envPath,
   scrubQuarantineAll,
   findExtensionIdInBrowserPreferences,
-  writeNativeHostLauncher
+  writeNativeHostLauncher,
+  browserDataRoots
 } from "../native-host/installer.mjs"
 
 const args = process.argv.slice(2)
@@ -91,14 +92,8 @@ if (detectedFrom) {
 
 const platform = process.platform
 const manifestDirs = []
-if (platform === "darwin") {
-  manifestDirs.push(
-    join(homedir(), "Library", "Application Support", "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
-    join(homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts"),
-    join(homedir(), "Library", "Application Support", "Chromium", "NativeMessagingHosts")
-  )
-} else if (platform === "linux") {
-  manifestDirs.push(join(homedir(), ".config", "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"))
+if (platform === "darwin" || platform === "linux") {
+  manifestDirs.push(...browserDataRoots().map((root) => join(root, "NativeMessagingHosts")))
 } else if (platform === "win32") {
   manifestDirs.push(join(homedir(), "AppData", "Local", "AiDevSidebar", "NativeMessagingHosts"))
 }
