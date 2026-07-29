@@ -90,21 +90,6 @@ describe("DNR rule registration is race-safe", () => {
     expect(calls[1].removeRuleIds).toContain(410_000)
   })
 
-  it("ensureCalTasksOriginRule serializes concurrent callers", async () => {
-    const { chromeStub, state, calls } = makeChromeMock()
-    ;(globalThis as { chrome?: unknown }).chrome = chromeStub
-
-    const mod = await import("../src/background/cal-tasks-origin")
-
-    await Promise.all([mod.ensureCalTasksOriginRule(), mod.ensureCalTasksOriginRule()])
-
-    const calRules = Array.from(state.values()).filter((r) => r.id === 411_000)
-    expect(calRules).toHaveLength(1)
-
-    expect(calls.length).toBe(2)
-    expect(calls[1].removeRuleIds).toContain(411_000)
-  })
-
   it("rejects a deliberate concurrent race when the lock is removed (sanity check)", async () => {
     // Drive the mock directly without the lock to confirm the mock reproduces
     // the real Chrome behaviour. If this test ever stops failing, the mock has

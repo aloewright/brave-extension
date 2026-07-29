@@ -12,10 +12,6 @@ const SIDEBAR_API_SECRET_NAMES = [
   "SIDEBAR_TOKEN",
   "SIDEBAR_SERVICE_TOKEN",
   "X_SIDEBAR_TOKEN",
-  "TASKS_API_TOKEN",
-  "TASKS_TOKEN",
-  "CAL_TASKS_API_TOKEN",
-  "CAL_TASKS_TOKEN",
   "AGENT_API_URL",
   "AGENT_URL",
   "AGENT_ACCESS_CLIENT_ID",
@@ -29,13 +25,6 @@ const SIDEBAR_TOKEN_SECRET_NAMES = [
   "SIDEBAR_TOKEN",
   "SIDEBAR_SERVICE_TOKEN",
   "X_SIDEBAR_TOKEN"
-]
-
-const TASKS_TOKEN_SECRET_NAMES = [
-  "TASKS_API_TOKEN",
-  "TASKS_TOKEN",
-  "CAL_TASKS_API_TOKEN",
-  "CAL_TASKS_TOKEN"
 ]
 
 const AGENT_API_URL_SECRET_NAMES = ["AGENT_API_URL", "AGENT_APIURL", "AGENT_URL"]
@@ -235,8 +224,6 @@ export function SettingsSection() {
           const secrets = msg.secrets || {}
           const sidebarApiUrl = pickSecretValue(secrets, ["SIDEBAR_API_URL"])
           const sidebarApiToken = pickSecretValue(secrets, SIDEBAR_TOKEN_SECRET_NAMES)
-          const tasksApiToken =
-            pickSecretValue(secrets, TASKS_TOKEN_SECRET_NAMES) || sidebarApiToken
           const agentApiUrl = pickSecretValue(secrets, AGENT_API_URL_SECRET_NAMES)
           const agentAccessClientId = pickSecretValue(secrets, AGENT_CLIENT_ID_SECRET_NAMES)
           const agentAccessClientSecret = pickSecretValue(
@@ -246,7 +233,6 @@ export function SettingsSection() {
           if (
             sidebarApiUrl ||
             sidebarApiToken ||
-            tasksApiToken ||
             agentApiUrl ||
             agentAccessClientId ||
             agentAccessClientSecret
@@ -254,7 +240,6 @@ export function SettingsSection() {
             update({
               ...(sidebarApiUrl ? { sidebarApiUrl } : {}),
               ...(sidebarApiToken ? { sidebarApiToken } : {}),
-              ...(tasksApiToken ? { tasksApiToken } : {}),
               ...(agentApiUrl ? { agentApiUrl } : {}),
               ...(agentAccessClientId ? { agentAccessClientId } : {}),
               ...(agentAccessClientSecret ? { agentAccessClientSecret } : {})
@@ -324,7 +309,7 @@ export function SettingsSection() {
   useEffect(() => {
     if (!settings || !nativeHost.connected || !dopplerStatus?.tokenSet) return
     const sidebarReady =
-      settings.sidebarApiUrl && settings.sidebarApiToken && settings.tasksApiToken
+      settings.sidebarApiUrl && settings.sidebarApiToken
     const agentReady = settings.agentAccessClientId && settings.agentAccessClientSecret
     if (sidebarReady && agentReady) return
     nativeHost.dopplerSecretsDownload({
@@ -346,7 +331,6 @@ export function SettingsSection() {
     settings?.agentAccessClientSecret,
     settings?.sidebarApiUrl,
     settings?.sidebarApiToken,
-    settings?.tasksApiToken,
     settings?.agentAccessClientId,
     settings?.agentAccessClientSecret,
     settings?.dopplerProject,

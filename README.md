@@ -17,6 +17,14 @@ Rolldown-Vite/Oxc build path for Brave and Chromium browsers.
 
 ## Extension Functionality
 
+> **Slim build.** This build ships without the Email (mail.fly.pm), Signal,
+> Tasks (cal.fly.pm), Passwords (go vault), and Contact Enrichment sections.
+> Their sidebar tabs, background handlers, content scripts, settings, and the
+> native-host Signal bridge are gone, and the storage keys they wrote are
+> purged on install/start. New tab saved URLs are untouched — the Quick Links
+> row still ships its email and tasks shortcuts, and edited links persist as
+> before.
+
 - **Sidebar rail:** persistent sections for Terminal, Inspector, Extensions,
   Library, Bookmarks, Data, Recorder, Eyedropper, GitHub, and Settings.
 - **GitHub refinements:** an opt-in **GitHub** section with a master switch and

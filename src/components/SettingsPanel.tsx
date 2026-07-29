@@ -6,19 +6,11 @@ import type {
   DopplerStatus,
   MCPServer,
   MCPStatus,
-  PasswordManagerProvider,
   TtsVoice,
   ThemeName,
 } from "../types";
 import type { ToolSourceState } from "../lib/agent-api";
 import { ping } from "../lib/joplin";
-import {
-  checkPasswordAppStatus,
-  getLegacyPasswordStorageState,
-  PASSWORD_STRATEGY,
-  purgeLegacyPasswordStorage,
-  type PasswordAppStatus,
-} from "../lib/password-strategy";
 import { normalizeRailSectionOrder } from "../lib/rail-order";
 import {
   APPEARANCE_COLOR_FIELDS,
@@ -306,13 +298,6 @@ export function SettingsPanel({
     "ok" | "fail" | null
   >(null);
   const [braveThemeStatus, setBraveThemeStatus] = useState<string | null>(null);
-  const [passwordCleanupStatus, setPasswordCleanupStatus] = useState<
-    string | null
-  >(null);
-  const [legacyPasswordKeys, setLegacyPasswordKeys] = useState<string[]>([]);
-  const [passwordAppStatus, setPasswordAppStatus] =
-    useState<PasswordAppStatus | null>(null);
-  const [passwordAppChecking, setPasswordAppChecking] = useState(false);
   const appearance = resolveAppearanceSettings(settings);
   const appearancePresets = Object.entries(APPEARANCE_PRESETS) as Array<
     [
@@ -366,89 +351,9 @@ export function SettingsPanel({
     );
   };
 
-  const refreshLegacyPasswordState = () => {
-    void getLegacyPasswordStorageState()
-      .then((state) => {
-        setLegacyPasswordKeys(
-          state.filter((entry) => entry.present).map((entry) => entry.key),
-        );
-      })
-      .catch(() => setLegacyPasswordKeys([]));
-  };
-
-  const purgePasswordCache = () => {
-    setPasswordCleanupStatus("Purging old password cache...");
-    void purgeLegacyPasswordStorage()
-      .then(() => {
-        setLegacyPasswordKeys([]);
-        setPasswordCleanupStatus("Legacy Nodewarden/password cache purged.");
-      })
-      .catch((err) => {
-        setPasswordCleanupStatus(
-          err instanceof Error ? err.message : "Password cache purge failed.",
-        );
-      });
-  };
-  const refreshPasswordAppStatus = () => {
-    const url = settings.passwordAppUrl.trim();
-    if (!url) return;
-
-    setPasswordAppChecking(true);
-    void checkPasswordAppStatus(url)
-      .then(setPasswordAppStatus)
-      .catch((error) => {
-        setPasswordAppStatus({
-          ok: false,
-          url,
-          checkedAt: new Date().toISOString(),
-          version: null,
-          jwtUnsafeReason: null,
-          registrationInviteRequired: null,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Password app status check failed.",
-        });
-      })
-      .finally(() => setPasswordAppChecking(false));
-  };
-  const passwordProvider = settings.passwordManagerProvider;
-  const passwordStrategyTitle =
-    passwordProvider === "none"
-      ? "Extension password features are off"
-      : passwordProvider === "nodewarden-self-hosted"
-        ? "go is the password vault"
-        : "Proton Pass is in charge";
-  const passwordStrategyDescription =
-    passwordProvider === "none"
-      ? "No extension password integration is active. Keep password management in your external manager."
-      : passwordProvider === "nodewarden-self-hosted"
-        ? "The extension opens go and checks health, while go owns login, encryption, imports, and backups."
-        : "The extension keeps Proton external: no local vault storage, no passive password autofill, no auto-submit.";
-  const passwordStrategyBadge =
-    passwordProvider === "nodewarden-self-hosted"
-      ? "Active"
-      : passwordProvider === "none"
-        ? "Off"
-        : "Active";
-  const passwordStrategyBadgeClass =
-    passwordProvider === "nodewarden-self-hosted"
-      ? "bg-success/15 text-success"
-      : passwordProvider === "none"
-        ? "bg-fg/10 text-fg/45"
-        : "bg-success/15 text-success";
-
   useEffect(() => {
     setLocalJoplinToken(settings.joplinToken ?? "");
   }, [settings.joplinToken]);
-
-  useEffect(() => {
-    refreshLegacyPasswordState();
-  }, []);
-
-  useEffect(() => {
-    setPasswordAppStatus(null);
-  }, [settings.passwordAppUrl]);
 
   useEffect(() => {
     if (nativeHost.connected) {
@@ -1033,248 +938,6 @@ export function SettingsPanel({
           </div>
         </SettingsAccordionSection>
 
-        {/* Password strategy */}
-        <SettingsAccordionSection
-          title="Password strategy"
-          meta={passwordStrategyBadge}
-        >
-          <div className="space-y-2">
-            <div className="rounded border border-success/20 bg-success/5 p-2">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-[11px] font-medium text-fg">
-                    {passwordStrategyTitle}
-                  </div>
-                  <div className="text-[9px] leading-snug text-fg/45">
-                    {passwordStrategyDescription}
-                  </div>
-                </div>
-                <span
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-[8px] uppercase tracking-wider ${passwordStrategyBadgeClass}`}
-                >
-                  {passwordStrategyBadge}
-                </span>
-              </div>
-            </div>
-
-            <label className="block">
-              <span className="text-[10px] text-fg/50 mb-1 block">
-                Provider of record
-              </span>
-              <select
-                value={settings.passwordManagerProvider}
-                onChange={(event) =>
-                  onUpdate({
-                    passwordManagerProvider: event.target
-                      .value as PasswordManagerProvider,
-                  })
-                }
-                className="w-full rounded border border-border bg-input px-2 py-1 text-[10px] text-fg outline-none"
-              >
-                <option value="nodewarden-self-hosted">
-                  Self-hosted go
-                </option>
-                <option value="proton-pass">Proton Pass</option>
-                <option value="none">No extension password integration</option>
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="text-[10px] text-fg/50 mb-1 block">
-                Self-hosted password app URL
-              </span>
-              <input
-                type="url"
-                value={settings.passwordAppUrl}
-                onChange={(event) =>
-                  onUpdate({ passwordAppUrl: event.target.value })
-                }
-                className="w-full rounded border border-border bg-input px-2 py-1 text-[10px] text-fg outline-none"
-                placeholder="https://passwords.example.com"
-              />
-            </label>
-
-            <div
-              className={`rounded border p-2 ${
-                passwordAppStatus?.ok
-                  ? "border-success/20 bg-success/5"
-                  : passwordAppStatus
-                    ? "border-warning/25 bg-warning/5"
-                    : "border-border/60 bg-card/20"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-medium text-fg/70">
-                    Custom app status
-                  </div>
-                  <div className="truncate text-[9px] leading-snug text-fg/45">
-                    {passwordAppChecking
-                      ? "Checking password app..."
-                      : passwordAppStatus
-                        ? passwordAppStatus.ok
-                          ? `Reachable${passwordAppStatus.version ? ` - ${passwordAppStatus.version}` : ""}`
-                          : passwordAppStatus.error || "Status check failed."
-                        : "Not checked yet."}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={passwordAppChecking || !settings.passwordAppUrl.trim()}
-                  onClick={refreshPasswordAppStatus}
-                  className="shrink-0 rounded bg-primary/15 px-2 py-1 text-[10px] text-primary hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {passwordAppChecking ? "Checking" : "Check"}
-                </button>
-              </div>
-
-              {passwordAppStatus && (
-                <div className="mt-2 grid gap-1">
-                  <StatusRow
-                    label="JWT secret"
-                    ok={
-                      !passwordAppStatus.error &&
-                      passwordAppStatus.jwtUnsafeReason === null
-                    }
-                    warn={
-                      !!passwordAppStatus.error ||
-                      passwordAppStatus.jwtUnsafeReason !== null
-                    }
-                    detail={
-                      passwordAppStatus.error &&
-                      passwordAppStatus.jwtUnsafeReason === null
-                        ? "unknown"
-                        : passwordAppStatus.jwtUnsafeReason
-                        ? passwordAppStatus.jwtUnsafeReason.replace(/_/g, " ")
-                        : "safe"
-                    }
-                  />
-                  <StatusRow
-                    label="Registration gate"
-                    ok={
-                      !passwordAppStatus.error &&
-                      passwordAppStatus.registrationInviteRequired === true
-                    }
-                    warn={
-                      !!passwordAppStatus.error ||
-                      passwordAppStatus.registrationInviteRequired !== true
-                    }
-                    detail={
-                      passwordAppStatus.error &&
-                      passwordAppStatus.registrationInviteRequired === null
-                        ? "unknown"
-                        : passwordAppStatus.registrationInviteRequired === true
-                        ? "active"
-                        : passwordAppStatus.registrationInviteRequired === false
-                          ? "open"
-                          : "unknown"
-                    }
-                  />
-                  <StatusRow
-                    label="Last check"
-                    ok={passwordAppStatus.ok}
-                    warn={!passwordAppStatus.ok}
-                    detail={new Date(
-                      passwordAppStatus.checkedAt,
-                    ).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-1.5">
-              <StatusRow
-                label="Stores vault passwords"
-                ok={!PASSWORD_STRATEGY.extensionStoresVaultPasswords}
-                detail={
-                  PASSWORD_STRATEGY.extensionStoresVaultPasswords
-                    ? "enabled"
-                    : "disabled"
-                }
-              />
-              <StatusRow
-                label="Passive autofill"
-                ok={!PASSWORD_STRATEGY.passiveAutofillEnabled}
-                detail={
-                  PASSWORD_STRATEGY.passiveAutofillEnabled
-                    ? "enabled"
-                    : "disabled"
-                }
-              />
-              <StatusRow
-                label="Self-hosted go"
-                ok={
-                  PASSWORD_STRATEGY.selfHostedNodewardenStatus ===
-                  "go external vault"
-                }
-                detail={PASSWORD_STRATEGY.selfHostedNodewardenStatus}
-              />
-              <StatusRow
-                label="Legacy cache"
-                ok={legacyPasswordKeys.length === 0}
-                warn={legacyPasswordKeys.length > 0}
-                detail={
-                  legacyPasswordKeys.length === 0
-                    ? "clear"
-                    : `${legacyPasswordKeys.length} old key${legacyPasswordKeys.length === 1 ? "" : "s"}`
-                }
-              />
-            </div>
-
-            {legacyPasswordKeys.length > 0 && (
-              <div className="rounded border border-warning/20 bg-warning/5 p-1.5 text-[9px] leading-snug text-fg/45">
-                Found old Nodewarden/password cache keys:{" "}
-                {legacyPasswordKeys.join(", ")}
-              </div>
-            )}
-
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                disabled={!settings.passwordAppUrl.trim()}
-                onClick={() =>
-                  window.open(
-                    settings.passwordAppUrl.trim(),
-                    "go",
-                    "popup,width=1100,height=760",
-                  )
-                }
-                className="flex-1 rounded bg-primary/15 px-2 py-1 text-[10px] text-primary hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Open custom app
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  window.open(
-                    "https://pass.proton.me",
-                    "proton-pass",
-                    "popup,width=1100,height=760",
-                  )
-                }
-                className="flex-1 rounded bg-primary/20 px-2 py-1 text-[10px] text-primary hover:bg-primary/30"
-              >
-                Open Proton Pass
-              </button>
-              <button
-                type="button"
-                onClick={purgePasswordCache}
-                className="flex-1 rounded bg-secondary/40 px-2 py-1 text-[10px] text-fg/80 hover:bg-secondary/60"
-              >
-                Purge old cache
-              </button>
-            </div>
-            {passwordCleanupStatus && (
-              <div className="text-[10px] text-fg/45">
-                {passwordCleanupStatus}
-              </div>
-            )}
-          </div>
-        </SettingsAccordionSection>
-
         {/* Joplin clipper */}
         <SettingsAccordionSection title="Joplin">
           <div className="space-y-2">
@@ -1463,25 +1126,6 @@ export function SettingsPanel({
                   className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
                   placeholder="X-Sidebar-Token (required)"
                 />
-                <input
-                  type="password"
-                  value={settings.tasksApiToken}
-                  onChange={(e) => onUpdate({ tasksApiToken: e.target.value })}
-                  className="w-full text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
-                  placeholder="Tasks API token (auto-fills from Doppler; falls back to sidebar token)"
-                />
-                <p className="text-[9px] text-muted-fg leading-snug">
-                  Tasks also accept your cal.fly.pm browser session. Sign in at{" "}
-                  <a
-                    href="https://cal.fly.pm/tasks"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline"
-                  >
-                    cal.fly.pm/tasks
-                  </a>{" "}
-                  if token auth fails.
-                </p>
                 <Toggle
                   label="Prune local after sync"
                   description="Drop synced messages from chrome.storage to keep space low"

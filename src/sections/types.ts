@@ -4,13 +4,8 @@ export type SectionId =
   | "pageStudio"
   | "extensions"
   | "session"
-  | "passwords"
-  | "email"
-  | "signal"
-  | "quickInfo"
   // Perplexity is temporarily hidden while the remote-tab experiment is refined.
   | "perplexity"
-  | "tasks"
   | "bookmarks"
   | "captures"
   | "cookies"
@@ -37,12 +32,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "pageStudio", label: "Page Studio" },
   { id: "extensions", label: "Extensions" },
   { id: "session", label: "Session" },
-  { id: "email", label: "Email" },
-  { id: "signal", label: "Signal" },
-  { id: "quickInfo", label: "Contact Enrichment" },
   // { id: "perplexity", label: "Perplexity" },
-  { id: "tasks", label: "Tasks" },
-  { id: "passwords", label: "Passwords" },
   { id: "bookmarks", label: "Bookmarks" },
   { id: "captures", label: "Page Captures" },
   { id: "cookies", label: "Cookies" },

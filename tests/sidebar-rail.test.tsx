@@ -48,44 +48,25 @@ describe("SECTIONS reflects the current rail organization", () => {
     expect(ids as string[]).not.toContain("library");
   });
 
-  it("includes Contact Enrichment as a dedicated Quick Info surface", () => {
-    const ids = SECTIONS.map((s) => s.id);
-    expect(ids).toContain<SectionId>("quickInfo");
-    expect(SECTIONS.find((s) => s.id === "quickInfo")?.label).toBe(
-      "Contact Enrichment",
+  it("does not register the removed mail/signal/tasks/passwords/contact sections", () => {
+    const ids = SECTIONS.map((s) => s.id) as string[];
+    const railSource = readFileSync(
+      join(process.cwd(), "src/components/SidebarRail.tsx"),
+      "utf8",
     );
-  });
-
-  it("includes Passwords as the go vault launcher surface", () => {
-    const ids = SECTIONS.map((s) => s.id);
     const sidepanelSource = readFileSync(
       join(process.cwd(), "src/sidepanel.tsx"),
       "utf8",
     );
 
-    expect(ids).toContain<SectionId>("passwords");
-    expect(SECTIONS.find((s) => s.id === "passwords")?.label).toBe(
-      "Passwords",
-    );
-    expect(sidepanelSource).toContain("<PasswordVaultSection />");
-    expect(sidepanelSource).not.toContain('section === "passwords"');
+    for (const removed of ["email", "signal", "tasks", "passwords", "quickInfo"]) {
+      expect(ids).not.toContain(removed);
+      expect(railSource).not.toContain(`${removed}: "`);
+      // Stored-section redirect keeps users off a blank panel after the removal.
+      expect(sidepanelSource).toContain(`section === "${removed}"`);
+    }
   });
 
-  it("uses the lock icon for the Passwords rail entry", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/components/SidebarRail.tsx"),
-      "utf8",
-    );
-    expect(source).toContain('passwords: "lock"');
-  });
-
-  it("uses the avatar icon for Contact Enrichment", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/components/SidebarRail.tsx"),
-      "utf8",
-    );
-    expect(source).toContain('quickInfo: "avatar"');
-  });
 
   it("uses a unique image stack icon for Page Captures", () => {
     const railSource = readFileSync(

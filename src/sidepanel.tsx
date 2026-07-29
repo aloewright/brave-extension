@@ -7,16 +7,11 @@ import { InspectorSection } from "./sections/inspector/InspectorSection";
 import { PageStudioSection } from "./sections/page-studio/PageStudioSection";
 import { ExtensionsSection } from "./sections/extensions/ExtensionsSection";
 import { SessionSection } from "./sections/session/SessionSection";
-import { PasswordVaultSection } from "./sections/passwords/PasswordVaultSection";
-import { EmailSection } from "./sections/email/EmailSection";
-import { SignalSection } from "./sections/signal/SignalSection";
-import { QuickInfoSection } from "./sections/quick-info/QuickInfoSection";
 // import { PerplexitySection } from "./sections/perplexity/PerplexitySection";
 import { BookmarksSection } from "./sections/bookmarks/BookmarksSection";
 import { CapturesSection } from "./sections/captures/CapturesSection";
 import { CookiesSection } from "./sections/cookies/CookiesSection";
 // import { RecorderSection } from "./sections/recorder/RecorderSection";
-import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
 import { LexiconSection } from "./sections/lexicon/LexiconSection";
@@ -34,7 +29,13 @@ function resolveStoredSection(
   if (
     section === "aiChat" ||
     section === "joplin" ||
-    section === "perplexity"
+    section === "perplexity" ||
+    // Removed in the slim build: mail, signal, tasks, passwords, contact enrichment.
+    section === "email" ||
+    section === "signal" ||
+    section === "tasks" ||
+    section === "passwords" ||
+    section === "quickInfo"
   ) {
     return "session";
   }
@@ -122,12 +123,7 @@ function SidePanel() {
           >
             <SessionSection />
           </div>
-          {active === "passwords" && <PasswordVaultSection />}
-          {active === "email" && <EmailSection />}
-          {active === "signal" && <SignalSection />}
-          {active === "quickInfo" && <QuickInfoSection />}
           {/* {active === "perplexity" && <PerplexitySection />} */}
-          {active === "tasks" && <TasksSection />}
           {active === "bookmarks" && <BookmarksSection />}
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}

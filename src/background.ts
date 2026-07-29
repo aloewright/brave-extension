@@ -17,22 +17,6 @@ import {
   closeCurrentWindowSavedTabs,
   saveCurrentWindowTabs,
 } from "./lib/tab-collections";
-import { purgeLegacyPasswordStorage } from "./lib/password-strategy";
-import {
-  GO_VAULT_SESSION_STATUS_MESSAGE,
-  goVaultOriginFromUrl,
-  sanitizeGoVaultBrowserSessionStatus,
-  saveGoVaultBrowserSessionStatus,
-} from "./lib/go-vault-session-state";
-import {
-  buildMailTwoFactorListUrl,
-  buildMailTwoFactorThreadUrl,
-  extractMailTwoFactorCodesFromText,
-  findBestMailTwoFactorCode,
-  MAIL_TWO_FACTOR_API_BASE,
-  type MailThreadDetail,
-  type MailThreadSummary,
-} from "./lib/mail-2fa";
 import { DOM_TOOL_HANDLERS } from "./background/dom-tools";
 import { LIBRARY_TOOL_HANDLERS } from "./background/library-tools";
 import { runChatTurn, stopTurn } from "./background/chat-orchestrator";
@@ -81,13 +65,6 @@ import {
   handleThirdPartyCookieMessage,
   isThirdPartyCookieMessage,
 } from "./background/third-party-cookies";
-import { ensureCalTasksOriginRule } from "./background/cal-tasks-origin";
-import {
-  CAL_TASKS_API_BASE,
-  fetchCalTasksViaPageContext,
-  type CalTasksTabFetchResult,
-} from "./background/cal-tasks-proxy";
-import { fetchMailViaPageContext } from "./background/mail-proxy";
 import { importVideoUrl } from "./background/video-import";
 import type {
   PickerCapture,
@@ -138,125 +115,6 @@ const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
 const RSS_FEED_MENU_ID = "save-rss-feed";
 const RSS_FEED_MENU_PREFIX = "save-rss-feed:";
-// chrome.cookies.getAll({ url }) returns only cookies the browser would send
-// to that URL (Domain/Path/Secure already filtered). Forward all of them —
-// don't whitelist by name. better-auth uses prefixes like __Host- on HTTPS
-// (e.g. __Host-better-auth.session_token) and ships a CSRF cookie checked on
-// state-changing requests; a name whitelist drops both and yields 401s.
-async function getCalFlyPmCookieHeader(): Promise<string | null> {
-  try {
-    const cookies = await chrome.cookies.getAll({ url: `${CAL_TASKS_API_BASE}/` });
-    if (cookies.length === 0) return null;
-    return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  } catch (err) {
-    safeRuntimeWarning("failed to read cal.fly.pm session cookies", err);
-    return null;
-  }
-}
-async function getMailFlyPmCookieHeader(): Promise<string | null> {
-  try {
-    const cookies = await chrome.cookies.getAll({ url: `${MAIL_TWO_FACTOR_API_BASE}/` });
-    if (cookies.length === 0) return null;
-    return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  } catch (err) {
-    safeRuntimeWarning("failed to read mail.fly.pm session cookies", err);
-    return null;
-  }
-}
-
-// mail.fly.pm uses better-auth with a SameSite-restricted `__Host-` session
-// cookie. A background service-worker fetch is cross-site relative to
-// mail.fly.pm, so the cookie is NOT attached by `credentials: "include"`, and
-// the forbidden `cookie` request header is stripped by fetch(). The only way to
-// attach it is at the network layer via declarativeNetRequest, which (unlike
-// fetch) is permitted to set the Cookie header. We add a temporary session rule
-// scoped to mail.fly.pm/api for the duration of the fetch, then remove it.
-const MAIL_TWO_FACTOR_DNR_RULE_ID = 920_417;
-let mailFlyPmCookieRuleUsers = 0;
-let mailFlyPmCookieRuleMutation: Promise<void> = Promise.resolve();
-
-function createMailFlyPmCookieRule(cookieHeader: string): chrome.declarativeNetRequest.Rule {
-  return {
-    id: MAIL_TWO_FACTOR_DNR_RULE_ID,
-    priority: 1,
-    action: {
-      type: "modifyHeaders" as chrome.declarativeNetRequest.RuleActionType,
-      requestHeaders: [
-        {
-          header: "cookie",
-          operation: "set" as chrome.declarativeNetRequest.HeaderOperation,
-          value: cookieHeader,
-        },
-      ],
-    },
-    condition: {
-      urlFilter: "||mail.fly.pm/api/",
-      resourceTypes: [
-        "xmlhttprequest" as chrome.declarativeNetRequest.ResourceType,
-        "other" as chrome.declarativeNetRequest.ResourceType,
-      ],
-    },
-  };
-}
-
-function mutateMailFlyPmCookieRule<T>(action: () => Promise<T>): Promise<T> {
-  const run = mailFlyPmCookieRuleMutation.then(action, action);
-  mailFlyPmCookieRuleMutation = run.then(() => undefined, () => undefined);
-  return run;
-}
-
-async function installMailFlyPmCookieRule(cookieHeader: string): Promise<boolean> {
-  const dnr = chrome.declarativeNetRequest;
-  if (!dnr?.updateSessionRules) return false;
-
-  try {
-    await mutateMailFlyPmCookieRule(async () => {
-      if (mailFlyPmCookieRuleUsers === 0) {
-        await dnr.updateSessionRules({
-          removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
-          addRules: [createMailFlyPmCookieRule(cookieHeader)],
-        });
-      }
-      mailFlyPmCookieRuleUsers += 1;
-    });
-    return true;
-  } catch (err) {
-    safeRuntimeWarning("failed to register mail.fly.pm cookie rule", err);
-    return false;
-  }
-}
-
-async function releaseMailFlyPmCookieRule() {
-  const dnr = chrome.declarativeNetRequest;
-  if (!dnr?.updateSessionRules) return;
-
-  await mutateMailFlyPmCookieRule(async () => {
-    mailFlyPmCookieRuleUsers = Math.max(0, mailFlyPmCookieRuleUsers - 1);
-    if (mailFlyPmCookieRuleUsers === 0) {
-      await dnr.updateSessionRules({
-        removeRuleIds: [MAIL_TWO_FACTOR_DNR_RULE_ID],
-      });
-    }
-  }).catch((err) => {
-    safeRuntimeWarning("failed to remove mail.fly.pm cookie rule", err);
-  });
-}
-
-async function withMailFlyPmCookieHeader<T>(
-  cookieHeader: string,
-  run: () => Promise<T>,
-): Promise<T> {
-  const installed = await installMailFlyPmCookieRule(cookieHeader);
-  if (!installed) {
-    return run();
-  }
-
-  try {
-    return await run();
-  } finally {
-    await releaseMailFlyPmCookieRule();
-  }
-}
 let nativePort: chrome.runtime.Port | null = null;
 let lastDisconnectAt = 0;
 // Exponential-backoff state for native-host reconnects. Each disconnect that
@@ -271,74 +129,8 @@ const RECONNECT_MAX_FAILURES = 6;
 const pendingCallbacks = new Map<string, (msg: any) => void>();
 const pendingNativeRequests = new Map<string, (msg: any) => void>();
 const rssFeedContextMenuCache = new Map<number, FeedInfo[]>();
-type MailTwoFactorResponse = {
-  code: string | null;
-  receivedAt?: number;
-  source?: "mail.fly.pm";
-  threadId?: string;
-  error?: string;
-};
-type MailInboxSidebarItem = {
-  id: string;
-  subject: string;
-  participants: string;
-  snippet: string;
-  receivedAt?: number;
-  codes: string[];
-  opened?: boolean;
-  clicked?: boolean;
-  sentStatus?: string;
-};
-type MailInboxSidebarPage = {
-  items: MailInboxSidebarItem[];
-  nextCursor: number | null;
-};
-type MailThreadSidebarMessage = {
-  id: string;
-  subject: string;
-  from: string;
-  body: string;
-  sentAt?: number;
-};
-type MailThreadSidebarDetail = {
-  id: string;
-  subject: string;
-  participants: string;
-  receivedAt?: number;
-  messages: MailThreadSidebarMessage[];
-  codes: string[];
-};
-type MailActivitySidebarItem = {
-  id: string;
-  type: "open" | "click" | "event";
-  email: string;
-  subject: string;
-  url?: string;
-  at?: number;
-};
-const mailTwoFactorCache = new Map<
-  string,
-  { at: number; response: MailTwoFactorResponse }
->();
-const MAIL_TWO_FACTOR_CACHE_TTL_MS = 7_500;
-// Opt-in boundary diagnostics for the mail.fly.pm 2FA pipeline. Enable from the
-// service-worker console with:
-//   chrome.storage.local.set({ "mail2fa.debug": true })
-// Logs whether the session cookie was found, the real top-level shape of the
-// /api/v1/threads response, the message field names, and whether a code was
-// selected — so a silent field-name/auth mismatch is visible at its boundary.
-let mail2faDebugEnabled = false;
 try {
-  chrome.storage?.local
-    ?.get?.("mail2fa.debug")
-    .then((r) => {
-      mail2faDebugEnabled = Boolean(r?.["mail2fa.debug"]);
-    })
-    .catch(() => {});
   chrome.storage?.onChanged?.addListener?.((changes, area) => {
-    if (area === "local" && changes["mail2fa.debug"]) {
-      mail2faDebugEnabled = Boolean(changes["mail2fa.debug"].newValue);
-    }
     // Mirror newly-saved/changed links to the sidebar-api Worker so they surface
     // in the hub + /api/search. Both save paths (the sidebar "save link" button
     // via lx setLinks and the session-tab SAVE_LINK handler) write the
@@ -366,14 +158,6 @@ try {
   });
 } catch {
   /* storage unavailable in some contexts */
-}
-function mail2faDebug(label: string, data: Record<string, unknown>): void {
-  if (!mail2faDebugEnabled) return;
-  try {
-    console.debug(`[mail-2fa] ${label}`, data);
-  } catch {
-    /* console may be unavailable */
-  }
 }
 
 function safeRuntimeWarning(message: string, err?: unknown) {
@@ -406,10 +190,6 @@ function postToNative(port: chrome.runtime.Port, message: unknown) {
 
 void ensureThirdPartyCookieRules().catch((err) => {
   safeRuntimeWarning("failed to initialize third-party cookie rules", err);
-});
-
-void ensureCalTasksOriginRule().catch((err) => {
-  safeRuntimeWarning("failed to initialize cal.fly.pm origin rewrite rule", err);
 });
 
 void ensureBookmarkSnapshot().catch((err) => {
@@ -918,34 +698,6 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === GO_VAULT_SESSION_STATUS_MESSAGE) {
-    (async () => {
-      const senderOrigin = goVaultOriginFromUrl(sender.url);
-      const settings = await getSettings();
-      const configuredOrigin = goVaultOriginFromUrl(settings.passwordAppUrl);
-      if (!senderOrigin || !configuredOrigin || senderOrigin !== configuredOrigin) {
-        return { ok: false, error: "Invalid go session status." };
-      }
-
-      const payload = sanitizeGoVaultBrowserSessionStatus(
-        message.payload,
-        configuredOrigin,
-      );
-      if (!payload) return { ok: false, error: "Invalid go session status." };
-
-      await saveGoVaultBrowserSessionStatus(payload);
-      return { ok: true };
-    })()
-      .then((result) => sendResponse(result))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
   if (message?.type === "consent:response") {
     handleConsentResponse(message as ConsentResponseMessage);
     sendResponse({ ok: true });
@@ -1257,69 +1009,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "TASKS_API_REQUEST") {
-    handleTasksApiRequest(message)
-      .then((result) => sendResponse(result))
-      .catch((err) => {
-        sendResponse({
-          ok: false,
-          status: 0,
-          error: err instanceof Error ? err.message : "Task request failed",
-        });
-      });
-    return true;
-  }
-
-  if (message.type === "MAIL_2FA_CODE_REQUEST") {
-    const pageUrl =
-      typeof message.url === "string" ? message.url : sender.tab?.url || "";
-    getMailTwoFactorCode(pageUrl).then((result) => sendResponse(result));
-    return true;
-  }
-
-  if (message.type === "MAIL_INBOX_LIST_REQUEST") {
-    const limit = Number.isFinite(message.limit) ? Number(message.limit) : 20;
-    const cursor = Number.isFinite(message.cursor) ? Number(message.cursor) : null;
-    getMailInboxSidebarItems({ limit, cursor })
-      .then((page) => sendResponse({ ok: true, ...page }))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          items: [],
-          nextCursor: null,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
-  if (message.type === "MAIL_THREAD_DETAIL_REQUEST") {
-    const threadId = typeof message.threadId === "string" ? message.threadId : "";
-    getMailThreadSidebarDetail(threadId)
-      .then((detail) => sendResponse({ ok: true, detail }))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          detail: null,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
-  if (message.type === "MAIL_ACTIVITY_LIST_REQUEST") {
-    getMailActivitySidebarItems()
-      .then((items) => sendResponse({ ok: true, items }))
-      .catch((err) =>
-        sendResponse({
-          ok: false,
-          items: [],
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    return true;
-  }
-
   if (message.type === "TECH_DETECTED") {
     cachedTech.set(message.hostname, { techs: message.techs, ts: Date.now() });
     sendResponse({ ok: true });
@@ -1403,230 +1092,6 @@ async function saveLinkToLibrary(
 
 type FeedInfo = { url: string; title: string; type: "rss" | "atom" | "json" };
 
-type TasksApiMessage = {
-  path?: string;
-  init?: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
-  };
-};
-
-function parseTasksApiResponse(
-  status: number,
-  ok: boolean,
-  text: string,
-): { ok: boolean; status: number; error?: string; data?: unknown } {
-  let data: unknown = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { text };
-    }
-  }
-
-  if (status === 401 || status === 403) {
-    return {
-      ok: false,
-      status,
-      error:
-        "Tasks auth failed. Sign in at cal.fly.pm in this browser profile, then reload tasks.",
-      data,
-    };
-  }
-  if (!ok) {
-    return {
-      ok: false,
-      status,
-      error: `Task request failed: ${status}`,
-      data,
-    };
-  }
-  return { ok: true, status, data };
-}
-
-async function fetchTasksViaServiceWorker(
-  message: TasksApiMessage,
-  path: string,
-  method: string,
-  isTasksDataPath: boolean,
-) {
-  const taskUrl = new URL(path, CAL_TASKS_API_BASE);
-  const headers: Record<string, string> = {
-    accept: "application/json",
-  };
-  for (const [key, value] of Object.entries(message.init?.headers || {})) {
-    if (
-      (key.toLowerCase() === "content-type" ||
-        key.toLowerCase() === "x-sidebar-token" ||
-        key.toLowerCase() === "authorization") &&
-      typeof value === "string"
-    ) {
-      headers[key] = value;
-    }
-  }
-  const cookieHeader = await getCalFlyPmCookieHeader();
-  if (cookieHeader) {
-    headers.cookie = cookieHeader;
-  }
-  const settings = await getSettings().catch(() => null);
-  const sidebarToken = settings?.sidebarApiToken?.trim();
-  const tasksToken = settings?.tasksApiToken?.trim() || sidebarToken;
-  const hasSidebarHeader = Object.keys(headers).some(
-    (key) => key.toLowerCase() === "x-sidebar-token",
-  );
-  const hasAuthorizationHeader = Object.keys(headers).some(
-    (key) => key.toLowerCase() === "authorization",
-  );
-  if (!cookieHeader && tasksToken && !hasSidebarHeader) {
-    headers["x-sidebar-token"] = tasksToken;
-  }
-  if (!cookieHeader && tasksToken && !hasAuthorizationHeader) {
-    headers.authorization = `Bearer ${tasksToken}`;
-  }
-  const init: RequestInit = {
-    method,
-    headers,
-    credentials: "include",
-  };
-  if (method !== "GET" && typeof message.init?.body === "string") {
-    init.body = message.init.body;
-  }
-  const urls: string[] = [taskUrl.toString()];
-  if (isTasksDataPath) {
-    urls.push(taskUrl.toString().replace("/tasks-data", "/tasks"));
-  }
-
-  for (let i = 0; i < urls.length; i++) {
-    const response = await fetch(urls[i], init);
-    const parsed = parseTasksApiResponse(
-      response.status,
-      response.ok,
-      await response.text(),
-    );
-    if (parsed.ok) return parsed;
-    if (parsed.status === 401 || parsed.status === 403) return parsed;
-    const shouldTryFallback =
-      i < urls.length - 1 &&
-      (parsed.status === 404 || parsed.status === 405);
-    if (shouldTryFallback) continue;
-    return parsed;
-  }
-
-  return {
-    ok: false,
-    status: 500,
-    error: "Task request failed: exhausted task API routes",
-  };
-}
-
-async function fetchTasksViaCalTab(
-  message: TasksApiMessage,
-  path: string,
-  method: string,
-  isTasksDataPath: boolean,
-) {
-  const requestHeaders: Record<string, string> = {};
-  for (const [key, value] of Object.entries(message.init?.headers || {})) {
-    if (key.toLowerCase() === "content-type" && typeof value === "string") {
-      requestHeaders[key] = value;
-    }
-  }
-  const body =
-    method !== "GET" && typeof message.init?.body === "string"
-      ? message.init.body
-      : undefined;
-
-  const paths = [path];
-  if (isTasksDataPath) {
-    paths.push(path.replace("/tasks-data", "/tasks"));
-  }
-
-  let ephemeralTabId: number | null = null;
-  try {
-    for (let i = 0; i < paths.length; i++) {
-      let tabResult: CalTasksTabFetchResult | null = null;
-      try {
-        tabResult = await fetchCalTasksViaPageContext({
-          path: paths[i],
-          method,
-          headers: requestHeaders,
-          body,
-          onEphemeralTab: (tabId) => {
-            ephemeralTabId = tabId;
-          },
-        });
-      } catch (err) {
-        safeRuntimeWarning("cal.fly.pm tab task fetch failed", err);
-        return null;
-      }
-      if (!tabResult) return null;
-
-      const parsed = parseTasksApiResponse(
-        tabResult.status,
-        tabResult.ok,
-        tabResult.text,
-      );
-      if (parsed.ok) return parsed;
-      if (parsed.status === 401 || parsed.status === 403) return parsed;
-      const shouldTryFallback =
-        i < paths.length - 1 &&
-        (parsed.status === 404 || parsed.status === 405);
-      if (shouldTryFallback) continue;
-      return parsed;
-    }
-  } finally {
-    if (ephemeralTabId != null) {
-      chrome.tabs.remove(ephemeralTabId).catch(() => {});
-    }
-  }
-
-  return {
-    ok: false,
-    status: 500,
-    error: "Task request failed: exhausted task API routes",
-  };
-}
-
-async function handleTasksApiRequest(message: TasksApiMessage) {
-  const path = typeof message.path === "string" ? message.path : "";
-  const isTasksDataPath = path.startsWith("/tasks-data");
-  const isTasksPath = path.startsWith("/tasks");
-  if (!isTasksDataPath && !isTasksPath) {
-    return { ok: false, status: 400, error: "Unsupported task API path" };
-  }
-  const method = (message.init?.method || "GET").toUpperCase();
-  if (!["GET", "POST", "DELETE"].includes(method)) {
-    return { ok: false, status: 405, error: "Unsupported task API method" };
-  }
-  const taskUrl = new URL(path, CAL_TASKS_API_BASE);
-  if (
-    taskUrl.origin !== CAL_TASKS_API_BASE ||
-    (!(
-      taskUrl.pathname === "/tasks-data" ||
-      taskUrl.pathname.startsWith("/tasks-data/") ||
-      taskUrl.pathname === "/tasks" ||
-      taskUrl.pathname.startsWith("/tasks/")
-    ))
-  ) {
-    return { ok: false, status: 400, error: "Unsupported task API path" };
-  }
-
-  const cookieHeader = await getCalFlyPmCookieHeader();
-  if (cookieHeader) {
-    const tabResult = await fetchTasksViaCalTab(
-      message,
-      path,
-      method,
-      isTasksDataPath,
-    );
-    if (tabResult) return tabResult;
-  }
-
-  return fetchTasksViaServiceWorker(message, path, method, isTasksDataPath);
-}
-
 function normalizeFeeds(feeds: unknown): FeedInfo[] {
   if (!Array.isArray(feeds)) return [];
   return feeds
@@ -1658,468 +1123,6 @@ async function getFeedsForTab(tabId: number): Promise<FeedInfo[]> {
       resolve(normalizeFeeds(response?.feeds));
     });
   });
-}
-
-async function getMailTwoFactorCode(pageUrl: string): Promise<MailTwoFactorResponse> {
-  if (!/^https?:\/\//i.test(pageUrl)) return { code: null };
-  if (/^https:\/\/mail\.fly\.pm\//i.test(pageUrl)) return { code: null };
-
-  const cacheKey = mailTwoFactorCacheKey(pageUrl);
-  const cached = mailTwoFactorCache.get(cacheKey);
-  const now = Date.now();
-  if (cached && now - cached.at < MAIL_TWO_FACTOR_CACHE_TTL_MS) {
-    return cached.response;
-  }
-
-  const response = await fetchLatestMailTwoFactorCode(pageUrl, now).catch((err) => {
-    safeRuntimeWarning("failed to fetch mail.fly.pm two-factor code", err);
-    return { code: null, error: err instanceof Error ? err.message : "mail fetch failed" };
-  });
-  mailTwoFactorCache.set(cacheKey, { at: now, response });
-  return response;
-}
-
-async function getMailInboxSidebarItems(options: {
-  limit?: number;
-  cursor?: number | null;
-} = {}): Promise<MailInboxSidebarPage> {
-  const cookieHeader = await getMailFlyPmCookieHeader();
-  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
-  const headers = { accept: "application/json" };
-  return withMailFlyPmCookieHeader(cookieHeader, () =>
-    fetchMailInboxSidebarItemsAuthed(headers, options),
-  );
-}
-
-async function fetchMailInboxSidebarItemsAuthed(
-  headers: { accept: string },
-  options: { limit?: number; cursor?: number | null } = {},
-): Promise<MailInboxSidebarPage> {
-  const limit = clampMailLimit(options.limit, 20);
-  const list = await fetchMailJson<unknown>(
-    buildMailThreadsListUrl("inbox", limit, options.cursor ?? null),
-    headers,
-  );
-  const listRecord = list && typeof list === "object" ? list as Record<string, unknown> : {};
-  const summaries = normalizeMailThreadSummaries(list).slice(0, limit);
-  const nextCursor =
-    typeof listRecord.nextCursor === "number"
-      ? listRecord.nextCursor
-      : typeof listRecord.nextCursor === "string" && Number.isFinite(Number(listRecord.nextCursor))
-      ? Number(listRecord.nextCursor)
-      : null;
-  if (!summaries.length) return { items: [], nextCursor: null };
-
-  const details = await Promise.all(
-    summaries.map((summary) =>
-      fetchMailJson<MailThreadDetail>(buildMailTwoFactorThreadUrl(summary.id), headers)
-        .catch(() => null),
-    ),
-  );
-
-  const items = summaries.map((summary, index) => {
-    const detail = details[index];
-    const messages = Array.isArray(detail?.messages) ? detail.messages : [];
-    const threadSubject =
-      mailStringValue(detail?.thread?.subject) || mailStringValue(summary.subject);
-    const text = [
-      threadSubject,
-      stringifyMailParticipants(detail?.thread?.participants ?? summary.participants),
-      summary.snippet,
-      ...messages.flatMap((message) => [
-        message.subject,
-        message.fromName,
-        message.fromAddr,
-        message.textBody,
-      ]),
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const newestMessage = messages
-      .slice()
-      .sort((a, b) => timestampMs(b.sentAt) - timestampMs(a.sentAt))[0];
-    const snippet =
-      mailStringValue(summary.snippet) ||
-      truncateMailSnippet(mailStringValue(newestMessage?.textBody));
-    const receivedAt =
-      timestampMs(summary.lastMessageAt) ||
-      timestampMs(newestMessage?.sentAt) ||
-      undefined;
-
-    return {
-      id: summary.id,
-      subject: threadSubject,
-      participants: stringifyMailParticipants(summary.participants),
-      snippet,
-      receivedAt,
-      codes: extractMailTwoFactorCodesFromText(text),
-      opened: Boolean((summary as MailThreadSummary & { opened?: boolean }).opened),
-      clicked: Boolean((summary as MailThreadSummary & { clicked?: boolean }).clicked),
-      sentStatus: mailStringValue((summary as MailThreadSummary & { sentStatus?: string }).sentStatus),
-    };
-  });
-  return { items, nextCursor };
-}
-
-async function getMailActivitySidebarItems(): Promise<MailActivitySidebarItem[]> {
-  const cookieHeader = await getMailFlyPmCookieHeader();
-  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
-  const headers = { accept: "application/json" };
-  return withMailFlyPmCookieHeader(cookieHeader, () =>
-    fetchMailActivitySidebarItemsAuthed(headers),
-  );
-}
-
-async function getMailThreadSidebarDetail(threadId: string): Promise<MailThreadSidebarDetail> {
-  if (!threadId) throw new Error("missing mail thread id");
-  const cookieHeader = await getMailFlyPmCookieHeader();
-  if (!cookieHeader) throw new Error("not signed in to mail.fly.pm");
-  const headers = { accept: "application/json" };
-  return withMailFlyPmCookieHeader(cookieHeader, () =>
-    fetchMailThreadSidebarDetailAuthed(threadId, headers),
-  );
-}
-
-async function fetchMailThreadSidebarDetailAuthed(
-  threadId: string,
-  headers: { accept: string },
-): Promise<MailThreadSidebarDetail> {
-  const detail = await fetchMailJson<MailThreadDetail>(
-    buildMailTwoFactorThreadUrl(threadId),
-    headers,
-  );
-  const messages = Array.isArray(detail.messages) ? detail.messages : [];
-  const subject = mailStringValue(detail.thread?.subject) || mailStringValue(messages[0]?.subject);
-  const participants = stringifyMailParticipants(detail.thread?.participants);
-  const newestMessage = messages
-    .slice()
-    .sort((a, b) => timestampMs(b.sentAt) - timestampMs(a.sentAt))[0];
-  const messageItems = messages
-    .slice()
-    .sort((a, b) => timestampMs(a.sentAt) - timestampMs(b.sentAt))
-    .map((message, index) => {
-      const fromName = mailStringValue(message.fromName);
-      const fromAddr = mailStringValue(message.fromAddr);
-      return {
-        id: mailStringValue(message.id) || `${threadId}-${index}`,
-        subject: mailStringValue(message.subject),
-        from: fromName && fromAddr ? `${fromName} <${fromAddr}>` : fromName || fromAddr || "Unknown sender",
-        body: mailStringValue(message.textBody),
-        sentAt: timestampMs(message.sentAt) || undefined,
-      };
-    });
-  const codeText = [
-    subject,
-    participants,
-    ...messages.flatMap((message) => [
-      message.subject,
-      message.fromName,
-      message.fromAddr,
-      message.textBody,
-    ]),
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return {
-    id: mailStringValue(detail.thread?.id) || threadId,
-    subject,
-    participants,
-    receivedAt: timestampMs(newestMessage?.sentAt) || undefined,
-    messages: messageItems,
-    codes: extractMailTwoFactorCodesFromText(codeText),
-  };
-}
-
-async function fetchMailActivitySidebarItemsAuthed(
-  headers: { accept: string },
-): Promise<MailActivitySidebarItem[]> {
-  const endpoints = [
-    "/api/v1/activity",
-    "/api/v1/email-activity",
-    "/api/v1/tracking/activity",
-    "/api/v1/events",
-  ];
-  let lastError: Error | null = null;
-
-  for (const endpoint of endpoints) {
-    try {
-      const url = new URL(endpoint, MAIL_TWO_FACTOR_API_BASE);
-      url.searchParams.set("limit", "20");
-      const payload = await fetchMailJson<unknown>(url.toString(), headers);
-      const normalized = normalizeMailActivityItems(payload);
-      return normalized.slice(0, 20);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    }
-  }
-
-  return fetchMailActivityFromThreadsAuthed(headers).catch((err) => {
-    if (lastError) {
-      safeRuntimeWarning("mail activity endpoints unavailable; thread fallback failed", err);
-    }
-    throw new Error("mail activity unavailable");
-  });
-}
-
-async function fetchMailActivityFromThreadsAuthed(
-  headers: { accept: string },
-): Promise<MailActivitySidebarItem[]> {
-  const page = await fetchMailInboxSidebarItemsAuthed(headers, { limit: 100 });
-  const activity = page.items.flatMap((item) => {
-    const events: MailActivitySidebarItem[] = [];
-    if (item.clicked) {
-      events.push({
-        id: `thread-click-${item.id}`,
-        type: "click",
-        email: item.participants,
-        subject: item.subject,
-        at: item.receivedAt,
-      });
-    }
-    if (item.opened) {
-      events.push({
-        id: `thread-open-${item.id}`,
-        type: "open",
-        email: item.participants,
-        subject: item.subject,
-        at: item.receivedAt,
-      });
-    }
-    return events;
-  });
-  return activity
-    .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
-    .slice(0, 50);
-}
-
-function mailTwoFactorCacheKey(pageUrl: string) {
-  try {
-    return new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return pageUrl;
-  }
-}
-
-async function fetchLatestMailTwoFactorCode(
-  pageUrl: string,
-  now: number,
-): Promise<MailTwoFactorResponse> {
-  const cookieHeader = await getMailFlyPmCookieHeader();
-  mail2faDebug("cookieHeader", { present: Boolean(cookieHeader) });
-  if (!cookieHeader) return { code: null, error: "not signed in to mail.fly.pm" };
-
-  // The Cookie header is injected at the network layer by the DNR rule below,
-  // so it is intentionally omitted here (fetch would strip it anyway).
-  const headers = {
-    accept: "application/json",
-  };
-  return withMailFlyPmCookieHeader(cookieHeader, () =>
-    fetchLatestMailTwoFactorCodeAuthed(pageUrl, now, headers),
-  );
-}
-
-async function fetchLatestMailTwoFactorCodeAuthed(
-  pageUrl: string,
-  now: number,
-  headers: { accept: string },
-): Promise<MailTwoFactorResponse> {
-  const list = await fetchMailJson<{ items?: MailThreadSummary[] }>(
-    buildMailTwoFactorListUrl(),
-    headers,
-  );
-  // Diagnostic: surface the real top-level shape so a field-name mismatch
-  // (e.g. `threads` instead of `items`) is visible rather than silently empty.
-  mail2faDebug("list response", {
-    topLevelKeys: list && typeof list === "object" ? Object.keys(list) : typeof list,
-    itemsIsArray: Array.isArray(list.items),
-    itemCount: Array.isArray(list.items) ? list.items.length : 0,
-  });
-  const summaries = Array.isArray(list.items) ? list.items.filter(isMailThreadSummary) : [];
-  const recentSummaries = summaries
-    .filter((summary) => {
-      const timestamp = timestampMs(summary.lastMessageAt);
-      return timestamp === 0 || now - timestamp <= MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS;
-    })
-    .slice(0, 8);
-
-  if (!recentSummaries.length) return { code: null };
-
-  const details = await Promise.all(
-    recentSummaries.map((summary) =>
-      fetchMailJson<MailThreadDetail>(buildMailTwoFactorThreadUrl(summary.id), headers)
-        .catch(() => null),
-    ),
-  );
-  const usableDetails = details.filter((detail): detail is MailThreadDetail => Boolean(detail));
-  // Diagnostic: a non-zero detail count with a null `best` points at message
-  // body field-name mismatch (parser expects messages[].textBody/subject).
-  mail2faDebug("thread details", {
-    fetched: details.length,
-    usable: usableDetails.length,
-    sampleMessageKeys:
-      usableDetails[0]?.messages?.[0] && typeof usableDetails[0].messages[0] === "object"
-        ? Object.keys(usableDetails[0].messages[0] as object)
-        : null,
-  });
-  const best = findBestMailTwoFactorCode({
-    details: usableDetails,
-    summaries: recentSummaries,
-    pageUrl,
-    now,
-  });
-  mail2faDebug("best candidate", { found: Boolean(best), code: best ? "<redacted>" : null });
-  if (!best) return { code: null };
-
-  return {
-    code: best.code,
-    receivedAt: best.receivedAt,
-    source: "mail.fly.pm",
-    threadId: best.threadId,
-  };
-}
-
-const MAIL_TWO_FACTOR_MAX_FETCH_AGE_MS = 30 * 60 * 1000;
-
-function clampMailLimit(value: number | undefined, fallback: number) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(100, Math.max(1, Math.floor(value)));
-}
-
-function buildMailThreadsListUrl(folder: string, limit: number, cursor?: number | null) {
-  const url = new URL("/api/v1/threads", MAIL_TWO_FACTOR_API_BASE);
-  url.searchParams.set("folder", folder);
-  url.searchParams.set("limit", String(limit));
-  if (typeof cursor === "number" && Number.isFinite(cursor)) {
-    url.searchParams.set("cursor", String(cursor));
-  }
-  return url.toString();
-}
-
-async function fetchMailJson<T>(
-  url: string,
-  headers: { accept: string },
-): Promise<T> {
-  const parsedUrl = new URL(url);
-  if (parsedUrl.origin === MAIL_TWO_FACTOR_API_BASE) {
-    const pageResult = await fetchMailViaPageContext({
-      path: `${parsedUrl.pathname}${parsedUrl.search}`,
-      method: "GET",
-      headers,
-    }).catch((err) => {
-      safeRuntimeWarning("failed to fetch mail.fly.pm via page context", err);
-      return null;
-    });
-
-    if (pageResult) {
-      if (!pageResult.ok) throw new Error(mailFlyPmStatusError(pageResult.status));
-      return parseMailJsonText<T>(pageResult.text);
-    }
-  }
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers,
-    credentials: "include",
-  });
-  if (!response.ok) throw new Error(mailFlyPmStatusError(response.status));
-  return response.json() as Promise<T>;
-}
-
-function mailFlyPmStatusError(status: number) {
-  if (status === 401) {
-    return "mail.fly.pm returned 401; open mail.fly.pm, confirm you are signed in, then refresh Email"
-  }
-  return `mail.fly.pm returned ${status}`;
-}
-
-function parseMailJsonText<T>(text: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error("mail.fly.pm returned a non-JSON response; confirm you are signed in to Fly Mail");
-  }
-}
-
-function isMailThreadSummary(value: unknown): value is MailThreadSummary {
-  if (!value || typeof value !== "object") return false;
-  const summary = value as MailThreadSummary;
-  return typeof summary.id === "string" && summary.id.length > 0;
-}
-
-function normalizeMailThreadSummaries(value: unknown): MailThreadSummary[] {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const candidates = [
-    value,
-    record.items,
-    record.threads,
-    record.results,
-    record.data,
-  ];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate.filter(isMailThreadSummary);
-  }
-  return [];
-}
-
-function normalizeMailActivityItems(value: unknown): MailActivitySidebarItem[] {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const candidates = [
-    value,
-    record.items,
-    record.events,
-    record.activity,
-    record.results,
-    record.data,
-  ];
-  const list = candidates.find(Array.isArray);
-  if (!Array.isArray(list)) return [];
-
-  return list
-    .map((item, index) => {
-      const event = item && typeof item === "object" ? item as Record<string, unknown> : {};
-      const rawType = mailStringValue(event.type || event.event || event.name).toLowerCase();
-      const type: MailActivitySidebarItem["type"] = rawType.includes("click")
-        ? "click"
-        : rawType.includes("open")
-        ? "open"
-        : "event";
-      const at =
-        timestampMs(event.at as string | number | null | undefined) ||
-        timestampMs(event.createdAt as string | number | null | undefined) ||
-        timestampMs(event.timestamp as string | number | null | undefined) ||
-        timestampMs(event.occurredAt as string | number | null | undefined) ||
-        undefined;
-      return {
-        id: mailStringValue(event.id) || `${type}-${index}-${at || "now"}`,
-        type,
-        email: mailStringValue(event.email || event.recipient || event.recipientEmail || event.to),
-        subject: mailStringValue(event.subject || event.messageSubject || event.campaign),
-        url: mailStringValue(event.url || event.link || event.linkUrl || event.href) || undefined,
-        at,
-      };
-    })
-    .filter((item) => item.email || item.subject || item.url);
-}
-
-function stringifyMailParticipants(value: string | string[] | null | undefined) {
-  return Array.isArray(value) ? value.join(", ") : mailStringValue(value);
-}
-
-function mailStringValue(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function truncateMailSnippet(value: string) {
-  return value.replace(/\s+/g, " ").trim().slice(0, 180);
-}
-
-function timestampMs(value: string | number | null | undefined) {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return 0;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 async function rebuildRssFeedContextMenu(tabId: number) {
@@ -2544,15 +1547,31 @@ function clearActionPopup() {
   }
 }
 
+// Storage written by features this build no longer ships (password vault, mail
+// 2FA, cal tasks). Purged on install/start so removed features leave nothing —
+// including vault session metadata — behind in extension storage.
+const REMOVED_FEATURE_STORAGE_KEYS = [
+  "passwords.autofill.cache",
+  "passwords.autofill.selectedLoginId",
+  "passwords.nodewarden.serverUrl",
+  "passwords.disposableAliases",
+  "passwords.go.sessionStatus.v1",
+  "mail2fa.debug",
+] as const;
+
+function purgeRemovedFeatureStorage() {
+  void chrome.storage.local
+    .remove([...REMOVED_FEATURE_STORAGE_KEYS])
+    .catch((err) => {
+      safeRuntimeWarning("failed to purge removed-feature storage", err);
+    });
+}
+
 clearActionPopup();
-void purgeLegacyPasswordStorage().catch((err) => {
-  safeRuntimeWarning("failed to purge legacy password storage", err);
-});
+purgeRemovedFeatureStorage();
 chrome.runtime.onStartup.addListener(() => {
   clearActionPopup();
-  void purgeLegacyPasswordStorage().catch((err) => {
-    safeRuntimeWarning("failed to purge legacy password storage", err);
-  });
+  purgeRemovedFeatureStorage();
   void syncNormalBrowserWindows();
   void syncStoredHighlights().catch((err) => {
     safeRuntimeWarning("failed to sync stored highlights", err);
@@ -2562,9 +1581,7 @@ chrome.runtime.onStartup.addListener(() => {
 // Context menu for scraping
 chrome.runtime.onInstalled.addListener(() => {
   clearActionPopup();
-  void purgeLegacyPasswordStorage().catch((err) => {
-    safeRuntimeWarning("failed to purge legacy password storage", err);
-  });
+  purgeRemovedFeatureStorage();
   void syncNormalBrowserWindows();
   void syncStoredHighlights().catch((err) => {
     safeRuntimeWarning("failed to sync stored highlights", err);

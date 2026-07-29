@@ -50,8 +50,6 @@ describe("getSettings / setSettings", () => {
     expect(s.browserAgentCloudVisionEnabled).toBe(false)
     expect(s.browserAgentCloudOcrEnabled).toBe(false)
     expect(s.railSectionOrder).toEqual([])
-    expect(s.passwordManagerProvider).toBe("nodewarden-self-hosted")
-    expect(s.passwordAppUrl).toBe("https://go.lazee.workers.dev")
     expect(s.dopplerProject).toBe("")
     expect(s.dopplerConfig).toBe("")
     expect(s.dopplerScope).toBe("/")

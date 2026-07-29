@@ -3,12 +3,6 @@ import { join } from "node:path"
 import { beforeEach, describe, expect, it } from "vitest"
 import { sanitizeFilename, suggestMediaFilename } from "../src/lib/ai-rename"
 import {
-  LEGACY_PASSWORD_STORAGE_KEYS,
-  PASSWORD_STRATEGY,
-  getLegacyPasswordStorageState,
-  purgeLegacyPasswordStorage
-} from "../src/lib/password-strategy"
-import {
   STICKY_NOTES_LIMIT,
   addStickyNote,
   getStickyNotes,
@@ -57,47 +51,80 @@ describe("sticky notes", () => {
   })
 })
 
-describe("password strategy", () => {
-  it("uses go as the external vault without storing passwords in the extension", () => {
-    const ids = SECTIONS.map((section) => section.id)
-    expect(ids as string[]).toContain("passwords")
-    expect(PASSWORD_STRATEGY).toMatchObject({
-      activeManager: "nodewarden-self-hosted",
-      extensionStoresVaultPasswords: false,
-      passiveAutofillEnabled: false,
-      selfHostedNodewardenStatus: "go external vault"
-    })
+describe("removed features (slim build)", () => {
+  const REMOVED_SECTION_IDS = ["email", "signal", "tasks", "passwords", "quickInfo"]
+  const REMOVED_FILES = [
+    "src/sections/email/EmailSection.tsx",
+    "src/sections/signal/SignalSection.tsx",
+    "src/sections/tasks/TasksSection.tsx",
+    "src/sections/passwords/PasswordVaultSection.tsx",
+    "src/sections/quick-info/QuickInfoSection.tsx",
+    "src/lib/password-strategy.ts",
+    "src/lib/go-vault-client.ts",
+    "src/lib/go-vault-session-state.ts",
+    "src/lib/go-vault-readiness.ts",
+    "src/lib/mail-2fa.ts",
+    "src/lib/signal-types.ts",
+    "src/contents/go-vault-session.ts",
+    "src/contents/mail-2fa-autofill.ts",
+    "src/background/mail-proxy.ts",
+    "src/background/cal-tasks-proxy.ts",
+    "src/background/cal-tasks-origin.ts",
+    "native-host/signal-bridge.mjs"
+  ]
+
+  it("does not register mail, signal, tasks, passwords, or contact enrichment in the rail", () => {
+    const ids = SECTIONS.map((section) => section.id) as string[]
+    for (const removed of REMOVED_SECTION_IDS) {
+      expect(ids).not.toContain(removed)
+    }
   })
 
-  it("does not ship the old local password manager UI or passive autofill content script", () => {
-    expect(existsSync(join(process.cwd(), "src/sections/passwords/PasswordsSection.tsx"))).toBe(false)
-    expect(existsSync(join(process.cwd(), "src/sections/passwords/PasswordVaultSection.tsx"))).toBe(true)
-    expect(existsSync(join(process.cwd(), "src/contents/password-autofill.ts"))).toBe(false)
+  it("ships no source files for the removed features", () => {
+    for (const file of REMOVED_FILES) {
+      expect(existsSync(join(process.cwd(), file))).toBe(false)
+    }
   })
 
-  it("purges legacy local password cache keys", async () => {
-    await chrome.storage.local.set(
-      Object.fromEntries(LEGACY_PASSWORD_STORAGE_KEYS.map((key) => [key, "legacy"]))
-    )
-
-    expect((await getLegacyPasswordStorageState()).every((entry) => entry.present)).toBe(true)
-    await purgeLegacyPasswordStorage()
-    expect((await getLegacyPasswordStorageState()).every((entry) => !entry.present)).toBe(true)
-  })
-
-  it("fills two-factor text inputs from recent mail.fly.pm verification emails", () => {
-    const content = readFileSync(
-      join(process.cwd(), "src/contents/mail-2fa-autofill.ts"),
+  it("keeps no background message handlers or content scripts for the removed features", () => {
+    const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
+    const buildScript = readFileSync(
+      join(process.cwd(), "scripts/build-extension.mjs"),
       "utf8"
     )
+    for (const handler of [
+      "TASKS_API_REQUEST",
+      "MAIL_2FA_CODE_REQUEST",
+      "MAIL_INBOX_LIST_REQUEST",
+      "MAIL_THREAD_DETAIL_REQUEST",
+      "MAIL_ACTIVITY_LIST_REQUEST",
+      "GO_VAULT_SESSION_STATUS"
+    ]) {
+      expect(background).not.toContain(handler)
+    }
+    expect(buildScript).not.toContain("mail-2fa-autofill")
+    expect(buildScript).not.toContain("go-vault-session")
+  })
+
+  it("purges storage keys the removed features used to write", async () => {
     const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8")
-    expect(content).toContain('type: "MAIL_2FA_CODE_REQUEST"')
-    expect(content).toContain('input.autocomplete?.toLowerCase() === "one-time-code"')
-    expect(content).toContain("fillTarget(target, code)")
-    expect(content).not.toContain(".click()")
-    expect(background).toContain("getMailFlyPmCookieHeader")
-    expect(background).toContain("buildMailTwoFactorListUrl")
-    expect(background).toContain("findBestMailTwoFactorCode")
+    for (const key of [
+      "passwords.autofill.cache",
+      "passwords.go.sessionStatus.v1",
+      "mail2fa.debug"
+    ]) {
+      expect(background).toContain(key)
+    }
+    expect(background).toContain("purgeRemovedFeatureStorage()")
+  })
+
+  it("keeps the new tab saved-URL defaults untouched", () => {
+    const quickLinks = readFileSync(
+      join(process.cwd(), "src/newtab-quick-links.ts"),
+      "utf8"
+    )
+    expect(quickLinks).toContain('url: "https://mail.fly.pm"')
+    expect(quickLinks).toContain('url: "https://alex.coffee"')
   })
 })
 
