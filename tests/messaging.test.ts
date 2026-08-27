@@ -75,6 +75,22 @@ describe("scanner messaging", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1)
   })
 
+  it("does not inject over a scanner whose response channel closed", async () => {
+    const sendMessage = globalThis.chrome.tabs.sendMessage as ReturnType<typeof vi.fn>
+    const executeScript = globalThis.chrome.scripting.executeScript as ReturnType<typeof vi.fn>
+    sendMessage.mockImplementation((_tabId, _message, callback) => {
+      ;(globalThis.chrome.runtime as { lastError?: unknown }).lastError = {
+        message: "The message port closed before a response was received."
+      }
+      callback(undefined)
+      delete (globalThis.chrome.runtime as { lastError?: unknown }).lastError
+    })
+
+    await expect(sendToScanner(12, { type: "scan:run" })).resolves.toBeNull()
+    expect(executeScript).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
   it("normalizes an empty callback response to null", async () => {
     const sendMessage = globalThis.chrome.tabs.sendMessage as ReturnType<typeof vi.fn>
     sendMessage.mockImplementation((_tabId, _message, callback) => callback(undefined))

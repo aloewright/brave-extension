@@ -2,16 +2,33 @@ import type { InspectorMessage } from "../types"
 
 const SCANNER_SCRIPT = "content/scanner.js"
 
-export async function sendToTab<T = unknown>(tabId: number, message: InspectorMessage): Promise<T | null> {
+type TabMessageAttempt<T> = {
+  response: T | null
+  error: string | null
+}
+
+async function sendToTabAttempt<T>(
+  tabId: number,
+  message: InspectorMessage
+): Promise<TabMessageAttempt<T>> {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve(null)
+      const error = chrome.runtime.lastError?.message ?? null
+      if (error) {
+        resolve({ response: null, error })
         return
       }
-      resolve(response == null ? null : (response as T))
+      resolve({ response: response == null ? null : (response as T), error: null })
     })
   })
+}
+
+export async function sendToTab<T = unknown>(tabId: number, message: InspectorMessage): Promise<T | null> {
+  return (await sendToTabAttempt<T>(tabId, message)).response
+}
+
+function isMissingReceiverError(error: string | null): boolean {
+  return Boolean(error && /receiving end does not exist/i.test(error))
 }
 
 /**
@@ -24,8 +41,9 @@ export async function sendToScanner<T = unknown>(
   tabId: number,
   message: InspectorMessage
 ): Promise<T | null> {
-  const response = await sendToTab<T>(tabId, message)
-  if (response !== null) return response
+  const firstAttempt = await sendToTabAttempt<T>(tabId, message)
+  if (firstAttempt.response !== null) return firstAttempt.response
+  if (!isMissingReceiverError(firstAttempt.error)) return null
   if (!chrome.scripting?.executeScript) return null
 
   try {
