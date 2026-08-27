@@ -7,7 +7,13 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.34.5",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "9.15.9",
+      "onFail": "download"
+    }
+  },
   "scripts": {
     "postinstall": "bash scripts/scrub-native-xattrs.sh && node scripts/scrub-quarantine.mjs",
     "dev": "node scripts/build-extension.mjs --watch",
