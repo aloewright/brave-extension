@@ -7,7 +7,7 @@ import type {
   ScanResult,
   ScannedAsset
 } from "../types"
-import { getActiveTab, sendToTab } from "../utils/messaging"
+import { getActiveTab, sendToScanner } from "../utils/messaging"
 import { buildZip, dataUrlToBytes, textEntry } from "../utils/zip"
 import { AssetCard } from "./AssetCard"
 import { ColorFormatToggle } from "./ColorFormatToggle"
@@ -46,7 +46,7 @@ export function ScanTab({ settings, onToast }: Props) {
     const tab = await getActiveTab()
     if (!tab?.id) return onToast("No active tab")
     setBusy(true)
-    const resp = await sendToTab<{ ok: boolean; result?: ScanResult; error?: string }>(
+    const resp = await sendToScanner<{ ok: boolean; result?: ScanResult; error?: string }>(
       tab.id,
       { type: "scan:run" } satisfies InspectorMessage
     )
@@ -108,7 +108,7 @@ export function ScanTab({ settings, onToast }: Props) {
     async function worker() {
       while (cursor < remoteAssets.length) {
         const asset = remoteAssets[cursor++]
-        const resp = await sendToTab<{ ok: boolean; dataUrl: string | null }>(tabId, {
+        const resp = await sendToScanner<{ ok: boolean; dataUrl: string | null }>(tabId, {
           type: "asset:fetch",
           url: asset.url
         } satisfies InspectorMessage)
