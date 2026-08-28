@@ -48,6 +48,12 @@ describe("custom extension build path", () => {
     expect(script).toContain('type: "module"');
   });
 
+  it("disables preload hints that Chromium rejects in extension pages", () => {
+    const script = readProjectFile("scripts/build-extension.mjs");
+
+    expect(script).toContain("modulePreload: false");
+  });
+
   it("uses explicit HTML entrypoints instead of framework-generated pages", () => {
     for (const path of [
       "sidepanel.html",

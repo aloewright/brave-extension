@@ -128,6 +128,9 @@ function pageBuildConfig() {
       outDir,
       emptyOutDir: true,
       manifest: ".vite/manifest.json",
+      // Chromium 151 rejects extension-page module preloads as cross-world
+      // resources (crbug.com/540906914). Static module imports still load them.
+      modulePreload: false,
       minify: "oxc",
       target: "chrome120",
       rolldownOptions: {
