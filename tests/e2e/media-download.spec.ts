@@ -10,7 +10,7 @@ test('one click saves a video and extracts MP3 through the native helper', async
   test.setTimeout(90000);
   const root = mkdtempSync(join(tmpdir(), 'media-download-test-'));
   const profile = join(root, 'profile');
-  const build = realpathSync(resolve('build'));
+  const build = realpathSync(resolve(process.env.MEDIA_TEST_BUILD_PATH || 'build'));
   const id = createHash('sha256').update(build).digest('hex').slice(0, 32)
     .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
   const stem = `media-test-${randomUUID()}`;
@@ -29,7 +29,13 @@ test('one click saves a video and extracts MP3 through the native helper', async
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as { port: number };
-  const context = await chromium.launchPersistentContext(profile, { headless: true, channel: 'chromium', args: [`--disable-extensions-except=${build}`, `--load-extension=${build}`] });
+  const context = await chromium.launchPersistentContext(profile, {
+    headless: true,
+    ...(process.env.MEDIA_TEST_BROWSER_EXECUTABLE
+      ? { executablePath: process.env.MEDIA_TEST_BROWSER_EXECUTABLE }
+      : { channel: 'chromium' }),
+    args: [`--disable-extensions-except=${build}`, `--load-extension=${build}`],
+  });
   try {
     const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
     expect(sw.url()).toContain(id);
