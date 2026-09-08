@@ -1,4 +1,5 @@
 import { ulid } from "./lib/ulid";
+import { startMediaDownload } from "./lib/media-download";
 import { MENU_ID_TO_MODE } from "./lib/joplin-types";
 import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
 import { handleClipRequest } from "./lib/joplin-clip-handler";
@@ -918,6 +919,15 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "MEDIA_DOWNLOAD") {
+    if (!sender.tab?.id || !sender.url) {
+      sendResponse({ ok: false, error: "Open a video web page first." });
+      return;
+    }
+    Promise.resolve().then(() => startMediaDownload(message.mode, sender.url!, message.sourceUrl))
+      .then(sendResponse, error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type === GO_VAULT_SESSION_STATUS_MESSAGE) {
     (async () => {
       const senderOrigin = goVaultOriginFromUrl(sender.url);
@@ -2578,6 +2588,14 @@ chrome.runtime.onInstalled.addListener(() => {
       title: "Scrape page to Brave Dev Extension",
       contexts: ["page"],
     });
+    for (const mode of ["video", "audio"] as const) {
+      chrome.contextMenus.create({
+        id: `media-download-${mode}`,
+        title: `Download ${mode}`,
+        contexts: ["video", "audio", "page"],
+        documentUrlPatterns: ["http://*/*", "https://*/*"],
+      });
+    }
     chrome.contextMenus.create({
       id: "save-highlight",
       title: "Save highlight",
@@ -2640,6 +2658,19 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
+  if (info.menuItemId === "media-download-video" || info.menuItemId === "media-download-audio") {
+    const mode = info.menuItemId === "media-download-audio" ? "audio" : "video";
+    await chrome.action.setBadgeText({ tabId: tab.id, text: "↓" });
+    try {
+      const result = await startMediaDownload(mode, info.frameUrl || info.pageUrl || tab.url || "", info.srcUrl);
+      await chrome.action.setBadgeText({ tabId: tab.id, text: result.ok ? "✓" : "!" });
+      await chrome.action.setTitle({ tabId: tab.id, title: result.ok ? `Saved to Downloads: ${result.filename}` : result.error || "Download failed" });
+    } catch (error) {
+      await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
+      await chrome.action.setTitle({ tabId: tab.id, title: error instanceof Error ? error.message : "Download failed" });
+    }
+    return;
+  }
 
   // Joplin clipper — dispatch to handleClipRequest via dispatchClip.
   const mode: ClipMode | undefined = MENU_ID_TO_MODE[String(info.menuItemId)];
