@@ -23,7 +23,7 @@ export function startMediaDownload(mode: MediaDownloadMode, pageUrl: string, sou
     port.onMessage.addListener(message => { resolve(message); port.disconnect(); });
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError;
-      resolve({ ok: false, error: error?.message ? 'The download helper is unavailable. Run the media helper installer, then reload the extension.' : 'The download helper disconnected.' });
+      resolve({ ok: false, error: error?.message ? `Download helper: ${error.message}` : 'The download helper disconnected.' });
     });
     port.postMessage({ mode, url });
   }).finally(() => { activeDownloads.delete(key); });

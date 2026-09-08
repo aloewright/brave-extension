@@ -8,7 +8,9 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const build = realpathSync(resolve(process.argv[2] || join(root, 'build')));
 const extensionId = createHash('sha256').update(build).digest('hex').slice(0, 32)
   .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
-const dir = join(homedir(), 'Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts');
+// Brave on macOS overrides its native-host lookup to Chrome's directory.
+// This is shared by standard Brave and Brave Origin, not their profile roots.
+const dir = join(homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
 mkdirSync(dir, { recursive: true });
 const wrapper = join(dir, 'media-download.sh');
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
