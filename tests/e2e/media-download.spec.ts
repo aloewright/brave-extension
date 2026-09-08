@@ -31,13 +31,15 @@ test('one click saves a video and extracts MP3 through the native helper', async
   const address = server.address() as { port: number };
   const context = await chromium.launchPersistentContext(profile, {
     headless: true,
+    ignoreDefaultArgs: ['--disable-extensions'],
+    timeout: 15000,
     ...(process.env.MEDIA_TEST_BROWSER_EXECUTABLE
       ? { executablePath: process.env.MEDIA_TEST_BROWSER_EXECUTABLE }
       : { channel: 'chromium' }),
     args: [`--disable-extensions-except=${build}`, `--load-extension=${build}`],
   });
   try {
-    const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
     expect(sw.url()).toContain(id);
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/`);
