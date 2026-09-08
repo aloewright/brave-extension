@@ -1,6 +1,6 @@
 import { test, expect, chromium } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -14,6 +14,7 @@ test('one click saves a video and extracts MP3 through the native helper', async
   const id = createHash('sha256').update(build).digest('hex').slice(0, 32)
     .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
   const stem = `media-test-${randomUUID()}`;
+  const savedFiles: string[] = [];
   const video = join(root, `${stem}.mp4`);
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:d=1',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', video]);
@@ -48,6 +49,7 @@ test('one click saves a video and extracts MP3 through the native helper', async
       await page.getByRole('button', { name: `Download ${mode}`, exact: true }).click();
       await expect(page.getByRole('status')).toContainText('Saved to Downloads:', { timeout: 30000 });
       const filename = (await page.getByRole('status').innerText()).replace('Saved to Downloads: ', '');
+      savedFiles.push(join(homedir(), 'Downloads', filename));
       const streams = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', join(homedir(), 'Downloads', filename)], { encoding: 'utf8' })).streams;
       expect(streams.some((s: { codec_type: string }) => s.codec_type === 'audio')).toBe(true);
       expect(streams.some((s: { codec_type: string }) => s.codec_type === 'video')).toBe(mode === 'video');
@@ -56,9 +58,7 @@ test('one click saves a video and extracts MP3 through the native helper', async
   } finally {
     await context.close();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    for (const filename of readdirSync(join(homedir(), 'Downloads'))) {
-      if (filename.startsWith(stem)) rmSync(join(homedir(), 'Downloads', filename));
-    }
+    for (const filename of savedFiles) rmSync(filename, { force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });
