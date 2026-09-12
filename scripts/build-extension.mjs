@@ -13,6 +13,13 @@ const packageJson = JSON.parse(
 
 const contentScripts = [
   {
+    name: "media-download",
+    input: "src/contents/media-download.ts",
+    matches: ["http://*/*", "https://*/*"],
+    run_at: "document_idle",
+    all_frames: true,
+  },
+  {
     name: "github",
     input: "src/contents/github.ts",
     matches: ["https://github.com/*"],

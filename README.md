@@ -69,6 +69,22 @@ Rolldown-Vite/Oxc build path for Brave and Chromium browsers.
 - **Auto picture-in-picture:** detects playable media across tabs and can move
   eligible video into picture-in-picture based on extension settings.
 
+## One-click video and audio downloads
+
+Hover over a video and click **Download video** or **Download audio**. The same
+actions are available in the page/video right-click menu. Files save to Downloads;
+audio is extracted as MP3. Streaming players are resolved from their page URL.
+The buttons show completion or the downloader's error. The context menu reports
+status on the extension badge (hover the icon for details).
+
+This feature uses a small, separate native helper with yt-dlp and FFmpeg. It does
+not require the terminal/MCP native host. On macOS, install those tools, build the
+extension, then run `node scripts/install-media-download-host.mjs /absolute/path/to/build`
+before loading that exact folder unpacked in Brave. Moving the folder changes its
+extension ID, so re-run the installer after moving it. No browser cookies or saved
+credentials are read. Sites requiring login or protected playback may reject the
+download. MP4 is preferred for video, with the source format retained if needed.
+
 ## Architecture
 
 - **Extension UI:** React + TypeScript side panel, popup, content scripts, and
