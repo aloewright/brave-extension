@@ -39,4 +39,22 @@ describe('one-click media downloads', () => {
     expect(shouldShowMediaDownloadButton('video', settings)).toBe(false);
     expect(shouldShowMediaDownloadButton('audio', settings)).toBe(true);
   });
+
+  it('shows the audio button by default, including for existing settings', () => {
+    expect(DEFAULT_SETTINGS.hideAudioDownloadButton).toBe(false);
+    for (const settings of [DEFAULT_SETTINGS, {}, undefined, null]) {
+      expect(shouldShowMediaDownloadButton('audio', settings)).toBe(true);
+    }
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('controls audio and video independently (hide video: %s, hide audio: %s)', (hideVideoDownloadButton, hideAudioDownloadButton) => {
+    const settings = { hideVideoDownloadButton, hideAudioDownloadButton };
+    expect(shouldShowMediaDownloadButton('video', settings)).toBe(!hideVideoDownloadButton);
+    expect(shouldShowMediaDownloadButton('audio', settings)).toBe(!hideAudioDownloadButton);
+  });
 });

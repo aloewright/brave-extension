@@ -39,6 +39,8 @@ describe("getSettings / setSettings", () => {
     expect(s.autoScrape).toBe(false)
     expect(s.captureConsole).toBe(true)
     expect(s.captureNetwork).toBe(false)
+    expect(s.hideVideoDownloadButton).toBe(false)
+    expect(s.hideAudioDownloadButton).toBe(false)
     // Cloudos defaults still present until users explicitly clear them.
     expect(s.cloudosSyncEnabled).toBe(false)
     // New sidebar defaults from Phase 5.
@@ -134,6 +136,24 @@ describe("getSettings / setSettings", () => {
     // Untouched defaults still present
     expect(s.backend).toBe("claude")
     expect(s.workingDirectory).toBe("~")
+  })
+
+  it("persists audio button visibility without changing the video preference", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: { hideVideoDownloadButton: true }
+    })
+    expect((await getSettings()).hideAudioDownloadButton).toBe(false)
+
+    await setSettings({ hideAudioDownloadButton: true })
+    expect(await getSettings()).toMatchObject({
+      hideVideoDownloadButton: true,
+      hideAudioDownloadButton: true
+    })
+    await setSettings({ hideAudioDownloadButton: false })
+    expect(await getSettings()).toMatchObject({
+      hideVideoDownloadButton: true,
+      hideAudioDownloadButton: false
+    })
   })
 
   it("setSettings shallow-merges over current settings", async () => {

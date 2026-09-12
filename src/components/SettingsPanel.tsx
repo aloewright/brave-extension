@@ -1620,9 +1620,15 @@ export function SettingsPanel({
             />
             <Toggle
               label="Hide Download video button"
-              description="Keep the on-page Download audio control, but hide Download video"
+              description="Hide the on-page Download video control"
               checked={settings.hideVideoDownloadButton}
               onChange={(v) => onUpdate({ hideVideoDownloadButton: v })}
+            />
+            <Toggle
+              label="Hide Download audio button"
+              description="Hide the on-page Download audio control"
+              checked={settings.hideAudioDownloadButton}
+              onChange={(v) => onUpdate({ hideAudioDownloadButton: v })}
             />
           </div>
         </SettingsAccordionSection>

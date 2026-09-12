@@ -229,6 +229,7 @@ export interface Settings {
   railSectionOrder: string[]
   hideRailQuickActions: boolean
   hideVideoDownloadButton: boolean
+  hideAudioDownloadButton: boolean
   passwordManagerProvider: PasswordManagerProvider
   passwordAppUrl: string
   signalEnabled: boolean
@@ -338,6 +339,7 @@ export const DEFAULT_SETTINGS: Settings = {
   railSectionOrder: [],
   hideRailQuickActions: false,
   hideVideoDownloadButton: false,
+  hideAudioDownloadButton: false,
   passwordManagerProvider: "nodewarden-self-hosted",
   passwordAppUrl: "https://go.lazee.workers.dev",
   signalEnabled: false,
