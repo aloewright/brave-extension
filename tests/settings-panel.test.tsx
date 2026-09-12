@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { BACKEND_INFO, DEFAULT_SETTINGS } from "../src/types";
-import type { CLIBackend, DopplerStatus, MCPStatus } from "../src/types";
+import type {
+  CLIBackend,
+  DopplerStatus,
+  MCPStatus,
+  Settings,
+} from "../src/types";
 
 // PDX-124 regression: SettingsPanel previously set `ringColor` inline,
 // which is not a valid React.CSSProperties key. The fix routes the active
@@ -83,7 +88,9 @@ const dopplerStatus: DopplerStatus = {
   error: null,
 };
 
-async function renderSettingsPanel() {
+async function renderSettingsPanel(
+  onUpdate: (patch: Partial<Settings>) => void = () => {},
+) {
   (globalThis as typeof globalThis & { React: typeof React }).React = React;
   const { SettingsPanel } = await import("../src/components/SettingsPanel");
   const host = document.createElement("div");
@@ -94,7 +101,7 @@ async function renderSettingsPanel() {
     root.render(
       <SettingsPanel
         settings={DEFAULT_SETTINGS}
-        onUpdate={() => {}}
+        onUpdate={onUpdate}
         onClose={() => {}}
         nativeHost={{
           connected: true,
@@ -196,6 +203,26 @@ describe("SettingsPanel — async action feedback", () => {
       expect(button?.disabled).toBe(true);
       expect(status).not.toBeNull();
       expect(status?.className).toContain("animate-spin");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("exposes the video download button visibility setting", async () => {
+    const onUpdate = vi.fn();
+    const { host, cleanup } = await renderSettingsPanel(onUpdate);
+    try {
+      const text = Array.from(host.querySelectorAll("div")).find(
+        (node) => node.textContent === "Hide Download video button",
+      );
+      const checkbox = text?.parentElement?.parentElement?.querySelector<HTMLInputElement>(
+        'input[type="checkbox"]',
+      );
+
+      expect(checkbox).not.toBeNull();
+      expect(checkbox?.checked).toBe(false);
+      await act(async () => checkbox?.click());
+      expect(onUpdate).toHaveBeenCalledWith({ hideVideoDownloadButton: true });
     } finally {
       cleanup();
     }

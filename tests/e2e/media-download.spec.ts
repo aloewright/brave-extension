@@ -45,6 +45,21 @@ test('one click saves a video and extracts MP3 through the native helper', async
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/`);
     await page.locator('video').hover();
+
+    const videoButton = page.getByRole('button', { name: 'Download video', exact: true });
+    const audioButton = page.getByRole('button', { name: 'Download audio', exact: true });
+    await expect(videoButton).toBeVisible();
+    await expect(audioButton).toBeVisible();
+    await sw.evaluate(async () => {
+      await chrome.storage.local.set({ 'ai-dev-settings': { hideVideoDownloadButton: true } });
+    });
+    await expect(videoButton).toBeHidden();
+    await expect(audioButton).toBeVisible();
+    await sw.evaluate(async () => {
+      await chrome.storage.local.set({ 'ai-dev-settings': { hideVideoDownloadButton: false } });
+    });
+    await expect(videoButton).toBeVisible();
+
     for (const mode of ['video', 'audio']) {
       await page.getByRole('button', { name: `Download ${mode}`, exact: true }).click();
       await expect(page.getByRole('status')).toContainText('Saved to Downloads:', { timeout: 30000 });
