@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-test('the setting hides only the video download control in an open tab', async () => {
+test('audio and video download visibility updates independently and persists across reloads', async () => {
   const root = mkdtempSync(join(tmpdir(), 'media-download-settings-test-'));
   const profile = join(root, 'profile');
   const build = realpathSync(resolve(process.env.MEDIA_TEST_BUILD_PATH || 'build'));
@@ -38,15 +38,36 @@ test('the setting hides only the video download control in an open tab', async (
     await expect(audioButton).toBeVisible();
 
     await worker.evaluate(async () => {
+      await chrome.storage.local.set({ 'ai-dev-settings': { hideAudioDownloadButton: true } });
+    });
+    await expect(videoButton).toBeVisible();
+    await expect(audioButton).toBeHidden();
+
+    await page.reload();
+    await page.locator('video').hover();
+    await expect(videoButton).toBeVisible();
+    await expect(audioButton).toBeHidden();
+
+    await worker.evaluate(async () => {
       await chrome.storage.local.set({ 'ai-dev-settings': { hideVideoDownloadButton: true } });
     });
     await expect(videoButton).toBeHidden();
     await expect(audioButton).toBeVisible();
 
     await worker.evaluate(async () => {
-      await chrome.storage.local.set({ 'ai-dev-settings': { hideVideoDownloadButton: false } });
+      await chrome.storage.local.set({
+        'ai-dev-settings': { hideVideoDownloadButton: true, hideAudioDownloadButton: true },
+      });
+    });
+    await expect(videoButton).toBeHidden();
+    await expect(audioButton).toBeHidden();
+    await expect(page.locator('.bar')).toBeHidden();
+
+    await worker.evaluate(async () => {
+      await chrome.storage.local.remove('ai-dev-settings');
     });
     await expect(videoButton).toBeVisible();
+    await expect(audioButton).toBeVisible();
   } finally {
     await context?.close();
     await new Promise<void>((resolveClosed) => server.close(() => resolveClosed()));

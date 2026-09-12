@@ -1,5 +1,5 @@
 // Isolated-world controls: the page cannot send native download requests.
-import { shouldShowMediaDownloadButton } from '../lib/media-download-controls';
+import { shouldShowMediaDownloadButton, type MediaDownloadControlSettings } from '../lib/media-download-controls';
 import type { MediaDownloadMode } from '../lib/media-download';
 import { getSettings, SETTINGS_STORAGE_KEY } from '../storage';
 
@@ -14,7 +14,7 @@ status.className = 'status';
 status.setAttribute('role', 'status');
 let selected: HTMLVideoElement | null = null;
 let busy = false;
-let settingsReady = false;
+let controlsVisible = false;
 const buttons = new Map<MediaDownloadMode, HTMLButtonElement>();
 for (const mode of ['video', 'audio'] as const) {
   const button = document.createElement('button');
@@ -40,7 +40,7 @@ bar.append(status);
 shadow.append(style, bar);
 document.documentElement.append(host);
 function position() {
-  if (!settingsReady || !selected?.isConnected) { host.style.display = 'none'; return; }
+  if (!controlsVisible || !selected?.isConnected) { host.style.display = 'none'; return; }
   const rect = selected.getBoundingClientRect();
   host.style.display = rect.width > 80 && rect.height > 60 && rect.bottom > 0 && rect.top < innerHeight ? 'block' : 'none';
   host.style.left = `${Math.max(8, Math.min(rect.left + 8, innerWidth - 285))}px`;
@@ -65,11 +65,11 @@ document.addEventListener('pointermove', event => {
 addEventListener('scroll', position, true);
 addEventListener('resize', position);
 
-function applySettings(settings?: { hideVideoDownloadButton?: boolean } | null) {
+function applySettings(settings?: Partial<MediaDownloadControlSettings> | null) {
   for (const [mode, button] of buttons) {
     button.hidden = !shouldShowMediaDownloadButton(mode, settings);
   }
-  settingsReady = true;
+  controlsVisible = [...buttons.values()].some(button => !button.hidden);
   position();
 }
 

@@ -208,12 +208,15 @@ describe("SettingsPanel — async action feedback", () => {
     }
   });
 
-  it("exposes the video download button visibility setting", async () => {
+  it.each([
+    ["video", "hideVideoDownloadButton"],
+    ["audio", "hideAudioDownloadButton"],
+  ] as const)("exposes the %s download button visibility setting", async (mode, setting) => {
     const onUpdate = vi.fn();
     const { host, cleanup } = await renderSettingsPanel(onUpdate);
     try {
       const text = Array.from(host.querySelectorAll("div")).find(
-        (node) => node.textContent === "Hide Download video button",
+        (node) => node.textContent === `Hide Download ${mode} button`,
       );
       const checkbox = text?.parentElement?.parentElement?.querySelector<HTMLInputElement>(
         'input[type="checkbox"]',
@@ -222,7 +225,7 @@ describe("SettingsPanel — async action feedback", () => {
       expect(checkbox).not.toBeNull();
       expect(checkbox?.checked).toBe(false);
       await act(async () => checkbox?.click());
-      expect(onUpdate).toHaveBeenCalledWith({ hideVideoDownloadButton: true });
+      expect(onUpdate).toHaveBeenCalledWith({ [setting]: true });
     } finally {
       cleanup();
     }
