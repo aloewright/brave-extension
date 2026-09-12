@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { shouldShowMediaDownloadButton } from '../src/lib/media-download-controls';
 import { mediaDownloadUrl } from '../src/lib/media-download';
+import { DEFAULT_SETTINGS } from '../src/types';
 import { downloadArguments } from '../native-host/media-download.mjs';
 
 describe('one-click media downloads', () => {
@@ -27,5 +29,14 @@ describe('one-click media downloads', () => {
     expect(video).toContain('--merge-output-format');
     expect(video).not.toContain('--extract-audio');
     expect(() => downloadArguments({ ...request, mode: 'exec' }, '/tmp')).toThrow();
+  });
+
+  it('can hide only the video button through Settings', () => {
+    expect(DEFAULT_SETTINGS.hideVideoDownloadButton).toBe(false);
+    expect(shouldShowMediaDownloadButton('video', DEFAULT_SETTINGS)).toBe(true);
+
+    const settings = { hideVideoDownloadButton: true };
+    expect(shouldShowMediaDownloadButton('video', settings)).toBe(false);
+    expect(shouldShowMediaDownloadButton('audio', settings)).toBe(true);
   });
 });

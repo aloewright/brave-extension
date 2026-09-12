@@ -8,8 +8,10 @@ import type {
 } from "./types"
 import { DEFAULT_INSPECTOR_SETTINGS, DEFAULT_SETTINGS } from "./types"
 
+export const SETTINGS_STORAGE_KEY = "ai-dev-settings"
+
 const KEYS = {
-  settings: "ai-dev-settings",
+  settings: SETTINGS_STORAGE_KEY,
   // Legacy single-array key — migrated to per-backend shards on first read.
   // Kept around (not deleted) until every backend has been migrated, so that
   // switching backends never wipes history mid-migration.

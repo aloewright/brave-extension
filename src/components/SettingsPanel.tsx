@@ -1618,6 +1618,12 @@ export function SettingsPanel({
               checked={settings.captureNetwork}
               onChange={(v) => onUpdate({ captureNetwork: v })}
             />
+            <Toggle
+              label="Hide Download video button"
+              description="Keep the on-page Download audio control, but hide Download video"
+              checked={settings.hideVideoDownloadButton}
+              onChange={(v) => onUpdate({ hideVideoDownloadButton: v })}
+            />
           </div>
         </SettingsAccordionSection>
 
