@@ -72,8 +72,8 @@ test('download buttons are hidden by default and can be enabled independently fr
     for (const width of [1024, 420]) {
       await settingsPage.setViewportSize({ width, height: 800 });
       await expect(topSection).toBeInViewport();
-      await expect(hideVideo).toBeInViewport();
-      await expect(hideAudio).toBeInViewport();
+      await expect(hideVideo.locator('..')).toBeInViewport();
+      await expect(hideAudio.locator('..')).toBeInViewport();
       if (process.env.MEDIA_TEST_SCREENSHOT_DIR) {
         await settingsPage.screenshot({ path: join(process.env.MEDIA_TEST_SCREENSHOT_DIR, `download-settings-${width}.png`) });
       }
