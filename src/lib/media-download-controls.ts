@@ -11,6 +11,6 @@ export function shouldShowMediaDownloadButton(
   settings?: Partial<MediaDownloadControlSettings> | null,
 ): boolean {
   return mode === "video"
-    ? settings?.hideVideoDownloadButton !== true
-    : settings?.hideAudioDownloadButton !== true
+    ? settings?.hideVideoDownloadButton === false
+    : settings?.hideAudioDownloadButton === false
 }

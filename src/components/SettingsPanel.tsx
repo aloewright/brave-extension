@@ -466,6 +466,23 @@ export function SettingsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        <SettingsAccordionSection title="Download buttons" defaultOpen>
+          <div className="space-y-2">
+            <Toggle
+              label="Hide Download video button"
+              description="Hidden by default. Turn off to show it on videos."
+              checked={settings.hideVideoDownloadButton}
+              onChange={(v) => onUpdate({ hideVideoDownloadButton: v })}
+            />
+            <Toggle
+              label="Hide Download audio button"
+              description="Hidden by default. Turn off to show it on videos."
+              checked={settings.hideAudioDownloadButton}
+              onChange={(v) => onUpdate({ hideAudioDownloadButton: v })}
+            />
+          </div>
+        </SettingsAccordionSection>
+
         {/* Appearance */}
         <SettingsAccordionSection
           title="Appearance"
@@ -1618,18 +1635,6 @@ export function SettingsPanel({
               checked={settings.captureNetwork}
               onChange={(v) => onUpdate({ captureNetwork: v })}
             />
-            <Toggle
-              label="Hide Download video button"
-              description="Hide the on-page Download video control"
-              checked={settings.hideVideoDownloadButton}
-              onChange={(v) => onUpdate({ hideVideoDownloadButton: v })}
-            />
-            <Toggle
-              label="Hide Download audio button"
-              description="Hide the on-page Download audio control"
-              checked={settings.hideAudioDownloadButton}
-              onChange={(v) => onUpdate({ hideAudioDownloadButton: v })}
-            />
           </div>
         </SettingsAccordionSection>
 
@@ -2179,6 +2184,7 @@ function Toggle({
       >
         <input
           type="checkbox"
+          aria-label={label}
           checked={checked}
           disabled={disabled}
           onChange={() => onChange(!checked)}

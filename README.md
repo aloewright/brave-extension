@@ -71,8 +71,11 @@ Rolldown-Vite/Oxc build path for Brave and Chromium browsers.
 
 ## One-click video and audio downloads
 
-Hover over a video and click **Download video** or **Download audio**. The same
-actions are available in the page/video right-click menu. Files save to Downloads;
+The on-page **Download video** and **Download audio** buttons are hidden by default.
+At the top of **Settings → Download buttons**, turn off either **Hide** switch to
+show that button when hovering over a video. Each preference is saved independently;
+existing explicit choices are preserved. These switches do not affect transcript
+recording or the download actions in the page/video right-click menu. Files save to Downloads;
 audio is extracted as MP3. Streaming players are resolved from their page URL.
 The buttons show completion or the downloader's error. The context menu reports
 status on the extension badge (hover the icon for details).
