@@ -31,20 +31,17 @@ describe('one-click media downloads', () => {
     expect(() => downloadArguments({ ...request, mode: 'exec' }, '/tmp')).toThrow();
   });
 
-  it('can hide only the video button through Settings', () => {
-    expect(DEFAULT_SETTINGS.hideVideoDownloadButton).toBe(false);
-    expect(shouldShowMediaDownloadButton('video', DEFAULT_SETTINGS)).toBe(true);
-
-    const settings = { hideVideoDownloadButton: true };
-    expect(shouldShowMediaDownloadButton('video', settings)).toBe(false);
-    expect(shouldShowMediaDownloadButton('audio', settings)).toBe(true);
+  it.each(['video', 'audio'] as const)('hides the %s button by default, including for missing or reset settings', (mode) => {
+    expect(DEFAULT_SETTINGS.hideVideoDownloadButton).toBe(true);
+    expect(DEFAULT_SETTINGS.hideAudioDownloadButton).toBe(true);
+    for (const settings of [DEFAULT_SETTINGS, {}, undefined, null]) {
+      expect(shouldShowMediaDownloadButton(mode, settings)).toBe(false);
+    }
   });
 
-  it('shows the audio button by default, including for existing settings', () => {
-    expect(DEFAULT_SETTINGS.hideAudioDownloadButton).toBe(false);
-    for (const settings of [DEFAULT_SETTINGS, {}, undefined, null]) {
-      expect(shouldShowMediaDownloadButton('audio', settings)).toBe(true);
-    }
+  it('keeps an unset button hidden when the other button is explicitly shown', () => {
+    expect(shouldShowMediaDownloadButton('audio', { hideVideoDownloadButton: false })).toBe(false);
+    expect(shouldShowMediaDownloadButton('video', { hideAudioDownloadButton: false })).toBe(false);
   });
 
   it.each([

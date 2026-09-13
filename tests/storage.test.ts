@@ -39,8 +39,8 @@ describe("getSettings / setSettings", () => {
     expect(s.autoScrape).toBe(false)
     expect(s.captureConsole).toBe(true)
     expect(s.captureNetwork).toBe(false)
-    expect(s.hideVideoDownloadButton).toBe(false)
-    expect(s.hideAudioDownloadButton).toBe(false)
+    expect(s.hideVideoDownloadButton).toBe(true)
+    expect(s.hideAudioDownloadButton).toBe(true)
     // Cloudos defaults still present until users explicitly clear them.
     expect(s.cloudosSyncEnabled).toBe(false)
     // New sidebar defaults from Phase 5.
@@ -136,20 +136,35 @@ describe("getSettings / setSettings", () => {
     // Untouched defaults still present
     expect(s.backend).toBe("claude")
     expect(s.workingDirectory).toBe("~")
+    expect(s.hideVideoDownloadButton).toBe(true)
+    expect(s.hideAudioDownloadButton).toBe(true)
   })
 
   it("persists audio button visibility without changing the video preference", async () => {
     await chrome.storage.local.set({
-      [SETTINGS_KEY]: { hideVideoDownloadButton: true }
+      [SETTINGS_KEY]: { hideVideoDownloadButton: false }
     })
-    expect((await getSettings()).hideAudioDownloadButton).toBe(false)
-
-    await setSettings({ hideAudioDownloadButton: true })
     expect(await getSettings()).toMatchObject({
-      hideVideoDownloadButton: true,
+      hideVideoDownloadButton: false,
       hideAudioDownloadButton: true
     })
+
     await setSettings({ hideAudioDownloadButton: false })
+    expect(await getSettings()).toMatchObject({
+      hideVideoDownloadButton: false,
+      hideAudioDownloadButton: false
+    })
+    await setSettings({ hideAudioDownloadButton: true })
+    expect(await getSettings()).toMatchObject({
+      hideVideoDownloadButton: false,
+      hideAudioDownloadButton: true
+    })
+  })
+
+  it("preserves an explicit audio preference when video visibility is unset", async () => {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: { hideAudioDownloadButton: false }
+    })
     expect(await getSettings()).toMatchObject({
       hideVideoDownloadButton: true,
       hideAudioDownloadButton: false

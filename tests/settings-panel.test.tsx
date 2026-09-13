@@ -166,9 +166,9 @@ describe("SettingsPanel — async action feedback", () => {
       expect(
         summaries.some((text) => text?.includes("Connection Status")),
       ).toBe(true);
-      expect(
-        host.querySelector("details[open] summary")?.textContent,
-      ).toContain("Appearance");
+      const firstSection = host.querySelector("details");
+      expect(firstSection?.querySelector("summary")?.textContent).toContain("Download buttons");
+      expect(firstSection?.open).toBe(true);
     } finally {
       cleanup();
     }
@@ -181,7 +181,7 @@ describe("SettingsPanel — async action feedback", () => {
         '[aria-label="Available in any terminal loading"]',
       );
       const input = host.querySelector<HTMLInputElement>(
-        'input[type="checkbox"]',
+        'input[aria-label="Available in any terminal"]',
       );
       expect(status).not.toBeNull();
       expect(status?.className).toContain("animate-spin");
@@ -215,17 +215,21 @@ describe("SettingsPanel — async action feedback", () => {
     const onUpdate = vi.fn();
     const { host, cleanup } = await renderSettingsPanel(onUpdate);
     try {
-      const text = Array.from(host.querySelectorAll("div")).find(
+      const firstSection = host.querySelector("details");
+      const matchingLabels = Array.from(host.querySelectorAll("div")).filter(
         (node) => node.textContent === `Hide Download ${mode} button`,
       );
+      expect(matchingLabels).toHaveLength(1);
+      const text = matchingLabels[0];
+      expect(text?.closest("details")).toBe(firstSection);
       const checkbox = text?.parentElement?.parentElement?.querySelector<HTMLInputElement>(
         'input[type="checkbox"]',
       );
 
       expect(checkbox).not.toBeNull();
-      expect(checkbox?.checked).toBe(false);
+      expect(checkbox?.checked).toBe(true);
       await act(async () => checkbox?.click());
-      expect(onUpdate).toHaveBeenCalledWith({ [setting]: true });
+      expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ [setting]: false });
     } finally {
       cleanup();
     }
