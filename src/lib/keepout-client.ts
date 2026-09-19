@@ -25,7 +25,10 @@ export async function getKeepoutConnection(): Promise<KeepoutConnection> {
     chrome.storage.local.get(PORT_KEY),
     chrome.storage.session.get(TOKEN_KEY),
   ]);
-  return { port: local[PORT_KEY] ?? 8721, token: session[TOKEN_KEY] ?? "" };
+  return {
+    port: typeof local[PORT_KEY] === "number" ? local[PORT_KEY] : 8721,
+    token: typeof session[TOKEN_KEY] === "string" ? session[TOKEN_KEY] : "",
+  };
 }
 
 export async function saveKeepoutConnection(connection: KeepoutConnection): Promise<void> {
