@@ -1,3 +1,5 @@
+export {};
+
 type Capture = {
   version: 1;
   id: string;
