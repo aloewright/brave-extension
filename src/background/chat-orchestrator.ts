@@ -5,7 +5,6 @@
 // writes via ai-chat-store, broadcasts via chrome.runtime.sendMessage.
 
 import { ulid } from "../lib/ulid"
-import { getSettings } from "../storage"
 import {
   appendMessage,
   getConversation,
@@ -66,9 +65,8 @@ export async function runChatTurn(input: RunChatTurnInput): Promise<void> {
     await appendMessage(userMsg)
     broadcast({ type: "ai-chat/turn-update", turnId, appendedMessage: userMsg })
 
-    // 2. Resolve tools and token.
-    const settings = await getSettings()
-    const tools = buildTools(async () => settings.joplinToken ?? "")
+    // 2. Resolve the available browser-context tools.
+    const tools = buildTools()
 
     // 3. Loop.
     let steps = 0

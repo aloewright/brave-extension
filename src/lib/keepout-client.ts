@@ -1,0 +1,111 @@
+/** Keepout capture is local-only. No cloud fallback, clipboard or disk queue. */
+export interface KeepoutCapture {
+  version: 1;
+  id: string;
+  title: string;
+  sourceUrl: string;
+  selection: string;
+  marginNote?: string;
+}
+
+export interface KeepoutConnection { port: number; token: string }
+export interface KeepoutCaptureReceipt { id: string; createdAt: string }
+const PORT_KEY = "keepout.connection.port";
+const TOKEN_KEY = "keepout.connection.token";
+const MAX_BYTES = 256 * 1024;
+
+function validatePort(port: number): void {
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("Enter a local port between 1024 and 65535.");
+  }
+}
+
+export async function getKeepoutConnection(): Promise<KeepoutConnection> {
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(PORT_KEY),
+    chrome.storage.session.get(TOKEN_KEY),
+  ]);
+  return { port: local[PORT_KEY] ?? 8721, token: session[TOKEN_KEY] ?? "" };
+}
+
+export async function saveKeepoutConnection(connection: KeepoutConnection): Promise<void> {
+  validatePort(connection.port);
+  const token = connection.token.trim();
+  if (/[\x00-\x20\x7f]/.test(token) || token.length > 4096) {
+    throw new Error("Use the bearer token shown in Keepout's Local API settings.");
+  }
+  // Session storage is memory-only and not exposed to content scripts. Never
+  // put the credential into the extension's general/synced settings object.
+  await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+  await chrome.storage.local.set({ [PORT_KEY]: connection.port });
+  if (token) await chrome.storage.session.set({ [TOKEN_KEY]: token });
+  else await chrome.storage.session.remove(TOKEN_KEY);
+}
+
+export function validateKeepoutCapture(value: unknown): KeepoutCapture {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid highlight.");
+  const capture = value as KeepoutCapture;
+  if (capture.version !== 1 || typeof capture.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(capture.id) ||
+      typeof capture.title !== "string" || !capture.title.trim() || capture.title.length > 500 ||
+      typeof capture.selection !== "string" || !capture.selection.trim() ||
+      typeof capture.sourceUrl !== "string" || capture.sourceUrl.length > 8192 ||
+      (capture.marginNote !== undefined && typeof capture.marginNote !== "string")) {
+    throw new Error("Select some text and enter a note title before saving.");
+  }
+  let url: URL;
+  try { url = new URL(capture.sourceUrl); } catch { throw new Error("This page has no valid source link."); }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+      /[\x00-\x1f\x7f]/.test(capture.sourceUrl)) {
+    throw new Error("Keepout can clip public web page addresses, not browser or file URLs.");
+  }
+  const clean: KeepoutCapture = {
+    version: 1, id: capture.id, title: capture.title.trim(), sourceUrl: capture.sourceUrl,
+    selection: capture.selection, marginNote: capture.marginNote ?? "",
+  };
+  if (new TextEncoder().encode(JSON.stringify(clean)).length > MAX_BYTES) {
+    throw new Error("This selection is too large. Save a smaller highlight (under 256 KB).");
+  }
+  return clean;
+}
+
+async function request(path: string, capture?: KeepoutCapture): Promise<unknown> {
+  const { port, token } = await getKeepoutConnection();
+  validatePort(port);
+  if (!token) throw new Error("Connect Keepout in the extension's Settings first. Its token lasts for this browser session.");
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: capture ? "POST" : "GET",
+      headers: { Authorization: `Bearer ${token}`, ...(capture ? { "Content-Type": "application/json" } : {}) },
+      body: capture ? JSON.stringify(capture) : undefined,
+      credentials: "omit", cache: "no-store", redirect: "error",
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch {
+    throw new Error("Cannot reach Keepout. Open and unlock it, enable its Local API on this Mac, then retry.");
+  }
+  if (response.status === 401) throw new Error("Keepout rejected the token. Reconnect in the extension's Settings.");
+  if (response.status === 423 || response.status === 503) throw new Error("Unlock Keepout and retry. This highlight has not been saved.");
+  if (response.status === 404) throw new Error("Update Keepout to a version that supports browser highlights.");
+  if (response.status === 403) throw new Error("Set Keepout's Local API to this Mac only (loopback) to save highlights.");
+  if (response.status === 409) throw new Error("This capture identifier is already in use. Close this panel and capture again.");
+  if (!response.ok) throw new Error("Keepout could not save this highlight. Your draft is still here; check Keepout and retry.");
+  if (response.status !== (capture ? 201 : 200)) throw new Error("Keepout returned an unexpected save confirmation. Check Keepout before retrying.");
+  try { return await response.json(); }
+  catch { throw new Error("Keepout returned an invalid confirmation. Check Keepout before retrying."); }
+}
+
+export async function testKeepoutConnection(): Promise<void> {
+  const result = await request("/v1/captures/status") as { version?: number; available?: boolean };
+  if (result?.version !== 1 || result.available !== true) throw new Error("This endpoint is not a compatible Keepout capture service.");
+}
+
+export async function saveKeepoutCapture(value: unknown): Promise<KeepoutCaptureReceipt> {
+  const capture = validateKeepoutCapture(value);
+  const receipt = await request("/v1/captures", capture) as KeepoutCaptureReceipt;
+  if (receipt?.id !== capture.id || typeof receipt.createdAt !== "string" || !Number.isFinite(Date.parse(receipt.createdAt))) {
+    throw new Error("No valid save confirmation was received. Check Keepout before retrying.");
+  }
+  return { id: receipt.id, createdAt: receipt.createdAt };
+}

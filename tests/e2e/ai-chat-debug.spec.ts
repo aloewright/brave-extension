@@ -60,7 +60,7 @@ test("ai-chat send: orchestrator runs and broadcasts a turn", async ({
       type: "ai-chat/send",
       userMessageId,
       text: "Say hello in five words.",
-      ambient: { activeTab: null, mostRecentClip: null },
+      ambient: {},
     })
 
     // Wait up to 30s for a turn-done event.

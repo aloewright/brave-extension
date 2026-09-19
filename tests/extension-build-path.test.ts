@@ -60,9 +60,4 @@ describe("custom extension build path", () => {
     }
   });
 
-  it("keeps the readability injection path stable for the custom build", () => {
-    expect(readProjectFile("src/lib/clip-extractors.ts")).toContain(
-      'READABILITY_BUNDLE_PATH = "content/readability-bundle.js"',
-    );
-  });
 });

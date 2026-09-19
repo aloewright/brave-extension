@@ -42,7 +42,6 @@ const SECTION_LABELS: Record<SectionId, string> = {
   cookies: "Cookies",
   recorder: "Recorder",
   eyedropper: "Eyedropper",
-  joplin: "Joplin",
   agentChat: "Agent",
   github: "GitHub",
   lexicon: "Lexicon",

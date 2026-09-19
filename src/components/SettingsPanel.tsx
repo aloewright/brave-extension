@@ -11,7 +11,11 @@ import type {
   ThemeName,
 } from "../types";
 import type { ToolSourceState } from "../lib/agent-api";
-import { ping } from "../lib/joplin";
+import {
+  getKeepoutConnection,
+  saveKeepoutConnection,
+  testKeepoutConnection,
+} from "../lib/keepout-client";
 import {
   checkPasswordAppStatus,
   getLegacyPasswordStorageState,
@@ -298,13 +302,13 @@ export function SettingsPanel({
     args: "",
   });
   const [showAddMCP, setShowAddMCP] = useState(false);
-  const [localJoplinToken, setLocalJoplinToken] = useState(
-    settings.joplinToken ?? "",
-  );
-  const [joplinTesting, setJoplinTesting] = useState(false);
-  const [joplinTestResult, setJoplinTestResult] = useState<
-    "ok" | "fail" | null
-  >(null);
+  const [keepoutPortInput, setKeepoutPortInput] = useState("8721");
+  const [keepoutToken, setKeepoutToken] = useState("");
+  const [keepoutBusy, setKeepoutBusy] = useState(false);
+  const [keepoutStatus, setKeepoutStatus] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
   const [braveThemeStatus, setBraveThemeStatus] = useState<string | null>(null);
   const [passwordCleanupStatus, setPasswordCleanupStatus] = useState<
     string | null
@@ -439,8 +443,36 @@ export function SettingsPanel({
         : "bg-success/15 text-success";
 
   useEffect(() => {
-    setLocalJoplinToken(settings.joplinToken ?? "");
-  }, [settings.joplinToken]);
+    void getKeepoutConnection()
+      .then(({ port, token }) => {
+        setKeepoutPortInput(String(port));
+        setKeepoutToken(token);
+      })
+      .catch(() => {
+        setKeepoutStatus({
+          kind: "error",
+          message: "Couldn't load the saved Keepout connection for this browser session.",
+        });
+      });
+  }, []);
+
+  const saveCurrentKeepoutConnection = async (): Promise<boolean> => {
+    const port = Number(keepoutPortInput);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      setKeepoutStatus({ kind: "error", message: "Enter a local port between 1024 and 65535." });
+      return false;
+    }
+    try {
+      await saveKeepoutConnection({ port, token: keepoutToken });
+      return true;
+    } catch (err) {
+      setKeepoutStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Couldn't save the Keepout connection.",
+      });
+      return false;
+    }
+  };
 
   useEffect(() => {
     refreshLegacyPasswordState();
@@ -1292,57 +1324,96 @@ export function SettingsPanel({
           </div>
         </SettingsAccordionSection>
 
-        {/* Joplin clipper */}
-        <SettingsAccordionSection title="Joplin">
+        <SettingsAccordionSection title="Keepout">
           <div className="space-y-2">
             <div className="text-[10px] text-fg/50">
-              Paste the Web Clipper token from Joplin Desktop (Tools → Options →
-              Web Clipper → Advanced options → Copy token).
+              Enable the local API in Keepout and unlock it first. The extension
+              only connects over the loopback interface; this token is kept in
+              this browser session only, is never synced, and is cleared when
+              the browser restarts.
             </div>
             <div className="flex gap-1.5">
               <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="w-20 text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
+                aria-label="Keepout local API port"
+                value={keepoutPortInput}
+                onChange={(e) => {
+                  setKeepoutPortInput(e.target.value);
+                  setKeepoutStatus(null);
+                }}
+              />
+              <input
                 type="password"
                 className="flex-1 text-[10px] py-1 px-2 rounded bg-input border border-border text-fg font-mono outline-none"
-                placeholder="Joplin API token"
-                value={localJoplinToken}
-                onChange={(e) => setLocalJoplinToken(e.target.value)}
+                placeholder="Keepout API token"
+                aria-label="Keepout API token"
+                value={keepoutToken}
+                onChange={(e) => {
+                  setKeepoutToken(e.target.value);
+                  setKeepoutStatus(null);
+                }}
               />
               <button
                 className="text-[10px] py-1 px-2 rounded bg-primary/20 text-primary hover:bg-primary/30"
+                aria-label="Save Keepout connection"
+                disabled={keepoutBusy}
                 onClick={() => {
-                  onUpdate({ joplinToken: localJoplinToken });
-                  setJoplinTestResult(null);
+                  if (keepoutBusy) return;
+                  void (async () => {
+                    setKeepoutBusy(true);
+                    setKeepoutStatus(null);
+                    if (await saveCurrentKeepoutConnection()) {
+                      setKeepoutStatus({
+                        kind: "success",
+                        message: "Keepout connection saved for this browser session.",
+                      });
+                    }
+                    setKeepoutBusy(false);
+                  })();
                 }}
               >
                 Save
               </button>
               <button
                 className="text-[10px] py-1 px-2 rounded bg-secondary/40 text-fg/80 hover:bg-secondary/60 inline-flex items-center gap-1"
+                disabled={keepoutBusy}
                 onClick={async () => {
-                  setJoplinTesting(true);
-                  const ok = await ping();
-                  setJoplinTesting(false);
-                  setJoplinTestResult(ok ? "ok" : "fail");
+                  if (keepoutBusy) return;
+                  setKeepoutBusy(true);
+                  setKeepoutStatus(null);
+                  try {
+                    if (!(await saveCurrentKeepoutConnection())) return;
+                    await testKeepoutConnection();
+                    setKeepoutStatus({ kind: "success", message: "Keepout local API reachable." });
+                  } catch (err) {
+                    setKeepoutStatus({
+                      kind: "error",
+                      message: err instanceof Error ? err.message : "Couldn't test the Keepout connection.",
+                    });
+                  } finally {
+                    setKeepoutBusy(false);
+                  }
                 }}
               >
-                {joplinTesting ? (
+                {keepoutBusy ? (
                   <>
-                    <LoadingGlyph label="Testing Joplin connection" /> Testing…
+                    <LoadingGlyph label="Testing Keepout connection" /> Testing…
                   </>
                 ) : (
                   "Test connection"
                 )}
               </button>
             </div>
-            {joplinTestResult === "ok" && (
-              <div className="text-[10px] text-success/90">
-                ✓ JoplinClipperServer reachable.
-              </div>
-            )}
-            {joplinTestResult === "fail" && (
-              <div className="text-[10px] text-error/90">
-                Couldn't reach Joplin on localhost:41184. Enable the Web Clipper
-                service in Joplin.
+            <div className="text-[10px] text-fg/50">
+              Select text on a page, then choose <span className="font-medium">Save highlight</span> from the
+              right-click menu or press Ctrl+Shift+H. Add an optional margin note in the capture pane before saving.
+            </div>
+            {keepoutStatus && (
+              <div className={`text-[10px] ${keepoutStatus.kind === "success" ? "text-success/90" : "text-error/90"}`}>
+                {keepoutStatus.kind === "success" ? "✓ " : ""}{keepoutStatus.message}
               </div>
             )}
           </div>

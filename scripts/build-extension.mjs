@@ -74,11 +74,6 @@ const contentScripts = [
     run_at: "document_start",
   },
   {
-    name: "readability-bundle",
-    input: "src/contents/readability-bundle.ts",
-    matches: ["<all_urls>"],
-  },
-  {
     name: "pip",
     input: "src/contents/pip.ts",
     matches: ["<all_urls>"],

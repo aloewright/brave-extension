@@ -20,14 +20,13 @@ export interface ChatMessage {
 
 export interface ToolCall {
   id: string                  // ulid() — matches tool messages back to the assistant call
-  name: string                // e.g. "joplin.createNote"
+  name: string
   arguments: Record<string, unknown>  // parsed from argumentsRaw
   argumentsRaw: string        // exact JSON the model emitted
 }
 
 export interface AmbientContext {
   activeTab?: { url: string; title: string }
-  mostRecentClip?: { title: string; mode: string; createdAt: string; joplinUrl: string }
   recentScrape?: { url: string; title: string; text: string; timestamp: number }
 }
 
@@ -39,7 +38,7 @@ export interface Conversation {
 export type JSONSchema = Record<string, unknown>
 
 export interface ToolDefinition {
-  name: string                // dotted namespace: "joplin.createNote", "context.activeTab"
+  name: string
   description: string         // one-sentence; goes into the model prompt
   parametersSchema: JSONSchema
   execute(args: Record<string, unknown>): Promise<ToolExecutionResult>

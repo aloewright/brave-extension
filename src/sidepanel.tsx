@@ -20,7 +20,6 @@ import { TasksSection } from "./sections/tasks/TasksSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import { GitHubSection } from "./sections/github/GitHubSection";
 import { LexiconSection } from "./sections/lexicon/LexiconSection";
-// import { JoplinSection } from "./sections/joplin/JoplinSection";
 import { AgentChatSection } from "./sections/agent-chat/AgentChatSection";
 import { ConsentBanner } from "./components/ConsentBanner";
 import { applyAppearanceSettings } from "./lib/appearance";
@@ -132,7 +131,6 @@ function SidePanel() {
           {active === "captures" && <CapturesSection />}
           {active === "cookies" && <CookiesSection />}
           {/* {active === "recorder" && <RecorderSection />} */}
-          {/* {active === "joplin" && <JoplinSection />} */}
           {agentChatMounted && (
             <div
               className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${active === "agentChat" ? "" : "hidden"}`}

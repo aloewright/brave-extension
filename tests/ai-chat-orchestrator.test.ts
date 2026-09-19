@@ -6,22 +6,16 @@ import type {
 } from "../src/lib/ai-chat-types"
 
 // Mocks (vi.hoisted is required so the factory references resolve)
-const { chatMock, compactMock, getSettingsMock, sendMessageMock, prependRecentClipMock } =
+const { chatMock, compactMock, sendMessageMock } =
   vi.hoisted(() => ({
     chatMock: vi.fn(),
     compactMock: vi.fn(),
-    getSettingsMock: vi.fn(),
     sendMessageMock: vi.fn(),
-    prependRecentClipMock: vi.fn()
   }))
 
 vi.mock("../src/background/native-host-bridge", () => ({
   runFoundationModelsChat: chatMock,
   runFoundationModelsCompact: compactMock
-}))
-
-vi.mock("../src/storage", () => ({
-  getSettings: getSettingsMock
 }))
 
 // Mock chrome.runtime.sendMessage to capture broadcasts
@@ -67,9 +61,7 @@ describe("chat-orchestrator runChatTurn", () => {
   beforeEach(() => {
     chatMock.mockReset()
     compactMock.mockReset()
-    getSettingsMock.mockReset()
     sendMessageMock.mockReset()
-    getSettingsMock.mockResolvedValue({ joplinToken: "tok" })
   })
 
   it("happy path: bridge returns final → one assistant message + turn-done(final)", async () => {
@@ -93,7 +85,7 @@ describe("chat-orchestrator runChatTurn", () => {
         ok: true,
         available: true,
         operation: "chat",
-        chatTurn: { toolCall: { name: "joplin.ping", arguments: "{}" } }
+        chatTurn: { toolCall: { name: "context.activeTab", arguments: "{}" } }
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -116,7 +108,7 @@ describe("chat-orchestrator runChatTurn", () => {
       ok: true,
       available: true,
       operation: "chat",
-      chatTurn: { toolCall: { name: "joplin.ping", arguments: "{}" } }
+      chatTurn: { toolCall: { name: "context.activeTab", arguments: "{}" } }
     })
     await runChatTurn({ userMessageId: "u1", text: "loop", ambient: {} })
     const broadcasts = getBroadcasts()
@@ -154,7 +146,7 @@ describe("chat-orchestrator runChatTurn", () => {
         operation: "chat",
         chatTurn: {
           final: "ignored",
-          toolCall: { name: "joplin.ping", arguments: "{}" }
+          toolCall: { name: "context.activeTab", arguments: "{}" }
         }
       })
       .mockResolvedValueOnce({
@@ -181,7 +173,7 @@ describe("chat-orchestrator runChatTurn", () => {
         ok: true,
         available: true,
         operation: "chat",
-        chatTurn: { toolCall: { name: "joplin.ping", arguments: "{}" } }
+        chatTurn: { toolCall: { name: "context.activeTab", arguments: "{}" } }
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -251,7 +243,7 @@ describe("chat-orchestrator runChatTurn", () => {
         ok: true,
         available: true,
         operation: "chat",
-        chatTurn: { toolCall: { name: "joplin.ping", arguments: "{}" } }
+        chatTurn: { toolCall: { name: "context.activeTab", arguments: "{}" } }
       }
     })
     const stopPromise = (async () => {
