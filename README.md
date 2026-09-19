@@ -2,6 +2,14 @@
 
 # Brave Dev Extension
 
+## Keepout highlights
+
+Select text on a web page, then right-click **Save highlight + margin note to Keepout…** (or use the existing **Ctrl/Cmd+Shift+H** shortcut). Add an optional margin note and save. Keepout stores a Markdown note under **Browser Highlights**, including the source link and quoted passage.
+
+In Keepout, enable **Local API**, leave its exposure set to **this Mac / loopback**, and unlock the vault. In this extension's **Settings → Keepout**, enter that port (default `8721`) and bearer token, then **Test connection**. The token is kept only in browser-session memory; reconnect after restarting the browser. Captures are not copied into Session, Review, cloud sync, or the clipboard. Drafts stay only in the open page panel; closing/reloading it discards an unsaved draft. A locked/offline Keepout reports an error and lets you retry the same capture without creating a duplicate.
+
+This replaces the retired Joplin clipper and Joplin AI tools. Existing Joplin notes and previously stored clip history are not deleted or migrated. Older Keepout builds without `/v1/captures` must be updated first.
+
 [![Tests](https://github.com/aloewright/brave-extension/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/brave-extension/actions/workflows/test.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)

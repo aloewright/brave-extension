@@ -64,7 +64,13 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
     get statusRequests() {
       return statusRequests
     },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => new Promise<void>((resolve) => {
+      // Chromium can retain the local HTTP connection after the response;
+      // close it before awaiting server shutdown so teardown cannot consume
+      // the test's full timeout.
+      server.closeAllConnections()
+      server.close(() => resolve())
+    }),
   }
 }
 
@@ -90,7 +96,15 @@ async function openCapturePanel(
   settingsPage: import("@playwright/test").Page,
   articlePage: import("@playwright/test").Page,
 ) {
-  await articlePage.locator("#selected").selectText()
+  const selected = await articlePage.locator("#selected").evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return selection?.toString()
+  })
+  if (selected !== SELECTED_TEXT) throw new Error("Could not select the Keepout sample text")
   const articleUrl = articlePage.url()
   const tabId = await settingsPage.evaluate(async (url) => {
     const tabs = await chrome.tabs.query({})
