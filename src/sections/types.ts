@@ -16,7 +16,6 @@ export type SectionId =
   | "cookies"
   | "recorder"
   | "eyedropper"
-  | "joplin"
   | "agentChat"
   | "github"
   | "lexicon"
@@ -50,8 +49,6 @@ export const SECTIONS: SectionDef[] = [
   // { id: "recorder", label: "Recorder" },
   // Eyedropper now lives inside Inspector to free rail space.
   // { id: "eyedropper", label: "Eyedropper" },
-  // Temporarily hidden from the sidebar rail.
-  // { id: "joplin", label: "Joplin" },
   { id: "agentChat", label: "Agent" },
   { id: "github", label: "GitHub" },
   { id: "lexicon", label: "Lexicon" },

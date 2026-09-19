@@ -22,13 +22,11 @@ function dummyTool(name: string, description: string): ToolDefinition {
 
 describe("buildSystemPrompt", () => {
   const tools: ToolDefinition[] = [
-    dummyTool("joplin.ping", "Check Joplin reachability."),
     dummyTool("context.activeTab", "Get active tab url+title.")
   ]
 
   it("lists all tool names with descriptions", () => {
     const out = buildSystemPrompt("", tools, {})
-    expect(out).toContain("joplin.ping: Check Joplin reachability.")
     expect(out).toContain("context.activeTab: Get active tab url+title.")
   })
 
@@ -53,19 +51,6 @@ describe("buildSystemPrompt", () => {
     expect(out).toContain("earlier conv summary")
   })
 
-  it("includes the mostRecentClip line when present", () => {
-    const ambient: AmbientContext = {
-      mostRecentClip: {
-        title: "Clip A",
-        mode: "simplified",
-        createdAt: "2026-05-27T00:00:00Z",
-        joplinUrl: "joplin://x"
-      }
-    }
-    const out = buildSystemPrompt("", tools, ambient)
-    expect(out).toContain('"Clip A"')
-    expect(out).toContain("simplified")
-  })
 })
 
 describe("toBridgeHistory", () => {
@@ -87,7 +72,7 @@ describe("toBridgeHistory", () => {
       createdAt: "",
       toolCall: {
         id: "c1",
-        name: "joplin.ping",
+        name: "context.activeTab",
         arguments: {},
         argumentsRaw: '{"foo":1}'
       }
@@ -113,7 +98,7 @@ describe("toBridgeHistory", () => {
   it("maps assistant tool-call messages preserving argumentsRaw", () => {
     const out = toBridgeHistory(asstToolCall())
     expect(out.role).toBe("assistant")
-    expect(out.toolName).toBe("joplin.ping")
+    expect(out.toolName).toBe("context.activeTab")
     expect(out.toolArguments).toBe('{"foo":1}')
   })
 

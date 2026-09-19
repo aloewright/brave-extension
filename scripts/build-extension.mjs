@@ -74,11 +74,6 @@ const contentScripts = [
     run_at: "document_start",
   },
   {
-    name: "readability-bundle",
-    input: "src/contents/readability-bundle.ts",
-    matches: ["<all_urls>"],
-  },
-  {
     name: "pip",
     input: "src/contents/pip.ts",
     matches: ["<all_urls>"],
@@ -108,6 +103,7 @@ const contentScripts = [
 ];
 
 const extensionPages = {
+  capture: resolve(rootDir, "capture.html"),
   sidepanel: resolve(rootDir, "sidepanel.html"),
   newtab: resolve(rootDir, "newtab.html"),
   popup: resolve(rootDir, "popup.html"),
@@ -118,6 +114,7 @@ const extensionPages = {
 
 function chunkNameForOutput(chunkInfo) {
   if (chunkInfo.name === "background") return "static/background/index.js";
+  if (chunkInfo.name === "capture") return "static/capture.js";
   return "assets/[name].[hash].js";
 }
 
@@ -229,6 +226,12 @@ async function writeManifest() {
     host_permissions: baseManifest.host_permissions ?? [],
     commands: baseManifest.commands ?? {},
     content_scripts: contentScripts.map(contentScriptManifest),
+    web_accessible_resources: [
+      {
+        resources: ["capture.html", "static/capture.js"],
+        matches: ["http://*/*", "https://*/*"],
+      },
+    ],
   };
 
   await writeFile(

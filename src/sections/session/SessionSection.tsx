@@ -28,12 +28,10 @@ import {
 
 /**
  * Session tab (ALO-470): consolidates the former Library Links,
- * context-menu highlights, sticky notes, and saved tab collections into one surface.
+ * locally retained snippets, sticky notes, and saved tab collections into one surface.
  *
- * Highlights are stored locally via lib/session-snippets and populated from
- * the "save-highlight" context menu (background.ts → addSessionSnippet).
- * Links carry over from the old Library, but with the new clipboard-backed
- * highlight workflow each highlight also copies to the user's clipboard.
+ * Keepout captures are delivered directly to Keepout from the capture pane.
+ * This view continues to show only its own locally retained snippets and notes.
  */
 type Tab = "links" | "notes" | "tabs"
 
@@ -185,7 +183,7 @@ function SnippetsAndNotes({
       </div>
       {items.length === 0 ? (
         <div className="rounded border border-dashed border-border/70 bg-card/20 p-3 text-[11px] text-fg/45">
-          Right-click selected text to save a highlight, or add a note here. Both now live in one combined column.
+          Add a local note here. Browser highlights are captured directly to Keepout from the right-click menu or Ctrl+Shift+H.
         </div>
       ) : (
         <ul className="space-y-2" data-testid="snippet-note-list">

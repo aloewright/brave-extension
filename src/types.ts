@@ -240,8 +240,6 @@ export interface Settings {
   dopplerProject: string
   dopplerConfig: string
   dopplerScope: string
-  // Phase 1 — Joplin clipper feature
-  joplinToken: string
   // Agent App Worker (Cloudflare Access service token auth)
   agentApiUrl: string
   agentAccessClientId: string
@@ -350,7 +348,6 @@ export const DEFAULT_SETTINGS: Settings = {
   dopplerProject: "",
   dopplerConfig: "",
   dopplerScope: "/",
-  joplinToken: "",
   agentApiUrl: "https://agent.fly.pm",
   agentAccessClientId: "",
   agentAccessClientSecret: "",

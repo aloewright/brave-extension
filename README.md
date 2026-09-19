@@ -2,6 +2,14 @@
 
 # Brave Dev Extension
 
+## Keepout highlights
+
+Select text on a web page, then right-click **Save highlight + margin note to Keepout…** (or use the existing **Ctrl/Cmd+Shift+H** shortcut). Add an optional margin note and save. Keepout stores a Markdown note under **Browser Highlights**, including the source link and quoted passage.
+
+In Keepout, enable **Local API**, leave its exposure set to **this Mac / loopback**, and unlock the vault. In this extension's **Settings → Keepout**, enter that port (default `8721`) and bearer token, then **Test connection**. The token is kept only in browser-session memory; reconnect after restarting the browser. Captures are not copied into Session, Review, cloud sync, or the clipboard. The host page receives only an opaque extension iframe and capture ID: raw selection text and margin-note keystrokes stay in the extension-origin frame, never in the page DOM. Closing/reloading it discards an unsaved draft. A locked/offline Keepout reports an error and lets you retry the same capture without creating a duplicate.
+
+This replaces the retired Joplin clipper and Joplin AI tools. Existing Joplin notes and previously stored clip history are not deleted or migrated. Older Keepout builds without `/v1/captures` must be updated first.
+
 [![Tests](https://github.com/aloewright/brave-extension/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/brave-extension/actions/workflows/test.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
@@ -39,15 +47,9 @@ Rolldown-Vite/Oxc build path for Brave and Chromium browsers.
 - **Recorder:** start browser recording through Brave's native capture prompt,
   pause/resume/stop recordings, keep recent recording metadata, and mirror
   completed clips for MCP access.
-- **Joplin clipper:** save the current page to Joplin Desktop in four modes
-  (simplified article, full HTML, selection, URL+title) via the sidebar or
-  a right-click context menu. Requires Joplin's Web Clipper *service*
-  (Tools → Options → Web Clipper → Enable) but not Joplin's own browser
-  extension. Token configured in Settings → Joplin.
 - **AI Chat (Apple Foundation Models):** local LLM chat in the sidebar,
   powered by Apple's on-device foundation models via the native-host
-  Swift bridge. Auto-fires tool calls (V1 catalog: joplin.createNote,
-  joplin.ping, context.activeTab) and threads results back into the
+  Swift bridge. Auto-fires browser-context tool calls and threads results back into the
   conversation. Hard Stop button. Single rolling conversation with
   compaction. Requires Apple Intelligence enabled (macOS 26+,
   M-series).
@@ -228,20 +230,6 @@ never has to spawn real CLI binaries:
 
 Run the full suite (unit + integration) with `npm test`.
 
-## Joplin clipper — done-criteria checklist
-
-- [ ] `pnpm build` produces a clean custom bundle with `content/readability-bundle.js` present under `build/`.
-- [ ] `pnpm test` (vitest) is green, including the new Joplin test files.
-- [ ] Load `build/` unpacked in Brave → sidebar shows the new "Joplin" section.
-- [ ] Settings → Joplin → paste token → Save → **Test connection** reports ✓ JoplinClipperServer.
-- [ ] Right-click any page → "Clip to Joplin → Simplified page" → toast shows "Clipped: \<title\>" within ~2s.
-- [ ] Open Joplin Desktop → the clipped note exists with the page's simplified Markdown body and `source_url` set.
-- [ ] Select text on a page → right-click → "Clip to Joplin → Selection" → Joplin note body equals the selected text.
-- [ ] Sidebar "Recent clips" list shows all four entries; clicking one opens the note in Joplin via the `joplin://` deep link.
-- [ ] Stop Joplin Desktop → click Clip → toast says "Couldn't reach Joplin." Status dot turns red within 30s.
-- [ ] Clear the token in Settings → Clip button still works mechanically but the result toast says "No Joplin API token configured."
-- [ ] Click Clip on a `chrome://` page → toast says "Couldn't extract page content" (or similar).
-
 ## AI Chat — done-criteria checklist
 
 - [ ] `pnpm build` produces a clean custom extension bundle.
@@ -250,9 +238,7 @@ Run the full suite (unit + integration) with `npm test`.
 - [ ] Load `build/` unpacked in Brave → sidebar shows the new "AI Chat" section.
 - [ ] On a Mac with Apple Intelligence enabled (macOS 26+, M-series), sending "hi" produces a streamed-feel response within ~5s.
 - [ ] Sending "what's the URL of my current tab?" → model emits a `context.activeTab` tool call, a tool-result row appears, then a final assistant message naming the URL.
-- [ ] Sending "create a Joplin note titled Hello with body World" (Joplin token configured, Web Clipper running) → model emits `joplin.createNote`, the tool result has the note id, final assistant message confirms; verify the note in Joplin Desktop.
 - [ ] Pressing Stop during a turn → conversation shows "Stopped by user." within ~3s.
 - [ ] Clear button empties the conversation; sending again starts fresh.
 - [ ] Apple Intelligence disabled → first Send produces a "Foundation Models is unavailable…" assistant message within ~2s.
 - [ ] Uninstall the native host (`pnpm uninstall-host`), reload extension → first Send produces a "Native host not installed…" assistant message within ~2s.
-- [ ] Force the step cap by asking for something open-ended (e.g., "keep pinging Joplin forever") — after 10 tool calls the conversation gets the cap message and stops.

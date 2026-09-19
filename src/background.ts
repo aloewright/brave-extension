@@ -1,19 +1,13 @@
 import { ulid } from "./lib/ulid";
 import { startMediaDownload } from "./lib/media-download";
-import { MENU_ID_TO_MODE } from "./lib/joplin-types";
-import type { ClipMode, ClipRequest, ClipResultEvent } from "./lib/joplin-types";
-import { handleClipRequest } from "./lib/joplin-clip-handler";
+import { saveKeepoutCapture, validateKeepoutCapture, type KeepoutCapture } from "./lib/keepout-client";
+import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
-import { addHighlight } from "./review";
-import { syncHighlight, syncStoredHighlights } from "./background/highlight-sync";
+import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
 import { triggerBackgroundSyncReconcile } from "./background/sync-reconcile-runner";
 import { getSettings } from "./storage";
 import { ApiError, createSidebarApiClient } from "./lib/sidebar-api";
-import {
-  addSessionSnippet,
-  copyToClipboardViaTab,
-} from "./lib/session-snippets";
 import {
   closeCurrentWindowSavedTabs,
   saveCurrentWindowTabs,
@@ -103,6 +97,13 @@ const HEARTBEAT_ALARM = "native-heartbeat";
 const TTS_LAST_ERROR_KEY = "tts.lastError";
 const TTS_CONTEXT_MENU_ID = "tts-speak-selection";
 const SCREENSHOT_CONTEXT_MENU_ID = "screenshot-download-page";
+const KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS = 2 * 60_000;
+const MAX_PENDING_KEEPOUT_CAPTURES = 8;
+const pendingKeepoutCaptures = new Map<string, {
+  tabId: number;
+  capture: KeepoutCapture;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
 const pendingTtsPlayback = new Map<
   string,
   {
@@ -111,29 +112,6 @@ const pendingTtsPlayback = new Map<
     timeout: ReturnType<typeof setTimeout>;
   }
 >();
-
-// ─── Joplin clipper integration ──────────────────────────────────────────────
-
-async function getJoplinToken(): Promise<string> {
-  const settings = await getSettings();
-  return settings.joplinToken ?? "";
-}
-
-function broadcastClipResult(event: ClipResultEvent) {
-  // Fire-and-forget. Receivers may not exist (sidebar closed). Errors here
-  // are harmless (the well-known "Could not establish connection" when there
-  // are no listeners).
-  void chrome.runtime.sendMessage(event).catch(() => undefined);
-}
-
-async function dispatchClip(req: ClipRequest) {
-  await handleClipRequest(req, {
-    getJoplinToken,
-    broadcast: broadcastClipResult,
-    newId: () => ulid(),
-    now: () => new Date()
-  });
-}
 
 const STALE_ERROR_CAPTURE_CLEANUP_KEY =
   "maintenance.errorCaptureCleanup.v1";
@@ -880,15 +858,101 @@ chrome.windows?.onRemoved?.addListener?.((windowId) => {
   reconcileTerminalKeepAlive();
 });
 
+function getCaptureIDFromExtensionPage(sender: chrome.runtime.MessageSender, candidate: unknown): string | undefined {
+  if (sender.id !== chrome.runtime.id || typeof sender.tab?.id !== "number" || typeof sender.url !== "string" || typeof candidate !== "string") {
+    return undefined;
+  }
+  try {
+    const senderUrl = new URL(sender.url);
+    const capturePage = new URL(chrome.runtime.getURL("capture.html"));
+    if (senderUrl.origin !== capturePage.origin || senderUrl.pathname !== capturePage.pathname) return undefined;
+    const captureID = senderUrl.searchParams.get("capture");
+    return captureID === candidate && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(captureID)
+      ? captureID
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stageKeepoutCapture(tabId: number, capture: KeepoutCapture): void {
+  const previous = pendingKeepoutCaptures.get(capture.id);
+  if (previous) clearTimeout(previous.timeout);
+  while (pendingKeepoutCaptures.size >= MAX_PENDING_KEEPOUT_CAPTURES) {
+    const oldestCaptureID = pendingKeepoutCaptures.keys().next().value;
+    if (typeof oldestCaptureID !== "string") break;
+    discardKeepoutCapture(oldestCaptureID);
+  }
+  const timeout = setTimeout(() => pendingKeepoutCaptures.delete(capture.id), KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS);
+  pendingKeepoutCaptures.set(capture.id, { tabId, capture, timeout });
+}
+
+function discardKeepoutCapture(captureID: string): void {
+  const pending = pendingKeepoutCaptures.get(captureID);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingKeepoutCaptures.delete(captureID);
+}
+
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
   const m = message as { type?: string };
 
-  if (m.type === "joplin/clip") {
-    dispatchClip(message as ClipRequest)
-      .then(() => sendResponse2({ ok: true }))
-      .catch((err) => sendResponse2({ ok: false, error: String(err) }));
-    return true; // keep the message channel open for the async response
+  if (m.type === "keepout/draft") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id) {
+      sendResponse2({ ok: false, error: "This capture is no longer available." });
+      return false;
+    }
+    discardKeepoutCapture(captureID);
+    sendResponse2({ ok: true, capture: pending.capture });
+    return false;
+  }
+
+  if (m.type === "keepout/capture") {
+    if (!getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
+      sendResponse2({ ok: false, error: "Capture must be confirmed from the Keepout panel." });
+      return false;
+    }
+    let capture: KeepoutCapture;
+    try {
+      capture = validateKeepoutCapture(message.capture);
+      if (capture.id !== getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
+        throw new Error("Capture identifier does not match this panel.");
+      }
+    } catch (err) {
+      sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Invalid capture." });
+      return false;
+    }
+    saveKeepoutCapture(capture)
+      .then((receipt) => sendResponse2({ ok: true, ...receipt }))
+      .catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save to Keepout." }));
+    return true;
+  }
+
+  if (m.type === "keepout/close") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    if (!captureID || !_sender2.tab?.id) return false;
+    const pending = pendingKeepoutCaptures.get(captureID);
+    if (pending?.tabId === _sender2.tab.id) discardKeepoutCapture(captureID);
+    chrome.scripting.executeScript({
+      target: { tabId: _sender2.tab.id },
+      world: "ISOLATED",
+      func: removeKeepoutCapturePanel,
+    }).finally(() => sendResponse2({ ok: true }));
+    return true;
+  }
+
+  if (m.type === "keepout/open") {
+    // Only our own extension UI may request a panel in another tab.
+    if (_sender2.id !== chrome.runtime.id || !_sender2.url?.startsWith(chrome.runtime.getURL(""))) return false;
+    (async () => {
+      const tab = await chrome.tabs.get(message.tabId);
+      const opened = await openKeepoutCaptureFromTab(tab);
+      sendResponse2({ ok: opened, ...(!opened ? { error: "Select some text on the web page first." } : {}) });
+    })().catch(() => sendResponse2({ ok: false, error: "Cannot clip this page. Try a regular web page." }));
+    return true;
   }
 
   if (m.type === "ai-chat/send") {
@@ -2570,7 +2634,7 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 // Context menu for scraping
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   clearActionPopup();
   void purgeLegacyPasswordStorage().catch((err) => {
     safeRuntimeWarning("failed to purge legacy password storage", err);
@@ -2583,6 +2647,8 @@ chrome.runtime.onInstalled.addListener(() => {
     safeRuntimeWarning("failed to refresh third-party cookie rules", err);
   });
   try {
+    // Updates must remove obsolete menu items as well as add the replacements.
+    await chrome.contextMenus.removeAll();
     chrome.contextMenus.create({
       id: "scrape-page",
       title: "Scrape page to Brave Dev Extension",
@@ -2598,8 +2664,9 @@ chrome.runtime.onInstalled.addListener(() => {
     }
     chrome.contextMenus.create({
       id: "save-highlight",
-      title: "Save highlight",
+      title: "Save highlight + margin note to Keepout…",
       contexts: ["selection"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"],
     });
     chrome.contextMenus.create({
       id: SCREENSHOT_CONTEXT_MENU_ID,
@@ -2614,36 +2681,6 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
       id: RSS_FEED_MENU_ID,
       title: "Save RSS feed...",
-      contexts: ["page"],
-    });
-    // Joplin clipper — parent + mode submenus
-    chrome.contextMenus.create({
-      id: "joplin-clip",
-      title: "Clip to Joplin",
-      contexts: ["page", "selection"],
-    });
-    chrome.contextMenus.create({
-      id: "joplin-clip-simplified",
-      parentId: "joplin-clip",
-      title: "Simplified page",
-      contexts: ["page"],
-    });
-    chrome.contextMenus.create({
-      id: "joplin-clip-full",
-      parentId: "joplin-clip",
-      title: "Full HTML",
-      contexts: ["page"],
-    });
-    chrome.contextMenus.create({
-      id: "joplin-clip-selection",
-      parentId: "joplin-clip",
-      title: "Selection",
-      contexts: ["selection"],
-    });
-    chrome.contextMenus.create({
-      id: "joplin-clip-url",
-      parentId: "joplin-clip",
-      title: "URL + title",
       contexts: ["page"],
     });
   } catch (err) {
@@ -2672,13 +2709,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     return;
   }
 
-  // Joplin clipper — dispatch to handleClipRequest via dispatchClip.
-  const mode: ClipMode | undefined = MENU_ID_TO_MODE[String(info.menuItemId)];
-  if (mode) {
-    await dispatchClip({ type: "joplin/clip", mode, tabId: tab.id });
-    return;
-  }
-
   if (info.menuItemId === "scrape-page") {
     await handleManualScrape(tab.id);
   }
@@ -2691,9 +2721,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "save-highlight" && info.selectionText) {
     try {
-      await saveSelectionAsSnippetFromTab(tab, info.selectionText);
+      await openKeepoutCaptureFromTab(tab, info.selectionText, info.frameUrl || info.pageUrl);
     } catch (err) {
-      console.warn("save-highlight failed:", err);
+      await showKeepoutCaptureError(tab.id);
     }
   }
 
@@ -2907,7 +2937,7 @@ async function speakSelectedText() {
   await speakTextWithTts(text);
 }
 
-async function saveSelectionAsSnippetFromTab(tab: chrome.tabs.Tab, selectionText?: string | null): Promise<boolean> {
+async function openKeepoutCaptureFromTab(tab: chrome.tabs.Tab, selectionText?: string | null, sourceUrl?: string): Promise<boolean> {
   if (!tab.id) return false;
 
   let selection = (selectionText || "").trim();
@@ -2921,33 +2951,31 @@ async function saveSelectionAsSnippetFromTab(tab: chrome.tabs.Tab, selectionText
   }
   if (!selection) return false;
 
-  const highlight = {
+  const capture = validateKeepoutCapture({
+    version: 1,
     id: crypto.randomUUID(),
-    text: selection,
-    sourceUrl: tab.url,
-    sourceTitle: tab.title,
-    createdAt: Date.now(),
-  };
-  // ALO-470: keep the Session highlight feed canonical while still writing the
-  // legacy Review-panel highlight for back-compat.
-  await Promise.all([
-    addSessionSnippet({
-      text: selection,
-      sourceUrl: tab.url || "",
-      sourceTitle: tab.title ?? null,
-    }),
-    addHighlight(highlight),
-  ]);
-  void syncHighlight(highlight).catch((err) => {
-    safeRuntimeWarning("failed to sync highlight", err);
+    selection,
+    sourceUrl: sourceUrl || tab.url || "",
+    title: (tab.title?.trim() || "Web highlight").slice(0, 500),
   });
-  void copyToClipboardViaTab(tab.id, selection);
-  await chrome.action.setBadgeBackgroundColor({ color: "#4ade80" });
-  await chrome.action.setBadgeText({ text: "+1" });
-  setTimeout(() => {
-    if (!recorderState.active) chrome.action.setBadgeText({ text: "" });
-  }, 1200);
+  // The draft stays only in the service worker until the extension-origin
+  // capture page retrieves it. The host page receives the opaque ID only.
+  stageKeepoutCapture(tab.id, capture);
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: "ISOLATED", func: showKeepoutCapturePanel, args: [capture.id],
+    });
+    if (!result[0]?.result) discardKeepoutCapture(capture.id);
+  } catch (error) {
+    discardKeepoutCapture(capture.id);
+    throw error;
+  }
   return true;
+}
+
+async function showKeepoutCaptureError(tabId: number) {
+  await chrome.action.setBadgeText({ tabId, text: "!" });
+  await chrome.action.setTitle({ tabId, title: "Cannot clip this page. Select a smaller passage on a regular web page and try again." });
 }
 
 async function promptForTabCollectionTitle(tabId?: number): Promise<string | null> {
@@ -3009,15 +3037,16 @@ chrome.commands.onCommand.addListener(async (command) => {
     toggleSidePanel(tab?.windowId);
   } else if (command === "save-link") {
     // Global Shift+Cmd+H (Ctrl+Shift+H) — if text is highlighted, save it as a
-    // Session highlight. Otherwise save the active tab's link from any page, even
+    // Keepout highlight with an optional margin note. Otherwise save the active tab's link from any page, even
     // when the sidebar is closed. This reuses one manifest command slot because
     // Chromium allows only four extension command shortcuts.
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
     });
-    if (tab?.id && (await saveSelectionAsSnippetFromTab(tab))) {
-      return;
+    if (tab?.id) {
+      try { if (await openKeepoutCaptureFromTab(tab)) return; }
+      catch { await showKeepoutCaptureError(tab.id); return; }
     }
     if (tab?.url && tab?.title) {
       const tags = /\.pdf(?:[?#].*)?$/i.test(tab.url) ? ["pdf"] : [];

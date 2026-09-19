@@ -34,7 +34,7 @@ export interface BridgeRawResponse {
 export interface BridgeHistoryRow {
   role: "user" | "assistant" | "tool"
   content: string
-  toolName?: string         // assistant tool-call rows: tool name (e.g. "joplin.ping")
+  toolName?: string         // assistant tool-call rows: tool name
   toolArguments?: string    // assistant tool-call rows: JSON-encoded args
   toolCallId?: string       // tool-result rows: ulid of the assistant tool-call this answers
   toolError?: string        // tool-result rows: error message if the call failed
@@ -95,11 +95,6 @@ export function buildSystemPrompt(
       `Active tab: ${ambient.activeTab.title || "(untitled)"} — ${ambient.activeTab.url}`
     )
   }
-  if (ambient.mostRecentClip) {
-    ambientLines.push(
-      `Most recent Joplin clip: "${ambient.mostRecentClip.title}" (${ambient.mostRecentClip.mode}) at ${ambient.mostRecentClip.createdAt}`
-    )
-  }
   if (ambient.recentScrape) {
     ambientLines.push(
       [
@@ -116,7 +111,7 @@ export function buildSystemPrompt(
     : ""
 
   return [
-    "You are an assistant inside a Brave sidebar extension. You can call tools to act on the user's Joplin notes and browser. When you have what you need to reply, use the `final` field. Otherwise use exactly one `toolCall`.",
+    "You are an assistant inside a Brave sidebar extension. You can call tools to inspect the user's browser context. When you have what you need to reply, use the `final` field. Otherwise use exactly one `toolCall`.",
     "AVAILABLE TOOLS:",
     toolsCatalog,
     ambientBlock,
