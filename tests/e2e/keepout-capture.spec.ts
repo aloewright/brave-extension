@@ -121,8 +121,35 @@ async function openCapturePanel(
       else resolve()
     })
   }), tabId)
-  const root = articlePage.locator("#keepout-capture-root")
-  const dialog = root.getByRole("dialog", { name: "Save to Keepout" })
+  const frame = articlePage.locator("#keepout-capture-root > iframe#keepout-capture-frame")
+  await expect(frame).toHaveAttribute("src", /^chrome-extension:\/\//)
+  // This executes in the hostile web-page origin. It can observe the opaque
+  // iframe shell, but never the extension-origin form, selection, or draft.
+  const hostilePageView = await articlePage.evaluate(() => {
+    const captureFrame = document.querySelector<HTMLIFrameElement>(
+      "#keepout-capture-root > iframe#keepout-capture-frame",
+    )
+    let bodyReadable = false
+    let fieldsReadable = false
+    try {
+      bodyReadable = Boolean(captureFrame?.contentDocument?.body)
+      fieldsReadable = Boolean(captureFrame?.contentDocument?.querySelector("input, textarea"))
+    } catch {
+      // Cross-origin frame reads may throw in some Chromium versions.
+    }
+    return {
+      bodyReadable,
+      fieldsReadable,
+      hostText: document.querySelector("#keepout-capture-root")?.textContent ?? "",
+    }
+  })
+  expect(hostilePageView.bodyReadable).toBe(false)
+  expect(hostilePageView.fieldsReadable).toBe(false)
+  expect(hostilePageView.hostText).not.toContain(SELECTED_TEXT)
+
+  const dialog = articlePage
+    .frameLocator("#keepout-capture-root > iframe#keepout-capture-frame")
+    .getByRole("dialog", { name: "Save to Keepout" })
   await expect(dialog).toBeVisible()
   await expect(dialog.locator("blockquote")).toHaveText(SELECTED_TEXT)
   return dialog
@@ -151,10 +178,20 @@ test("Keepout settings stay session-local and save the rendered selected-text ca
     expect(JSON.stringify(storage.sync)).not.toContain(TOKEN)
 
     const articlePage = await context.newPage()
+    await articlePage.setViewportSize({ width: 1280, height: 720 })
     await articlePage.goto(`http://127.0.0.1:${keepout.port}/article`)
+    await articlePage.evaluate(() => {
+      const captured: string[] = []
+      document.addEventListener("keydown", (event) => captured.push(event.key), true)
+      ;(window as Window & { __keepoutHostKeys?: string[] }).__keepoutHostKeys = captured
+    })
     const dialog = await openCapturePanel(settingsPage, articlePage)
     await dialog.getByLabel("Note title").fill("A durable title")
-    await dialog.getByLabel("Margin note").fill("A private marginal observation")
+    await dialog.getByLabel("Margin note").pressSequentially("A private marginal observation")
+    const hostKeys = await articlePage.evaluate(
+      () => (window as Window & { __keepoutHostKeys?: string[] }).__keepoutHostKeys ?? [],
+    )
+    expect(hostKeys).toEqual([])
 
     if (process.env.KEEPOUT_E2E_SCREENSHOT_DIR) {
       await articlePage.screenshot({

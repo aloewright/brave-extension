@@ -1,7 +1,7 @@
 import { ulid } from "./lib/ulid";
 import { startMediaDownload } from "./lib/media-download";
-import { saveKeepoutCapture, validateKeepoutCapture } from "./lib/keepout-client";
-import { showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
+import { saveKeepoutCapture, validateKeepoutCapture, type KeepoutCapture } from "./lib/keepout-client";
+import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
@@ -97,6 +97,13 @@ const HEARTBEAT_ALARM = "native-heartbeat";
 const TTS_LAST_ERROR_KEY = "tts.lastError";
 const TTS_CONTEXT_MENU_ID = "tts-speak-selection";
 const SCREENSHOT_CONTEXT_MENU_ID = "screenshot-download-page";
+const KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS = 2 * 60_000;
+const MAX_PENDING_KEEPOUT_CAPTURES = 8;
+const pendingKeepoutCaptures = new Map<string, {
+  tabId: number;
+  capture: KeepoutCapture;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
 const pendingTtsPlayback = new Map<
   string,
   {
@@ -851,18 +858,89 @@ chrome.windows?.onRemoved?.addListener?.((windowId) => {
   reconcileTerminalKeepAlive();
 });
 
+function getCaptureIDFromExtensionPage(sender: chrome.runtime.MessageSender, candidate: unknown): string | undefined {
+  if (sender.id !== chrome.runtime.id || typeof sender.tab?.id !== "number" || typeof sender.url !== "string" || typeof candidate !== "string") {
+    return undefined;
+  }
+  try {
+    const senderUrl = new URL(sender.url);
+    const capturePage = new URL(chrome.runtime.getURL("capture.html"));
+    if (senderUrl.origin !== capturePage.origin || senderUrl.pathname !== capturePage.pathname) return undefined;
+    const captureID = senderUrl.searchParams.get("capture");
+    return captureID === candidate && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(captureID)
+      ? captureID
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stageKeepoutCapture(tabId: number, capture: KeepoutCapture): void {
+  const previous = pendingKeepoutCaptures.get(capture.id);
+  if (previous) clearTimeout(previous.timeout);
+  while (pendingKeepoutCaptures.size >= MAX_PENDING_KEEPOUT_CAPTURES) {
+    const oldestCaptureID = pendingKeepoutCaptures.keys().next().value;
+    if (typeof oldestCaptureID !== "string") break;
+    discardKeepoutCapture(oldestCaptureID);
+  }
+  const timeout = setTimeout(() => pendingKeepoutCaptures.delete(capture.id), KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS);
+  pendingKeepoutCaptures.set(capture.id, { tabId, capture, timeout });
+}
+
+function discardKeepoutCapture(captureID: string): void {
+  const pending = pendingKeepoutCaptures.get(captureID);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingKeepoutCaptures.delete(captureID);
+}
+
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
   const m = message as { type?: string };
 
-  if (m.type === "keepout/capture") {
-    if (_sender2.id !== chrome.runtime.id || !_sender2.tab || !/^https?:\/\//.test(_sender2.url ?? "")) {
-      sendResponse2({ ok: false, error: "Capture must be confirmed from a web page's Keepout panel." });
+  if (m.type === "keepout/draft") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id) {
+      sendResponse2({ ok: false, error: "This capture is no longer available." });
       return false;
     }
-    saveKeepoutCapture(message.capture)
+    discardKeepoutCapture(captureID);
+    sendResponse2({ ok: true, capture: pending.capture });
+    return false;
+  }
+
+  if (m.type === "keepout/capture") {
+    if (!getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
+      sendResponse2({ ok: false, error: "Capture must be confirmed from the Keepout panel." });
+      return false;
+    }
+    let capture: KeepoutCapture;
+    try {
+      capture = validateKeepoutCapture(message.capture);
+      if (capture.id !== getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
+        throw new Error("Capture identifier does not match this panel.");
+      }
+    } catch (err) {
+      sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Invalid capture." });
+      return false;
+    }
+    saveKeepoutCapture(capture)
       .then((receipt) => sendResponse2({ ok: true, ...receipt }))
       .catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save to Keepout." }));
+    return true;
+  }
+
+  if (m.type === "keepout/close") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    if (!captureID || !_sender2.tab?.id) return false;
+    const pending = pendingKeepoutCaptures.get(captureID);
+    if (pending?.tabId === _sender2.tab.id) discardKeepoutCapture(captureID);
+    chrome.scripting.executeScript({
+      target: { tabId: _sender2.tab.id },
+      world: "ISOLATED",
+      func: removeKeepoutCapturePanel,
+    }).finally(() => sendResponse2({ ok: true }));
     return true;
   }
 
@@ -2880,11 +2958,18 @@ async function openKeepoutCaptureFromTab(tab: chrome.tabs.Tab, selectionText?: s
     sourceUrl: sourceUrl || tab.url || "",
     title: (tab.title?.trim() || "Web highlight").slice(0, 500),
   });
-  // An isolated page panel holds the draft in memory until explicit Save.
-  // No Session/Review/cloud copy and no clipboard mutation for Keepout clips.
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id }, world: "ISOLATED", func: showKeepoutCapturePanel, args: [capture],
-  });
+  // The draft stays only in the service worker until the extension-origin
+  // capture page retrieves it. The host page receives the opaque ID only.
+  stageKeepoutCapture(tab.id, capture);
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: "ISOLATED", func: showKeepoutCapturePanel, args: [capture.id],
+    });
+    if (!result[0]?.result) discardKeepoutCapture(capture.id);
+  } catch (error) {
+    discardKeepoutCapture(capture.id);
+    throw error;
+  }
   return true;
 }
 
