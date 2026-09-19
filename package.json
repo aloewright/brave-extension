@@ -2,6 +2,7 @@
   "name": "brave-extension",
   "displayName": "Brave Dev Extension",
   "version": "0.1.0",
+  "packageManager": "pnpm@10.32.1",
   "description": "Brave sidebar extension connected to local CLI tools — Claude Code, Gemini, Copilot, Codex — with page inspection and scraping.",
   "author": "aloe",
   "engines": {
