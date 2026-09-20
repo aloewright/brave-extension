@@ -40,10 +40,17 @@ async function startSyntheticCanvasAndKeepout() {
     }
     if (request.method === "POST" && path === "/v1/page-videos") {
       const input = JSON.parse(body.toString("utf8")) as { id: string }
-      return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id: input.id, chunkBytes: 1_048_576, uploadNonce, index: 0 }))
+      return response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ id: input.id, chunkBytes: 1_048_576, uploadNonce, index: 0, complete: false }))
     }
-    if (request.method === "POST" && /^\/v1\/page-videos\/[0-9a-f-]+\/chunks$/.test(path)) return response.writeHead(200).end()
-    if (request.method === "POST" && /^\/v1\/page-videos\/[0-9a-f-]+\/complete$/.test(path)) return response.writeHead(200, { "content-type": "application/json" }).end("{}")
+    if (request.method === "POST" && /^\/v1\/page-videos\/[0-9a-f-]+\/chunks$/.test(path)) {
+      const id = path.split("/")[3]
+      const index = Number(new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("index"))
+      return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, index, complete: false }))
+    }
+    if (request.method === "POST" && /^\/v1\/page-videos\/[0-9a-f-]+\/complete$/.test(path)) {
+      const id = path.split("/")[3]
+      return response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ id, complete: true }))
+    }
     response.writeHead(404).end()
   })
   await new Promise<void>((resolve) => keepout.listen(0, "127.0.0.1", resolve))
@@ -56,7 +63,7 @@ async function startSyntheticCanvasAndKeepout() {
     if (url.pathname === "/courses/42/pages/lesson") {
       response.setHeader("set-cookie", "canvas_session=signed-in; Path=/; SameSite=Lax")
       response.setHeader("content-type", "text/html; charset=utf-8")
-      response.end(`<!doctype html><main id="wiki_page_show"><h1 class="page-title">Encrypted video lesson</h1><div class="show-content user_content"><a download href="/courses/42/files/123/download">Lecture.mp4</a><a download href="/courses/42/files/124/download">Broken.mp4</a></div></main>`)
+      response.end(`<!doctype html><main id="wiki_page_show"><h1 class="page-title">Encrypted video lesson</h1><div class="show-content user_content"><a download href="/courses/42/files/123/download">Lecture.mp4</a><a download href="/courses/42/files/124/download">Broken.mp4</a><video title="Direct.mp4" src="/media/direct.mp4"></video></div></main>`)
       return
     }
     if (url.pathname === "/api/v1/files/123/public_url" || url.pathname === "/api/v1/files/124/public_url") {
@@ -70,6 +77,7 @@ async function startSyntheticCanvasAndKeepout() {
       return response.writeHead(200, { "content-type": "video/mp4", "content-length": VIDEO_BYTES.length }).end(VIDEO_BYTES)
     }
     if (url.pathname === "/signed/124") return response.writeHead(200, { "content-type": "text/html" }).end("<html>sign in</html>")
+    if (url.pathname === "/media/direct.mp4") return response.writeHead(200, { "content-type": "video/mp4", "content-length": VIDEO_BYTES.length }).end(VIDEO_BYTES)
     response.writeHead(404).end()
   })
   await new Promise<void>((resolve) => canvas.listen(0, "127.0.0.1", resolve))
@@ -136,6 +144,16 @@ test("saves an authenticated Canvas video through encrypted loopback upload with
     await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).nth(1).click()
     await expect(dialog.getByText("Canvas returned a sign-in or preview page, not a video. Open the video in Canvas and try again.")).toBeVisible({ timeout: 10_000 })
     expect(servers.keepoutRequests.filter((request) => request.path === "/v1/page-captures")).toHaveLength(1)
+
+    // A same-origin <video> follows the signed-in tab's isolated-world stream
+    // path; it must still use the exact same encrypted Keepout API contract.
+    await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).nth(2).click()
+    await expect(dialog.getByText(/Saved in Keepout.*bytes encrypted/i)).toHaveCount(2, { timeout: 10_000 })
+    expect(servers.keepoutRequests.filter((request) => request.path === "/v1/page-videos")).toHaveLength(2)
+    expect(servers.keepoutRequests.filter((request) => request.path.endsWith("/chunks"))).toHaveLength(2)
+    expect(servers.canvasRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "/media/direct.mp4", cookie: expect.stringContaining("canvas_session=signed-in") }),
+    ]))
   } finally {
     await servers.close()
   }
