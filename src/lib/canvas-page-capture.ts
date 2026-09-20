@@ -343,7 +343,7 @@ export async function captureCanvasPageFromTab(tabId: number): Promise<CanvasPag
             // The signature authorizes storage access. No Canvas cookies or
             // API tokens are sent, even if storage shares the Canvas origin.
             const attempt = await readCanvasImageAttempt(resolved.url, extracted.sourceUrl, true);
-            if (attempt.ok) loaded = attempt.image;
+            if (attempt.ok === true) loaded = attempt.image;
             else fileFailure = attempt.failure;
           } else fileFailure = resolved?.ok === false ? resolved.failure : { kind: "network" };
         } catch { fileFailure = { kind: "network" }; }
