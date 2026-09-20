@@ -11,10 +11,10 @@ export function mediaDownloadUrl(pageUrl: string, sourceUrl?: string): string {
   return url.href;
 }
 
-export function startMediaDownload(mode: MediaDownloadMode, pageUrl: string, sourceUrl?: string) {
+export function startMediaDownload(mode: MediaDownloadMode, pageUrl: string, sourceUrl?: string, referer?: string) {
   if (mode !== 'video' && mode !== 'audio') throw new Error('Choose video or audio.');
   const url = mediaDownloadUrl(pageUrl, sourceUrl);
-  const key = `${mode}:${url}`;
+  const key = `${mode}:${url}:${referer || ''}`;
   const existing = activeDownloads.get(key);
   if (existing) return existing;
   if (activeDownloads.size >= 3) throw new Error('Three downloads are running. Wait for one to finish.');
@@ -25,7 +25,7 @@ export function startMediaDownload(mode: MediaDownloadMode, pageUrl: string, sou
       const error = chrome.runtime.lastError;
       resolve({ ok: false, error: error?.message ? `Download helper: ${error.message}` : 'The download helper disconnected.' });
     });
-    port.postMessage({ mode, url });
+    port.postMessage({ mode, url, ...(referer ? { referer } : {}) });
   }).finally(() => { activeDownloads.delete(key); });
   activeDownloads.set(key, job);
   return job;

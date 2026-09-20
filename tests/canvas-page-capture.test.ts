@@ -158,6 +158,63 @@ describe("Canvas page capture", () => {
     expect(result.markdown).not.toContain("<iframe");
   });
 
+  it("inventories direct Canvas videos and Vimeo embeds without changing the page capture", () => {
+    content(`
+      <video src="/courses/42/files/9/download?access_token=never-save" title="Week one lecture"></video>
+      <a href="/courses/42/files/10/download" data-content-type="video/mp4">Download recap</a>
+      <iframe src="https://player.vimeo.com/video/12345?h=unlisted-token&autoplay=1" title="Guest lecture"></iframe>
+      <iframe src="https://example.test/embed/other" title="Not a video import"></iframe>
+    `);
+
+    const result = extractCanvasPage();
+
+    expect(result.markdown).toContain(`[Guest lecture](${source})`);
+    expect(result.videos.map(({ id: _id, ...video }) => video)).toEqual([
+      { title: "Week one lecture", url: "https://school.example/courses/42/files/9/download", kind: "canvas-file", canvasFileId: "9" },
+      { title: "Download recap", url: "https://school.example/courses/42/files/10/download", kind: "canvas-file", canvasFileId: "10" },
+      { title: "Guest lecture", url: "https://player.vimeo.com/video/12345?h=unlisted-token", kind: "vimeo" },
+    ]);
+    expect(result.markdown).not.toContain("access_token=never-save");
+    expect(result.videos.every((video) => /^[0-9a-f-]{36}$/i.test(video.id))).toBe(true);
+  });
+
+  it("keeps signed video URLs out of the saved Markdown and ignores non-video file downloads", () => {
+    content(`<video src="https://cdn.example/lecture.mp4?signature=private" title="Lecture"></video>
+      <a href="/courses/42/files/10/download?verifier=private">Recap.mp4</a>
+      <a download href="/courses/42/files/11/download">Worksheet.pdf</a>
+      <a href="https://cdn.example/extra.webm?signature=private">Extra</a>`);
+    const result = extractCanvasPage();
+    expect(result.videos).toHaveLength(3);
+    expect(result.markdown).not.toContain("signature=");
+    expect(result.markdown).not.toContain("verifier=");
+    expect(result.markdown).toContain(`[Lecture](${source})`);
+    expect(result.markdown).toContain("[Recap.mp4](https://school.example/courses/42/files/10/download)");
+    expect(result.videos[0].url).toContain("signature=private");
+  });
+
+  it("recognizes labeled Canvas video downloads and filename titles without treating PDFs as videos", () => {
+    content(`<a download href="/files/20/download">Download video</a>
+      <a href="/files/21/download" title="Lecture.mp4">Download</a>
+      <a download href="/files/22/download">Worksheet.pdf</a>`);
+    expect(extractCanvasPage().videos.map(video => video.canvasFileId)).toEqual(['20', '21']);
+  });
+
+  it("deduplicates supported videos, caps the inventory, and ignores tracking media or arbitrary frames", () => {
+    content(`
+      <video src="/courses/42/files/9/download"></video><a href="/courses/42/files/9/download" download>Same video</a>
+      <video src="/tracking.mp4" width="1" height="1"></video>
+      <iframe src="https://player.vimeo.com/video/not-a-number"></iframe><iframe src="https://example.test/embed/1"></iframe>
+      ${Array.from({ length: 20 }, (_, index) => `<video src="https://cdn.example/${index}.mp4"></video>`).join("")}
+    `);
+
+    const result = extractCanvasPage();
+
+    expect(result.videos).toHaveLength(16);
+    expect(result.videos.filter((video) => video.url.endsWith("/courses/42/files/9/download"))).toHaveLength(1);
+    expect(result.videos.some((video) => video.url.includes("tracking"))).toBe(false);
+    expect(result.videos.some((video) => video.url.includes("example.test/embed"))).toBe(false);
+  });
+
   it("reads raster bytes with same-Canvas credentials and excludes cookies for external images", async () => {
     const fetcher = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } }));
     vi.stubGlobal("fetch", fetcher);

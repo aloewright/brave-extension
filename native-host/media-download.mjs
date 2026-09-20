@@ -9,10 +9,22 @@ export function downloadArguments(request, directory) {
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
     throw new Error('This video needs an HTTP or HTTPS page URL.');
   }
+  let referer;
+  if (request.referer !== undefined) {
+    const value = new URL(request.referer);
+    if (!['https:', 'http:'].includes(value.protocol) || value.username || value.password
+      || (url.protocol === 'https:' && value.protocol !== 'https:')) {
+      throw new Error('This video has an invalid referring page.');
+    }
+    // Vimeo's domain-restricted embeds need the Canvas origin, not the
+    // student's course path, cookies, or a full signed referring URL.
+    referer = value.origin + '/';
+  }
   return ['--ignore-config', '--no-playlist', '--no-overwrites', '--no-progress',
     '--no-cache-dir', '--restrict-filenames', '--socket-timeout', '30',
     '--paths', directory, '--output', '%(title).150B [%(id)s].%(ext)s',
     '--print', 'after_move:filepath',
+    ...(referer ? ['--referer', referer] : []),
     ...(request.mode === 'audio'
       ? ['--format', 'bestaudio/best', '--extract-audio', '--audio-format', 'mp3']
       : ['--format', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best', '--merge-output-format', 'mp4']),

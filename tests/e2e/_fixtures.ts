@@ -53,6 +53,9 @@ export const test = base.extend<Fixtures>({
     const ctx = await chromium.launchPersistentContext(userDataDir, {
       headless: true,
       channel: "chromium",
+      // Reuse a verified local Chrome for Testing on build hosts rather than
+      // downloading a second browser. Omit to keep Playwright's bundled one.
+      executablePath: process.env.EXTENSION_TEST_CHROMIUM || undefined,
       args: [
         `--disable-extensions-except=${EXT_DIST}`,
         `--load-extension=${EXT_DIST}`,
