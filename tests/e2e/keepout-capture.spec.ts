@@ -104,6 +104,85 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
   }
 }
 
+/**
+ * Canvas is deliberately served as localhost while its signed download URL is
+ * 127.0.0.1.  They are distinct origins even though this fixture owns both,
+ * which lets the browser enforce the redirect/CORS boundary we rely on in
+ * production instead of faking it with disabled web security.
+ */
+async function startAuthenticatedCanvasServer(options: { denyPublicUrl?: boolean } = {}) {
+  const previewRequests: Array<{ fileId: string; secFetchSite?: string; origin?: string }> = []
+  const publicUrlRequests: Array<{ fileId: string; cookie?: string; secFetchSite?: string; origin?: string }> = []
+  const signedRequests: string[] = []
+  const signedToken = "signed-cdn-session-token"
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    const url = new URL(request.url ?? "/", "http://localhost")
+    const publicUrl = url.pathname.match(/^\/api\/v1\/files\/(\d+)\/public_url$/)
+    const preview = url.pathname.match(/^\/(?:courses\/42|groups\/77)\/files\/(\d+)\/preview$/)
+    const signed = url.pathname.match(/^\/signed-download\/(\d+)$/)
+    if (url.pathname === "/courses/42/pages/lesson") {
+      response.setHeader("set-cookie", "canvas_session=authenticated; Path=/; SameSite=Lax")
+      response.setHeader("content-type", "text/html; charset=utf-8")
+      response.end(`<!doctype html><title>Canvas lesson</title><main id="wiki_page_show"><h1 class="page-title">Week one lesson</h1><div class="show-content user_content"><h2>Week one</h2><p>${CANVAS_TEXT}</p><img alt="Endpoint course" src="/courses/42/files/101/preview" data-api-endpoint="/api/v1/courses/42/files/101"><img alt="Preview course" src="/courses/42/files/102/preview"><img alt="Endpoint group" src="/groups/77/files/103/preview" data-api-endpoint="/api/v1/groups/77/files/103"><img alt="Preview group" src="/groups/77/files/104/preview"></div></main>`)
+      return
+    }
+    if (preview) {
+      previewRequests.push({ fileId: preview[1], secFetchSite: request.headers["sec-fetch-site"], origin: request.headers.origin })
+      // A tab follows this to a different origin, so its fetch is CORS-blocked.
+      // An extension fetch sees this HTML fallback, never image bytes.
+      if (request.headers["sec-fetch-site"] === "same-origin") {
+        response.writeHead(302, { location: `http://127.0.0.1:${address.port}/preview-login` }).end()
+      } else {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end("<p>Canvas preview requires a signed URL</p>")
+      }
+      return
+    }
+    if (publicUrl) {
+      publicUrlRequests.push({ fileId: publicUrl[1], cookie: request.headers.cookie, secFetchSite: request.headers["sec-fetch-site"], origin: request.headers.origin })
+      // This is intentionally callable only by the authenticated Canvas tab,
+      // not by an extension-origin request that happens to have host access.
+      if (options.denyPublicUrl || !request.headers.cookie?.includes("canvas_session=authenticated")
+        || request.headers["sec-fetch-site"] !== "same-origin" || request.headers.origin?.startsWith("chrome-extension:")) {
+        response.writeHead(403).end()
+        return
+      }
+      response.setHeader("content-type", "application/json")
+      response.end(`while(1);${JSON.stringify({ public_url: `http://127.0.0.1:${address.port}/signed-download/${publicUrl[1]}?session=${signedToken}` })}`)
+      return
+    }
+    if (signed) {
+      signedRequests.push(url.href)
+      if (url.searchParams.get("session") !== signedToken || request.headers.cookie) {
+        response.writeHead(403).end()
+        return
+      }
+      response.writeHead(200, { "content-type": "image/png" })
+      response.end(Buffer.from(TWO_BY_TWO_PNG, "base64"))
+      return
+    }
+    if (url.pathname === "/preview-login") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end("<p>Canvas sign in</p>")
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const bound = server.address()
+  if (!bound || typeof bound === "string") throw new Error("Canvas test server did not bind a TCP port")
+  const address = { port: bound.port }
+  return {
+    port: address.port,
+    previewRequests,
+    publicUrlRequests,
+    signedRequests,
+    signedToken,
+    close: () => new Promise<void>((resolve) => {
+      server.closeAllConnections()
+      server.close(() => resolve())
+    }),
+  }
+}
+
 async function configureKeepout(
   page: import("@playwright/test").Page,
   port: number,
@@ -362,6 +441,90 @@ test("imports a rendered Canvas page and its authenticated raster image only aft
     expect(body.markdown).toContain("keepout-capture-image://")
     await expect(dialog.getByRole("status")).toHaveText(/Saved to Keepout · Canvas page/i)
   } finally {
+    await keepout.close()
+  }
+})
+
+test("resolves authenticated Canvas file APIs to signed downloads without persisting credentials", async ({
+  context,
+  openSidepanel,
+}) => {
+  const keepout = await startKeepoutServer()
+  const canvas = await startAuthenticatedCanvasServer()
+  try {
+    const settingsPage = await openSidepanel()
+    await configureKeepout(settingsPage, keepout.port)
+    const canvasPage = await context.newPage()
+    await canvasPage.goto(`http://localhost:${canvas.port}/courses/42/pages/lesson`)
+    await canvasPage.waitForLoadState("networkidle")
+    // The browser may independently try to render the source preview URLs as
+    // it parses the page. Those requests are intentionally hostile to a fetch
+    // client, so only assert that the capture flow does not add any of its own.
+    const previewsBeforeCapture = canvas.previewRequests.length
+    const dialog = await openCanvasCapturePanel(settingsPage, canvasPage)
+
+    await expect(dialog.getByText("4 images will be imported with this page.")).toBeVisible()
+    // Opening the confirmation frame only stages private data; it must not
+    // issue a Keepout write until the extension-origin Save button is clicked.
+    expect(keepout.pageCaptures).toHaveLength(0)
+    expect(canvas.previewRequests).toHaveLength(previewsBeforeCapture)
+    expect(canvas.publicUrlRequests).toHaveLength(4)
+    expect(canvas.publicUrlRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fileId: "101", cookie: expect.stringContaining("canvas_session=authenticated"), secFetchSite: "same-origin" }),
+      expect.objectContaining({ fileId: "102", cookie: expect.stringContaining("canvas_session=authenticated"), secFetchSite: "same-origin" }),
+      expect.objectContaining({ fileId: "103", cookie: expect.stringContaining("canvas_session=authenticated"), secFetchSite: "same-origin" }),
+      expect.objectContaining({ fileId: "104", cookie: expect.stringContaining("canvas_session=authenticated"), secFetchSite: "same-origin" }),
+    ]))
+    expect(canvas.signedRequests).toHaveLength(4)
+
+    await dialog.getByRole("button", { name: "Save to Keepout", exact: true }).click()
+    await expect.poll(() => keepout.pageCaptures).toHaveLength(1)
+    const saved = keepout.pageCaptures[0].body as {
+      images?: Array<{ mimeType?: string; dataBase64?: string }>
+      markdown?: string
+    }
+    expect(saved.images).toHaveLength(4)
+    for (const image of saved.images ?? []) {
+      expect(image).toMatchObject({ mimeType: "image/png", dataBase64: TWO_BY_TWO_PNG })
+    }
+    expect(JSON.stringify(saved)).not.toContain(canvas.signedToken)
+    expect(JSON.stringify(saved)).not.toContain("canvas_session=authenticated")
+    expect(saved.markdown).not.toContain("signed-download")
+    expect(saved.markdown).not.toContain("preview")
+  } finally {
+    await canvas.close()
+    await keepout.close()
+  }
+})
+
+test("rejects a Canvas image when its authenticated public URL is denied without saving a partial page", async ({
+  context,
+  openSidepanel,
+}) => {
+  const keepout = await startKeepoutServer()
+  const canvas = await startAuthenticatedCanvasServer({ denyPublicUrl: true })
+  try {
+    const settingsPage = await openSidepanel()
+    await configureKeepout(settingsPage, keepout.port)
+    const canvasPage = await context.newPage()
+    await canvasPage.goto(`http://localhost:${canvas.port}/courses/42/pages/lesson`)
+    const response = await settingsPage.evaluate((url) => new Promise<{ ok?: boolean; error?: string }>((resolve, reject) => {
+      chrome.tabs.query({}, (tabs) => {
+        const tab = tabs.find((candidate) => candidate.url === url)
+        if (typeof tab?.id !== "number") return reject(new Error("Could not find denied Canvas page tab"))
+        chrome.runtime.sendMessage({ type: "keepout/open-canvas-page", tabId: tab.id }, (reply) => {
+          const error = chrome.runtime.lastError
+          if (error) reject(new Error(error.message))
+          else resolve(reply as { ok?: boolean; error?: string })
+        })
+      })
+    }), canvasPage.url())
+    expect(response.ok).toBe(false)
+    expect(response.error).toMatch(/Could not import image|HTTP 403|Nothing has been saved/i)
+    await expect(canvasPage.locator("#keepout-capture-root > iframe#keepout-capture-frame")).toHaveCount(0)
+    expect(keepout.pageCaptures).toHaveLength(0)
+  } finally {
+    await canvas.close()
     await keepout.close()
   }
 })
