@@ -64,11 +64,13 @@ export async function beginFreshKeepoutVideoUpload(connection: KeepoutConnection
 
 export async function sendKeepoutVideoChunk(connection: KeepoutConnection, upload: KeepoutVideoUpload, index: number, bytes: Uint8Array): Promise<void> {
   if (!Number.isSafeInteger(index) || index < 0 || !bytes.byteLength || bytes.byteLength > upload.chunkBytes) throw new Error("Invalid video chunk.");
+  // Fetch's TypeScript body types require owned ArrayBuffer-backed bytes.
+  const body = new Uint8Array(bytes).buffer;
   let response: Response;
   try {
     response = await fetch(endpoint(connection, `/v1/page-videos/${upload.id}/chunks?index=${index}`), {
       method: "POST", headers: { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/octet-stream", ...(upload.uploadNonce ? { "X-Keepout-Upload": upload.uploadNonce } : {}) },
-      body: bytes, credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(45_000),
+      body, credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(45_000),
     });
   } catch { throw new Error("Keepout lost the video upload. Retry the video."); }
   if (!response.ok) throw new Error(response.status === 409 ? "Keepout rejected this video upload." : "Keepout could not save this video chunk.");

@@ -997,7 +997,15 @@ async function requireCurrentCanvasImportTab(tabId: number, sourceURL: string): 
 
 async function importCanvasVideo(
   captureID: string,
-  pending: { tabId: number; capture: KeepoutCapture | KeepoutPageCapture; videos: CanvasPageVideo[]; videoImportJobs: Map<string, KeepoutVideoImportJob> },
+  pending: {
+    tabId: number;
+    capture: KeepoutCapture | KeepoutPageCapture;
+    videos: CanvasPageVideo[];
+    videoImportJobs: Map<string, KeepoutVideoImportJob>;
+    pageSaved: boolean;
+    pageSavePromise?: Promise<void>;
+    pageSaveReceipt?: { id: string; createdAt: string };
+  },
   video: CanvasPageVideo,
   title: unknown,
   marginNote: unknown,
