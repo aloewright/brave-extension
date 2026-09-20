@@ -141,13 +141,13 @@ test("saves an authenticated Canvas video through encrypted loopback upload with
     ]))
     expect(await extensionPage.evaluate(() => chrome.downloads.search({}))).toEqual(downloadsBefore)
 
-    await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).nth(1).click()
+    await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).first().click()
     await expect(dialog.getByText("Canvas returned a sign-in or preview page, not a video. Open the video in Canvas and try again.")).toBeVisible({ timeout: 10_000 })
     expect(servers.keepoutRequests.filter((request) => request.path === "/v1/page-captures")).toHaveLength(1)
 
     // A same-origin <video> follows the signed-in tab's isolated-world stream
     // path; it must still use the exact same encrypted Keepout API contract.
-    await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).nth(2).click()
+    await dialog.getByRole("button", { name: "Save in Keepout", exact: true }).first().click()
     await expect(dialog.getByText(/Saved in Keepout.*bytes encrypted/i)).toHaveCount(2, { timeout: 10_000 })
     expect(servers.keepoutRequests.filter((request) => request.path === "/v1/page-videos")).toHaveLength(2)
     expect(servers.keepoutRequests.filter((request) => request.path.endsWith("/chunks"))).toHaveLength(2)
