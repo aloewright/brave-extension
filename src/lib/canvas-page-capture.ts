@@ -12,6 +12,8 @@ export type CanvasPageCaptureDraft = {
   sourceUrl: string;
   markdown: string;
   images: CanvasPageImage[];
+  /** Extension-memory video candidates; Keepout page-capture JSON omits this. */
+  videos: CanvasPageVideo[];
   marginNote?: string;
 };
 
@@ -20,6 +22,22 @@ export type CanvasPageExtraction = {
   sourceUrl: string;
   markdown: string;
   images: { id: string; title: string; url: string; canvasFileId?: string }[];
+  /**
+   * Candidate video sources discovered in the rendered page. These are only a
+   * short-lived, extension-memory inventory: callers must never persist a
+   * signed URL or the Vimeo `h` token in a page capture.
+   */
+  videos: CanvasPageVideo[];
+};
+
+export type CanvasPageVideo = {
+  id: string;
+  title: string;
+  /** A direct, Canvas-file, or Vimeo embed source. Vimeo retains only `h`. */
+  url: string;
+  kind: "direct" | "canvas-file" | "vimeo-embed";
+  /** Present only for an exact same-origin Canvas `/files/<id>` route. */
+  canvasFileId?: string;
 };
 
 type CanvasImage = { mimeType: string; dataBase64: string; byteCount: number };
@@ -49,6 +67,8 @@ export function extractCanvasPage(): CanvasPageExtraction {
     || document.querySelector("#content h1")?.textContent || document.title).trim().slice(0, 500);
   const images: CanvasPageExtraction["images"] = [];
   const imageIDs = new Map<string, string>();
+  const videos: CanvasPageVideo[] = [];
+  const videoIDs = new Set<string>();
   // Escape only characters that can create inline Markdown. Escaping ordinary
   // prose punctuation made Canvas headings and sentences needlessly noisy.
   const literal = (text: string) => text.replace(/\u00a0/g, " ")
@@ -83,22 +103,71 @@ export function extractCanvasPage(): CanvasPageExtraction {
     if (img.closest("footer, [role=contentinfo], #footer, .ic-app-footer")) return true;
     return /(?:^|[-_\s])(footer|branding|brand)(?:[-_\s]|$)/i.test(`${img.id} ${img.className}`);
   };
+  const canvasFileIDFromURL = (value: string | null): string | undefined => {
+    if (!value) return undefined;
+    try {
+      const url = new URL(value, pageURL);
+      if (url.origin !== pageURL.origin || url.username || url.password) return undefined;
+      return url.pathname.match(/^\/(?:(?:courses|groups|users)\/\d+\/)?files\/([1-9]\d{0,29})(?:\/(?:preview|download))?\/?$/)?.[1];
+    } catch { return undefined; }
+  };
   const canvasFileID = (img: HTMLImageElement): string | undefined => {
     // currentSrc may already point at a CDN; use the original image source.
     // Do not trust data-api-endpoint alone: page metadata could name a different
     // user-readable file than the image the user actually chose to import.
     const originalSource = img.getAttribute("src");
-    const candidates = [originalSource, img.currentSrc, ...(!originalSource && !img.currentSrc ? [img.getAttribute("data-src")] : [])];
-    for (const value of candidates) {
-      if (!value) continue;
-      try {
-        const url = new URL(value, pageURL);
-        if (url.origin !== pageURL.origin || url.username || url.password) continue;
-        const match = url.pathname.match(/^\/(?:(?:courses|groups|users)\/\d+\/)?files\/([1-9]\d{0,29})(?:\/(?:preview|download))?\/?$/);
-        if (match) return match[1];
-      } catch { /* Non-Canvas images still use the ordinary image fetch. */ }
+    return canvasFileIDFromURL(originalSource)
+      ?? canvasFileIDFromURL(img.currentSrc)
+      ?? (!originalSource && !img.currentSrc ? canvasFileIDFromURL(img.getAttribute("data-src")) : undefined);
+  };
+  const mediaExtensions = /\.(?:mp4|m4v|mov|webm|ogv|ogg|m3u8)$/i;
+  const hasVideoMIME = (node: Element) => ["data-mime-type", "data-content-type", "type"]
+    .some((attribute) => /^video\//i.test(node.getAttribute(attribute) || ""));
+  const addVideo = (raw: string | null, candidateTitle: string, eligible: boolean) => {
+    if (!eligible || videos.length >= 16) return;
+    const safe = safeURL(raw || "");
+    if (!safe) return;
+    const parsed = new URL(safe);
+    let kind: CanvasPageVideo["kind"] = "direct";
+    let url = parsed.href;
+    let fileID = canvasFileIDFromURL(raw);
+    if (fileID) {
+      kind = "canvas-file";
+      // A Canvas file's temporary access query is never part of its identity.
+      parsed.search = "";
+      parsed.hash = "";
+      url = parsed.href;
+    } else if (parsed.protocol === "https:" && parsed.hostname === "player.vimeo.com" && /^\/video\/[1-9]\d*\/?$/.test(parsed.pathname)) {
+      kind = "vimeo-embed";
+      // `h` is Vimeo's unlisted-video capability. Drop player/UI/tracker
+      // options; the remaining value is still transient extension data.
+      const h = parsed.searchParams.get("h");
+      parsed.search = h ? `?h=${encodeURIComponent(h)}` : "";
+      parsed.hash = "";
+      url = parsed.href;
+      fileID = undefined;
     }
-    return undefined;
+    const key = `${kind}:${url}`;
+    if (videoIDs.has(key)) return;
+    videoIDs.add(key);
+    videos.push({
+      id: crypto.randomUUID(),
+      title: (candidateTitle.trim() || `Canvas video ${videos.length + 1}`).slice(0, 200),
+      url,
+      kind,
+      ...(fileID ? { canvasFileId: fileID } : {}),
+    });
+  };
+  const canonicalMediaURL = (raw: string): string | null => {
+    const safe = safeURL(raw);
+    if (!safe) return null;
+    const url = new URL(safe);
+    // Media-player and Canvas file queries are often temporary capabilities.
+    // Keep a stable source link in the saved page; transient access stays only
+    // in the separate in-memory video descriptor.
+    url.search = "";
+    url.hash = "";
+    return url.href;
   };
   const children = (element: Element, depth = 0): string => Array.from(element.childNodes)
     .map((node) => render(node, depth)).join("");
@@ -156,8 +225,28 @@ export function extractCanvasPage(): CanvasPageExtraction {
       const url = safeURL(node.getAttribute("href") || "");
       return url && text ? `[${text}](${markdownURL(url)})` : text;
     }
+    if (tag === "video") {
+      const video = node as HTMLVideoElement;
+      const raw = video.currentSrc || video.getAttribute("src") || video.querySelector("source")?.getAttribute("src") || "";
+      const isTrackingPixel = (video.getAttribute("width") === "1" && video.getAttribute("height") === "1")
+        || (video.videoWidth === 1 && video.videoHeight === 1);
+      addVideo(raw, video.title || video.getAttribute("aria-label") || "", !isTrackingPixel);
+    }
+    if (tag === "iframe") {
+      const frame = node as HTMLIFrameElement;
+      // An iframe is a candidate only for Vimeo's documented player route.
+      // Other frames are rendered as ordinary links, never treated as media.
+      const raw = frame.getAttribute("src");
+      let isVimeo = false;
+      try {
+        const url = new URL(raw || "", pageURL);
+        isVimeo = url.protocol === "https:" && url.hostname === "player.vimeo.com"
+          && /^\/video\/[1-9]\d*\/?$/.test(url.pathname) && !url.username && !url.password;
+      } catch { /* Not an importable Vimeo embed. */ }
+      addVideo(raw, frame.title || "", isVimeo);
+    }
     if (tag === "iframe" || tag === "video" || tag === "audio") {
-      const url = safeURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
+      const url = canonicalMediaURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
       return url ? `\n\n[${literal(node.title || "Embedded media — open in Canvas")}](${markdownURL(url)})\n\n` : "";
     }
     if (tag === "table") {
@@ -173,11 +262,23 @@ export function extractCanvasPage(): CanvasPageExtraction {
     if (["p", "div", "section", "article", "figure", "figcaption"].includes(tag)) return `\n\n${text.trim()}\n\n`;
     return text;
   };
+  // Canvas file-download anchors are often separate from the player. Scan
+  // after rendering so the Markdown output stays exactly as it was before
+  // video inventory support.
+  for (const anchor of content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const raw = anchor.getAttribute("href");
+    const url = safeURL(raw || "");
+    if (!url) continue;
+    const parsed = new URL(url);
+    const fileID = canvasFileIDFromURL(raw);
+    const eligible = Boolean(fileID) && (anchor.hasAttribute("download") || hasVideoMIME(anchor) || mediaExtensions.test(parsed.pathname));
+    addVideo(raw, anchor.textContent || anchor.title || "", eligible);
+  }
   const markdown = children(content).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!markdown) throw new Error("This Canvas page is empty or has not finished loading.");
   if (new TextEncoder().encode(markdown).length > 256 * 1024) throw new Error("This Canvas page is too large to import (256 KB text limit).");
   // Drop module navigation, access tokens, signed query parameters, and fragments.
-  return { title: title || "Canvas page", sourceUrl: pageURL.origin + pageURL.pathname, markdown, images };
+  return { title: title || "Canvas page", sourceUrl: pageURL.origin + pageURL.pathname, markdown, images, videos };
 }
 
 const TOTAL_LIMIT = 8 * 1024 * 1024;
@@ -403,5 +504,13 @@ export async function captureCanvasPageFromTab(tabId: number): Promise<CanvasPag
       throw new Error(`Could not import image ${images.length + 1} of ${extracted.images.length}. ${detail} Nothing has been saved.`);
     }
   }
-  return { version: 1, id: crypto.randomUUID(), title: extracted.title, sourceUrl: extracted.sourceUrl, markdown: extracted.markdown, images };
+  return {
+    version: 1,
+    id: crypto.randomUUID(),
+    title: extracted.title,
+    sourceUrl: extracted.sourceUrl,
+    markdown: extracted.markdown,
+    images,
+    videos: extracted.videos,
+  };
 }
