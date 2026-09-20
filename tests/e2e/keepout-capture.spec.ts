@@ -5,6 +5,7 @@ import { join } from "node:path"
 const TOKEN = "e2e-keepout-session-token"
 const SELECTED_TEXT = "A selected passage saved only to Keepout."
 const CANVAS_TEXT = "Canvas body text that must stay inside the extension confirmation frame."
+const CANVAS_MARKDOWN_TEXT = CANVAS_TEXT.replace(/\./g, "\\.")
 const TWO_BY_TWO_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIHWP4z8DwH4QZYAwjAwA2AgH/1fsA0QAAAABJRU5ErkJggg=="
 
 type CaptureRequest = {
@@ -339,7 +340,7 @@ test("imports a rendered Canvas page and its authenticated raster image only aft
     const dialog = await openCanvasCapturePanel(settingsPage, canvasPage)
 
     await expect(dialog.getByRole("heading", { name: "Save Canvas page to Keepout" })).toBeVisible()
-    await expect(dialog.locator("pre")).toContainText(CANVAS_TEXT)
+    await expect(dialog.locator("pre")).toContainText(CANVAS_MARKDOWN_TEXT)
     await expect(dialog.getByText("1 image will be imported with this page.")).toBeVisible()
     await dialog.getByLabel("Note title").fill("Canvas import title")
     await dialog.getByLabel("Margin note").fill("Review this lesson")
@@ -353,7 +354,7 @@ test("imports a rendered Canvas page and its authenticated raster image only aft
       title: "Canvas import title",
       sourceUrl: `http://127.0.0.1:${keepout.port}/courses/42/pages/lesson`,
       marginNote: "Review this lesson",
-      markdown: expect.stringContaining(CANVAS_TEXT),
+      markdown: expect.stringContaining(CANVAS_MARKDOWN_TEXT),
     })
     const body = submitted.body as { images?: Array<{ mimeType?: string; dataBase64?: string }>; markdown?: string }
     expect(body.images).toHaveLength(1)
