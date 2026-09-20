@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { downloadMedia } from './media-download.mjs';
+import { importKeepoutVideo } from './keepout-video-import.mjs';
 
 function send(message) {
   const body = Buffer.from(JSON.stringify(message));
@@ -23,7 +24,7 @@ process.stdin.on('data', chunk => {
     try { request = JSON.parse(body.toString()); }
     catch { send({ ok: false, error: 'Invalid download request.' }); continue; }
     busy = true;
-    downloadMedia(request).then(
+    (request.mode === 'keepout-video' ? importKeepoutVideo(request) : downloadMedia(request)).then(
       result => send({ ok: true, ...result }),
       error => send({ ok: false, error: error.message }),
     ).finally(() => { busy = false; });
