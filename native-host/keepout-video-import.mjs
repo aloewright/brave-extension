@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, open, rm, realpath, lstat, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, rm, realpath, lstat, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, isAbsolute } from 'node:path';
 import { resolveYtDlpExecutable } from './media-download.mjs';
@@ -35,7 +35,7 @@ function api(connection, path, method, body, nonce) {
 }
 async function responseJSON(response) { if (!response.ok) throw new Error(response.status === 423 ? 'Keepout is locked.' : 'Keepout rejected the video import.'); const value = await response.json(); if (!value || typeof value !== 'object') throw new Error('Invalid Keepout response.'); return value; }
 async function download(url, referer, directory) {
-  const args = ['--ignore-config','--no-playlist','--no-overwrites','--no-progress','--no-cache-dir','--restrict-filenames','--socket-timeout','30','--referer',`${referer.origin}/`,'--paths',directory,'--output','video.%(ext)s','--print','after_move:filepath','--format','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best','--merge-output-format','mp4','--',url.href];
+  const args = ['--ignore-config','--no-playlist','--no-overwrites','--no-progress','--no-cache-dir','--restrict-filenames','--socket-timeout','30','--max-filesize',String(MAX_BYTES),'--referer',`${referer.origin}/`,'--paths',directory,'--output','video.%(ext)s','--print','after_move:filepath','--format','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best','--merge-output-format','mp4','--',url.href];
   return new Promise((resolve,reject) => {
     const child = spawn(resolveYtDlpExecutable(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -168,6 +168,8 @@ export async function importKeepoutVideo(request) {
     await (await import('node:fs/promises')).chmod(root, 0o700);
     await writeFile(join(root, OWNER_FILE), JSON.stringify({ pid: process.pid, createdAt: Date.now() }), { mode: 0o600 });
     const output = await download(input.url, input.referer, root); const file = await verifiedDownloadedFile(root, output);
+    const fileSize = (await stat(file)).size;
+    if (!Number.isSafeInteger(fileSize) || fileSize <= 0 || fileSize > MAX_BYTES) throw new Error('Video exceeds Keepout\'s 4 GiB limit.');
     const contentType = await verifiedVideoType(file);
     let started = await responseJSON(await api(input.connection, '/v1/page-videos','POST',{id:input.id,captureID:input.captureID,title:input.title,contentType}));
     if (started.id !== input.id || started.chunkBytes !== CHUNK_BYTES) throw new Error('Incompatible Keepout video session.');
