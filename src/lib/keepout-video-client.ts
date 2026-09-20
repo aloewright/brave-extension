@@ -40,12 +40,13 @@ export async function beginKeepoutVideoUpload(connection: KeepoutConnection, inp
   const result = await json(connection, "/v1/page-videos", "POST", input);
   const id = requireUUID(result.id, "Keepout returned an invalid video identifier.");
   if (id.toLowerCase() !== input.id.toLowerCase() || result.chunkBytes !== KEEPOUT_VIDEO_CHUNK_BYTES) throw new Error("Keepout returned an incompatible video-upload session.");
-  if (result.complete !== undefined && result.complete !== true) throw new Error("Keepout returned an invalid video-upload state.");
+  if (typeof result.complete !== "boolean") throw new Error("Keepout returned an invalid video-upload state.");
+  const complete = result.complete;
   const uploadNonce = result.uploadNonce;
-  const nextIndex = result.index === undefined ? 0 : result.index;
-  if (result.complete !== true && (typeof uploadNonce !== "string" || !/^[0-9a-f-]{36}$/i.test(uploadNonce))) throw new Error("Keepout did not return a video-upload nonce.");
+  const nextIndex = complete ? 0 : result.index;
+  if (!complete && (typeof uploadNonce !== "string" || !/^[0-9a-f-]{36}$/i.test(uploadNonce))) throw new Error("Keepout did not return a video-upload nonce.");
   if (!Number.isSafeInteger(nextIndex) || nextIndex < 0) throw new Error("Keepout returned an invalid video-upload position.");
-  return { id, chunkBytes: KEEPOUT_VIDEO_CHUNK_BYTES, nextIndex, complete: result.complete === true, ...(typeof uploadNonce === "string" ? { uploadNonce } : {}) };
+  return { id, chunkBytes: KEEPOUT_VIDEO_CHUNK_BYTES, nextIndex, complete, ...(typeof uploadNonce === "string" ? { uploadNonce } : {}) };
 }
 
 /** A stream retry starts from byte zero. Do not overwrite an earlier partial
