@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, open, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,18 +35,44 @@ async function download(url, referer, directory) {
   return new Promise((resolve,reject) => { const child=spawn('yt-dlp',args,{stdio:['ignore','pipe','pipe']}); let out='',err=''; const timer=setTimeout(()=>{child.kill();reject(new Error('Video download exceeded 30 minutes.'));},30*60_000); child.stdout.on('data',d=>out=(out+d).slice(-4096)); child.stderr.on('data',d=>err=(err+d).slice(-4096)); child.on('error',()=>{clearTimeout(timer);reject(new Error('Install yt-dlp and FFmpeg, then retry.'));}); child.on('close',code=>{clearTimeout(timer); if(code) reject(new Error(scrub(err.split('\n').pop()))); else resolve(out.trim().split('\n').pop());}); });
 }
 
+export function videoTypeFromPrefix(prefix) {
+  if (prefix.byteLength < 64) throw new Error('Video downloader produced an incomplete video file.');
+  const ascii = (from, count) => String.fromCharCode(...prefix.slice(from, from + count));
+  if (ascii(4, 4) === 'ftyp' && /isom|iso[2-9]|mp4[12]|avc1|M4V |qt  |dash/.test(ascii(8, 56))) return 'video/mp4';
+  if (prefix[0] === 0x1a && prefix[1] === 0x45 && prefix[2] === 0xdf && prefix[3] === 0xa3) return 'video/webm';
+  if (ascii(0, 4) === 'OggS') return 'video/ogg';
+  throw new Error('Video downloader did not produce a recognizable video file.');
+}
+
+async function verifiedVideoType(file) {
+  const handle = await open(file, 'r');
+  try {
+    const prefix = new Uint8Array(64);
+    const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
+    return videoTypeFromPrefix(prefix.subarray(0, bytesRead));
+  } finally { await handle.close(); }
+}
+
 export async function importKeepoutVideo(request) {
   const input = validateKeepoutVideoRequest(request); let root; let upload;
   try {
     root = await mkdtemp(join(tmpdir(), 'keepout-video-'), { encoding: 'utf8' });
     await (await import('node:fs/promises')).chmod(root, 0o700);
-    const started = await responseJSON(await api(input.connection, '/v1/page-videos','POST',{id:input.id,captureID:input.captureID,title:input.title,contentType:'video/mp4'}));
-    if (started.id !== input.id || started.chunkBytes !== CHUNK_BYTES) throw new Error('Incompatible Keepout video session.');
-    if (started.complete === true) return { id: input.id, complete: true };
-    if (typeof started.uploadNonce !== 'string' || !UUID.test(started.uploadNonce)) throw new Error('Keepout did not return an upload nonce.');
-    upload = { id: input.id, nonce: started.uploadNonce };
     const output = await download(input.url, input.referer, root); const file = String(output || '');
     if (!output || !file.startsWith(root + '/')) throw new Error('Video downloader did not produce a safe file.');
+    const contentType = await verifiedVideoType(file);
+    let started = await responseJSON(await api(input.connection, '/v1/page-videos','POST',{id:input.id,captureID:input.captureID,title:input.title,contentType}));
+    if (started.id !== input.id || started.chunkBytes !== CHUNK_BYTES) throw new Error('Incompatible Keepout video session.');
+    if (started.complete === true) return { id: input.id, complete: true };
+    if (typeof started.uploadNonce !== 'string' || !UUID.test(started.uploadNonce) || !Number.isSafeInteger(started.index) || started.index < 0) throw new Error('Keepout did not return a valid upload session.');
+    // The native helper can only replay the temporary file from byte zero.
+    // Reset a partial strict-index session rather than corrupting or guessing.
+    if (started.index > 0) {
+      await responseJSON(await api(input.connection, `/v1/page-videos/${input.id}`, 'DELETE', undefined, started.uploadNonce));
+      started = await responseJSON(await api(input.connection, '/v1/page-videos','POST',{id:input.id,captureID:input.captureID,title:input.title,contentType}));
+      if (started.id !== input.id || started.chunkBytes !== CHUNK_BYTES || started.complete === true || typeof started.uploadNonce !== 'string' || !UUID.test(started.uploadNonce) || started.index !== 0) throw new Error('Keepout could not reset the interrupted video upload.');
+    }
+    upload = { id: input.id, nonce: started.uploadNonce };
     const handle = await open(file, 'r'); try { const buffer = new Uint8Array(CHUNK_BYTES); let index=0,total=0; while (true) { const {bytesRead}=await handle.read(buffer,0,buffer.length,null); if(!bytesRead) break; total+=bytesRead; if(total>MAX_BYTES) throw new Error('Video exceeds Keepout\'s 4 GiB limit.'); const response=await api(input.connection,`/v1/page-videos/${input.id}/chunks?index=${index++}`,'POST',buffer.subarray(0,bytesRead),upload.nonce); if(!response.ok) throw new Error('Keepout rejected a video chunk.'); } } finally { await handle.close(); }
     await responseJSON(await api(input.connection, `/v1/page-videos/${input.id}/complete`, 'POST', {}, upload.nonce)); return { id: input.id, complete: true };
   } catch (error) { if (upload) { try { await api(input.connection, `/v1/page-videos/${upload.id}`, 'DELETE', undefined, upload.nonce); } catch {} } throw new Error(scrub(error));

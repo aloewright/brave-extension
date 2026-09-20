@@ -3,7 +3,7 @@ import type { KeepoutConnection } from "./keepout-client";
 export const KEEPOUT_VIDEO_CHUNK_BYTES = 1_048_576;
 export const KEEPOUT_VIDEO_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 
-export type KeepoutVideoUpload = { id: string; chunkBytes: number; uploadNonce?: string; complete: boolean };
+export type KeepoutVideoUpload = { id: string; chunkBytes: number; uploadNonce?: string; nextIndex: number; complete: boolean };
 
 function requireUUID(value: unknown, message: string): string {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error(message);
@@ -42,8 +42,21 @@ export async function beginKeepoutVideoUpload(connection: KeepoutConnection, inp
   if (id.toLowerCase() !== input.id.toLowerCase() || result.chunkBytes !== KEEPOUT_VIDEO_CHUNK_BYTES) throw new Error("Keepout returned an incompatible video-upload session.");
   if (result.complete !== undefined && result.complete !== true) throw new Error("Keepout returned an invalid video-upload state.");
   const uploadNonce = result.uploadNonce;
+  const nextIndex = result.index === undefined ? 0 : result.index;
   if (result.complete !== true && (typeof uploadNonce !== "string" || !/^[0-9a-f-]{36}$/i.test(uploadNonce))) throw new Error("Keepout did not return a video-upload nonce.");
-  return { id, chunkBytes: KEEPOUT_VIDEO_CHUNK_BYTES, complete: result.complete === true, ...(typeof uploadNonce === "string" ? { uploadNonce } : {}) };
+  if (!Number.isSafeInteger(nextIndex) || nextIndex < 0) throw new Error("Keepout returned an invalid video-upload position.");
+  return { id, chunkBytes: KEEPOUT_VIDEO_CHUNK_BYTES, nextIndex, complete: result.complete === true, ...(typeof uploadNonce === "string" ? { uploadNonce } : {}) };
+}
+
+/** A stream retry starts from byte zero. Do not overwrite an earlier partial
+ * session whose strict chunk index would otherwise reject that replay. */
+export async function beginFreshKeepoutVideoUpload(connection: KeepoutConnection, input: { id: string; captureID: string; title: string; contentType: string }): Promise<KeepoutVideoUpload> {
+  let upload = await beginKeepoutVideoUpload(connection, input);
+  if (upload.complete || upload.nextIndex === 0) return upload;
+  await cancelKeepoutVideoUpload(connection, upload);
+  upload = await beginKeepoutVideoUpload(connection, input);
+  if (!upload.complete && upload.nextIndex !== 0) throw new Error("Keepout could not reset the interrupted video upload. Retry the video.");
+  return upload;
 }
 
 export async function sendKeepoutVideoChunk(connection: KeepoutConnection, upload: KeepoutVideoUpload, index: number, bytes: Uint8Array): Promise<void> {
@@ -72,7 +85,7 @@ export async function cancelKeepoutVideoUpload(connection: KeepoutConnection, up
 export async function uploadKeepoutVideoStream(connection: KeepoutConnection, upload: KeepoutVideoUpload, stream: ReadableStream<Uint8Array>, onProgress?: (sent: number) => void): Promise<void> {
   if (upload.complete) return;
   const reader = stream.getReader();
-  let pending = new Uint8Array(upload.chunkBytes); let filled = 0; let index = 0; let sent = 0;
+  let pending = new Uint8Array(upload.chunkBytes); let filled = 0; let index = upload.nextIndex; let sent = 0;
   try {
     while (true) {
       const next = await reader.read();

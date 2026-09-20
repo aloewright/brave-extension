@@ -5,12 +5,15 @@ import {
   saveKeepoutPageCapture,
   validateKeepoutCapture,
   validateKeepoutPageCapture,
+  getKeepoutConnection,
   type KeepoutCapture,
   type KeepoutPageCapture,
 } from "./lib/keepout-client";
 import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
 import { captureCanvasPageFromTab, type CanvasPageCaptureDraft, type CanvasPageVideo } from "./lib/canvas-page-capture";
 import { downloadCanvasVideo, canvasVideoDownloadStatus, type CanvasVideoDownloadResult } from "./lib/canvas-video-download";
+import { beginFreshKeepoutVideoUpload, cancelKeepoutVideoUpload, completeKeepoutVideoUpload, sendKeepoutVideoChunk, uploadKeepoutVideoStream, type KeepoutVideoUpload } from "./lib/keepout-video-client";
+import { resolveCanvasVideoImport, safeCanvasVideoImportError, streamCanvasVideoInIsolated } from "./lib/canvas-video-import";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
@@ -113,8 +116,22 @@ const pendingKeepoutCaptures = new Map<string, {
   capture: KeepoutCapture | KeepoutPageCapture;
   videos: CanvasPageVideo[];
   videoJobs: Map<string, Promise<CanvasVideoDownloadResult>>;
+  videoImportJobs: Map<string, KeepoutVideoImportJob>;
+  pageSaved: boolean;
+  pageSavePromise?: Promise<void>;
+  pageSaveReceipt?: { id: string; createdAt: string };
   timeout: ReturnType<typeof setTimeout>;
 }>();
+
+type KeepoutVideoImportJob = {
+  state: "saving" | "complete" | "failed";
+  bytes: number;
+  transferNonce?: string;
+  nextIndex?: number;
+  upload?: KeepoutVideoUpload;
+  error?: string;
+  promise: Promise<void>;
+};
 const pendingTtsPlayback = new Map<
   string,
   {
@@ -895,7 +912,9 @@ function stageKeepoutCapture(tabId: number, capture: KeepoutCapture | KeepoutPag
     discardKeepoutCapture(oldestCaptureID);
   }
   const timeout = setTimeout(() => pendingKeepoutCaptures.delete(capture.id), KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS);
-  pendingKeepoutCaptures.set(capture.id, { tabId, capture, videos, videoJobs: new Map(), timeout });
+  pendingKeepoutCaptures.set(capture.id, {
+    tabId, capture, videos, videoJobs: new Map(), videoImportJobs: new Map(), pageSaved: false, timeout,
+  });
 }
 
 function touchKeepoutCapture(captureID: string, ttl = KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS): void {
@@ -923,13 +942,155 @@ function isStagedKeepoutCapture(
 function discardKeepoutCapture(captureID: string): void {
   const pending = pendingKeepoutCaptures.get(captureID);
   if (!pending) return;
+  // A native or streamed import can outlive the panel. Retain only the
+  // in-memory binding while it is actively using that capture, so an expiry or
+  // Close click cannot orphan a server-side upload mid-stream.
+  if ([...pending.videoImportJobs.values()].some((job) => job.state === "saving")) {
+    touchKeepoutCapture(captureID, 31 * 60_000);
+    return;
+  }
   clearTimeout(pending.timeout);
   pendingKeepoutCaptures.delete(captureID);
+}
+
+function currentCanvasCaptureForVideo(
+  pending: { capture: KeepoutCapture | KeepoutPageCapture },
+  title: unknown,
+  marginNote: unknown,
+): KeepoutPageCapture {
+  if (!("markdown" in pending.capture) || typeof title !== "string" || typeof marginNote !== "string") {
+    throw new Error("Canvas pages need a title and note before a video can be saved.");
+  }
+  return validateKeepoutPageCapture({ ...pending.capture, title, marginNote });
+}
+
+async function saveCanvasPageBeforeVideo(
+  captureID: string,
+  pending: { capture: KeepoutCapture | KeepoutPageCapture; pageSaved: boolean; pageSavePromise?: Promise<void>; pageSaveReceipt?: { id: string; createdAt: string } },
+  title: unknown,
+  marginNote: unknown,
+): Promise<void> {
+  if (pending.pageSaved) return;
+  if (!pending.pageSavePromise) {
+    const capture = currentCanvasCaptureForVideo(pending, title, marginNote);
+    pending.pageSavePromise = saveKeepoutPageCapture(capture).then((receipt) => {
+      pending.pageSaved = true;
+      pending.pageSaveReceipt = receipt;
+    });
+  }
+  try {
+    await pending.pageSavePromise;
+  } finally {
+    // A failed save is retryable; a successful one remains recorded separately.
+    if (!pending.pageSaved) pending.pageSavePromise = undefined;
+  }
+  touchKeepoutCapture(captureID, 31 * 60_000);
+}
+
+async function requireCurrentCanvasImportTab(tabId: number, sourceURL: string): Promise<void> {
+  const [tab, source] = await Promise.all([chrome.tabs.get(tabId), Promise.resolve(new URL(sourceURL))]);
+  const current = new URL(tab.url || "");
+  if (current.origin !== source.origin || current.pathname !== source.pathname) {
+    throw new Error("The Canvas tab changed. Reopen the import panel and try again.");
+  }
+}
+
+async function importCanvasVideo(
+  captureID: string,
+  pending: { tabId: number; capture: KeepoutCapture | KeepoutPageCapture; videos: CanvasPageVideo[]; videoImportJobs: Map<string, KeepoutVideoImportJob> },
+  video: CanvasPageVideo,
+  title: unknown,
+  marginNote: unknown,
+): Promise<KeepoutVideoImportJob> {
+  const existing = pending.videoImportJobs.get(video.id);
+  if (existing?.state === "saving" || existing?.state === "complete") return existing;
+  const job = { state: "saving" as const, bytes: 0, promise: Promise.resolve() } as KeepoutVideoImportJob;
+  pending.videoImportJobs.set(video.id, job);
+  job.promise = (async () => {
+    await saveCanvasPageBeforeVideo(captureID, pending, title, marginNote);
+    await requireCurrentCanvasImportTab(pending.tabId, pending.capture.sourceUrl);
+    const connection = await getKeepoutConnection();
+    if (!connection.token) throw new Error("Connect Keepout in the extension's Settings first. Its token lasts for this browser session.");
+    if (video.kind === "vimeo") {
+      const native = await chrome.runtime.sendNativeMessage(HOST_NAME, {
+        mode: "keepout-video", url: video.url, referer: pending.capture.sourceUrl,
+        videoTitle: video.title, captureID, id: video.id, connection,
+      });
+      if (!native?.ok || native.id !== video.id || native.complete !== true) throw new Error(native?.error || "The local video helper could not import this Vimeo video.");
+      job.state = "complete";
+      return;
+    }
+    const resolved = await resolveCanvasVideoImport(pending.tabId, pending.capture.sourceUrl, video);
+    const upload = await beginFreshKeepoutVideoUpload(connection, {
+      id: video.id, captureID, title: video.title, contentType: resolved.mimeType,
+    });
+    job.upload = upload;
+    if (upload.complete) { job.state = "complete"; return; }
+    if (resolved.sameOrigin) {
+      const transferNonce = crypto.randomUUID();
+      job.transferNonce = transferNonce;
+      job.nextIndex = 0;
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: pending.tabId }, world: "ISOLATED", func: streamCanvasVideoInIsolated,
+        args: [resolved.url, pending.capture.sourceUrl, { captureId: captureID, videoId: video.id, transferNonce, chunkBytes: upload.chunkBytes }],
+      });
+      if (!result?.result || typeof result.result.bytes !== "number") throw new Error("Canvas did not finish sending this video.");
+      job.bytes = result.result.bytes;
+      await completeKeepoutVideoUpload(connection, upload);
+    } else {
+      const response = await fetch(resolved.url, {
+        credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: AbortSignal.timeout(60_000),
+      });
+      if (!response.ok || !response.body) throw new Error("Could not fetch this video for import.");
+      await uploadKeepoutVideoStream(connection, upload, response.body, (bytes) => {
+        job.bytes = bytes;
+        touchKeepoutCapture(captureID, 31 * 60_000);
+      });
+    }
+    job.state = "complete";
+  })().catch(async (error) => {
+    job.state = "failed";
+    job.error = safeCanvasVideoImportError(error);
+    if (job.upload && !job.upload.complete) await cancelKeepoutVideoUpload(await getKeepoutConnection(), job.upload).catch(() => {});
+  });
+  return job;
 }
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
   const m = message as { type?: string };
+
+  if (m.type === "keepout/video-import-chunk") {
+    const captureID = typeof message.captureId === "string" ? message.captureId : undefined;
+    const videoID = typeof message.videoId === "string" ? message.videoId : undefined;
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    const job = videoID ? pending?.videoImportJobs.get(videoID) : undefined;
+    if (_sender2.id !== chrome.runtime.id || !_sender2.tab?.id || !captureID || !videoID || !pending
+      || pending.tabId !== _sender2.tab.id || !job || job.state !== "saving"
+      || message.transferNonce !== job.transferNonce || message.index !== job.nextIndex
+      || !(message.bytes instanceof ArrayBuffer) || !job.upload) {
+      sendResponse2({ ok: false, error: "This video import is no longer active." });
+      return false;
+    }
+    const bytes = new Uint8Array(message.bytes);
+    if (!bytes.byteLength || bytes.byteLength > job.upload.chunkBytes) {
+      sendResponse2({ ok: false, error: "Invalid video chunk." });
+      return false;
+    }
+    void (async () => {
+      await requireCurrentCanvasImportTab(pending.tabId, pending.capture.sourceUrl);
+      await sendKeepoutVideoChunk(await getKeepoutConnection(), job.upload!, job.nextIndex!, bytes);
+      job.nextIndex! += 1;
+      job.bytes += bytes.byteLength;
+      touchKeepoutCapture(captureID, 31 * 60_000);
+      sendResponse2({ ok: true, bytes: job.bytes });
+    })().catch((error) => {
+      job.state = "failed";
+      job.error = safeCanvasVideoImportError(error);
+      sendResponse2({ ok: false, error: job.error });
+    });
+    return true;
+  }
 
   if (m.type === "keepout/draft") {
     const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
@@ -981,6 +1142,32 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
     return true;
   }
 
+  if (m.type === "keepout/video-import" || m.type === "keepout/video-import-status") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureId);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    const video = pending?.videos.find((item) => item.id === message.videoId);
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id || !video || !("markdown" in pending.capture)) {
+      sendResponse2({ ok: false, error: "Reopen the Canvas import panel to save this video." });
+      return false;
+    }
+    const existing = pending.videoImportJobs.get(video.id);
+    if (m.type === "keepout/video-import-status") {
+      if (!existing) {
+        sendResponse2({ ok: false, error: "This video import has not started. Click Save in Keepout to retry." });
+      } else if (existing.state === "failed") {
+        sendResponse2({ ok: false, error: existing.error || "The video could not be imported. Please retry." });
+      } else {
+        sendResponse2({ ok: true, state: existing.state, ...(existing.bytes ? { bytes: existing.bytes } : {}) });
+      }
+      return false;
+    }
+    if (existing?.state === "failed") pending.videoImportJobs.delete(video.id);
+    touchKeepoutCapture(captureID, 31 * 60_000);
+    void importCanvasVideo(captureID, pending, video, message.title, message.marginNote);
+    sendResponse2({ ok: true, state: "saving", ...(existing?.bytes ? { bytes: existing.bytes } : {}) });
+    return false;
+  }
+
   if (m.type === "keepout/capture") {
     const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
     const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
@@ -1012,6 +1199,17 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
       sendResponse2({ ok: false, error: "Canvas pages must be confirmed from the Keepout panel." });
       return false;
     }
+    if (pending.pageSaved && pending.pageSaveReceipt) {
+      sendResponse2({ ok: true, ...pending.pageSaveReceipt });
+      return false;
+    }
+    if (pending.pageSavePromise) {
+      pending.pageSavePromise.then(() => {
+        if (!pending.pageSaveReceipt) throw new Error("Canvas page save did not return a receipt.");
+        sendResponse2({ ok: true, ...pending.pageSaveReceipt });
+      }).catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save Canvas page to Keepout." }));
+      return true;
+    }
     let capture: KeepoutPageCapture;
     try {
       capture = validateKeepoutPageCapture(message.capture);
@@ -1027,6 +1225,8 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
         // The page save and video downloads are independent actions. Keep
         // transient video descriptors until Done/expiry, never in storage or
         // the note payload, so videos can still be downloaded after saving.
+        pending.pageSaved = true;
+        pending.pageSaveReceipt = receipt;
         if (pending.videos.length) touchKeepoutCapture(captureID);
         else discardKeepoutCapture(captureID);
         sendResponse2({ ok: true, ...receipt });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateKeepoutVideoRequest } from '../native-host/keepout-video-import.mjs';
+import { validateKeepoutVideoRequest, videoTypeFromPrefix } from '../native-host/keepout-video-import.mjs';
 
 const request = {
   mode: 'keepout-video', url: 'https://player.vimeo.com/video/42?h=capability', referer: 'https://canvas.example.edu/courses/1/pages/2',
@@ -18,4 +18,12 @@ describe('native Keepout video import', () => {
     { ...request, connection: { port: 80, token: 'token' } },
     { ...request, connection: { port: 8721, token: 'has space' } },
   ])('rejects unsafe native input', (unsafe) => expect(() => validateKeepoutVideoRequest(unsafe)).toThrow());
+
+  it('requires a 64-byte recognizable video signature before opening an encrypted upload', () => {
+    const mp4 = new Uint8Array(64);
+    mp4.set(new TextEncoder().encode('ftypisom'), 4);
+    expect(videoTypeFromPrefix(mp4)).toBe('video/mp4');
+    expect(() => videoTypeFromPrefix(new Uint8Array(63))).toThrow('incomplete');
+    expect(() => videoTypeFromPrefix(new Uint8Array(64))).toThrow('recognizable');
+  });
 });
