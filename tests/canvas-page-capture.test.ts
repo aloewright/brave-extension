@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Window as HappyWindow } from "happy-dom";
-import { extractCanvasPage, readCanvasImage, captureCanvasPageFromTab } from "../src/lib/canvas-page-capture";
+import { extractCanvasPage, readCanvasImage, resolveCanvasFileURL, captureCanvasPageFromTab } from "../src/lib/canvas-page-capture";
 
 const source = "https://school.example/courses/42/pages/lesson-one";
 beforeEach(() => {
@@ -27,6 +27,88 @@ describe("Canvas page capture", () => {
     expect(result.markdown.indexOf("keepout-capture-image")).toBeLessThan(result.markdown.indexOf("After the image"));
     expect(result.markdown).not.toContain("course navigation");
     expect(result.images[0].url).toBe("https://school.example/courses/42/files/9/preview");
+    expect(result.images[0].canvasFileId).toBe("9");
+  });
+
+  it("retains the same-origin Canvas file reference when currentSrc points to storage", () => {
+    content(`<img src="/courses/42/files/9/preview" data-api-endpoint="https://school.example/api/v1/courses/42/files/9" data-api-returntype="File">`);
+    Object.defineProperty(document.querySelector("img")!, "currentSrc", { value: "https://cdn.example/image.png?signature=transient" });
+    const image = extractCanvasPage().images[0];
+    expect(image.canvasFileId).toBe("9");
+    expect(image.url).toBe("https://cdn.example/image.png?signature=transient");
+  });
+
+  it("derives only exact same-origin numeric File routes, never arbitrary API endpoints", () => {
+    content(`<img src="/a.png" data-api-endpoint="https://evil.example/api/v1/files/9"><img src="/b.png" data-api-endpoint="/api/v1/courses/42/users"><img src="/c.png" data-api-endpoint="https://user:secret@school.example/api/v1/files/9"><img src="/groups/7/files/10/download"><img src="/files/11/preview">`);
+    expect(extractCanvasPage().images.map((image) => image.canvasFileId)).toEqual([undefined, undefined, undefined, "10", "11"]);
+  });
+
+  it("never substitutes a different file ID supplied by page metadata", () => {
+    content(`<img src="/courses/42/files/9/preview" data-api-endpoint="/api/v1/files/999" data-api-returntype="File"><img src="https://cdn.example/image.png" data-api-endpoint="/api/v1/files/999" data-api-returntype="File"><img src="/diagram.png" data-src="/files/999/preview">`);
+    expect(extractCanvasPage().images.map((image) => image.canvasFileId)).toEqual(["9", undefined, undefined]);
+  });
+
+  it("resolves signed storage URLs inside the session without an API token", async () => {
+    const url = "https://storage.example/image.png?signature=transient";
+    const fetcher = vi.fn(async () => new Response(`while(1);${JSON.stringify({ public_url: url })}`, { headers: { "content-type": "application/json; charset=utf-8" } }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(resolveCanvasFileURL("9", source)).resolves.toEqual({ ok: true, url });
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith("https://school.example/api/v1/files/9/public_url", expect.objectContaining({
+      credentials: "include", redirect: "error", cache: "no-store", headers: { Accept: "application/json" },
+    }));
+  });
+
+  it("never resolves arbitrary IDs or a page that navigated away from its Canvas origin", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    await expect(resolveCanvasFileURL("../users", source)).resolves.toMatchObject({ ok: false, failure: { kind: "address" } });
+    vi.stubGlobal("location", new URL("https://another.example/"));
+    await expect(resolveCanvasFileURL("9", source)).resolves.toMatchObject({ ok: false, failure: { kind: "address" } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects login pages, malformed or oversized metadata and unsafe signed URLs", async () => {
+    for (const body of ["<form>sign in</form>", "{}", "not JSON", " ".repeat(64 * 1024 + 1)]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { headers: { "content-type": "application/json" } })));
+      await expect(resolveCanvasFileURL("9", source)).resolves.toMatchObject({ ok: false, failure: { kind: "metadata" } });
+    }
+    for (const url of ["http://storage.example/image.png", "file:///private/image.png", "https://user:secret@storage.example/image.png", "/relative.png"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ public_url: url }), { headers: { "content-type": "application/json" } })));
+      await expect(resolveCanvasFileURL("9", source)).resolves.toMatchObject({ ok: false, failure: { kind: "address" } });
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("login", { headers: { "content-type": "text/html" } })));
+    await expect(resolveCanvasFileURL("9", source)).resolves.toMatchObject({ ok: false, failure: { kind: "metadata" } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("denied", { status: 403 })));
+    await expect(resolveCanvasFileURL("9", source)).resolves.toMatchObject({ ok: false, failure: { kind: "http", status: 403 } });
+  });
+
+  it("downloads signed bytes with no cookies and never saves a signed URL or file metadata", async () => {
+    const signedURL = "https://school.example/download.png?signature=never-save";
+    const executeScript = vi.fn(async ({ func, args }: { func?: (...input: any[]) => unknown; args?: any[] }) => {
+      if (func && args) return [{ result: await func(...args) }];
+      return [{ result: { title: "Lesson", sourceUrl: source, markdown: "Image", images: [{ id: "1", title: "Diagram", url: "https://school.example/courses/42/files/9/preview", canvasFileId: "9" }] } }];
+    });
+    Object.assign(chrome, { scripting: { executeScript } });
+    const fetcher = vi.fn(async (url: string) => url.endsWith("/public_url")
+      ? new Response(JSON.stringify({ public_url: signedURL }), { headers: { "content-type": "application/json" } })
+      : new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const capture = await captureCanvasPageFromTab(9);
+    expect(capture.images).toEqual([{ id: "1", title: "Diagram.png", mimeType: "image/png", dataBase64: "AQID" }]);
+    expect(fetcher).toHaveBeenLastCalledWith(signedURL, expect.objectContaining({ credentials: "omit" }));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(capture)).not.toMatch(/signature|never-save|canvasFileId|public_url/);
+  });
+
+  it("retains the direct image path when the Canvas file API is unavailable", async () => {
+    const executeScript = vi.fn(async ({ func, args }: { func?: (...input: any[]) => unknown; args?: any[] }) => {
+      if (func && args) return [{ result: await func(...args) }];
+      return [{ result: { title: "Lesson", sourceUrl: source, markdown: "Image", images: [{ id: "1", title: "Diagram", url: "https://school.example/files/9/preview", canvasFileId: "9" }] } }];
+    });
+    Object.assign(chrome, { scripting: { executeScript } });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/public_url")
+      ? new Response("denied", { status: 403 })
+      : new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } })));
+    await expect(captureCanvasPageFromTab(9)).resolves.toMatchObject({ images: [{ dataBase64: "AQID" }] });
   });
 
   it("omits active content and hidden controls; escapes text instead of turning it into executable HTML", () => {
