@@ -71,13 +71,47 @@ describe("Canvas page capture", () => {
     expect(fetcher).toHaveBeenLastCalledWith("https://cdn.example/image.png", expect.objectContaining({ credentials: "omit" }));
   });
 
-  it("rejects a login HTML response, active SVG, and oversized image bytes", async () => {
+  it("reports HTTP failures separately from safe response-type categories", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Forbidden", { status: 403 })));
+    await expect(readCanvasImage("https://school.example/private.png", source)).rejects.toThrow(/HTTP 403/);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<form>Sign in</form>", { headers: { "content-type": "text/html" } })));
-    await expect(readCanvasImage("https://school.example/private.png", source)).rejects.toThrow(/signed in/);
+    await expect(readCanvasImage("https://school.example/private.png", source)).rejects.toThrow(/received text\/html/);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<svg/>", { headers: { "content-type": "image/svg+xml" } })));
-    await expect(readCanvasImage("https://school.example/private.svg", source)).rejects.toThrow();
+    await expect(readCanvasImage("https://school.example/private.svg", source)).rejects.toThrow(/unsupported image\/svg\+xml/);
+  });
+
+  it("still captures an authenticated same-origin image when the tab attempt succeeds", async () => {
+    const executeScript = vi.fn(async ({ func, args }: { func?: (...input: any[]) => unknown; args?: any[] }) => {
+      if (func && args) return [{ result: await func(...args) }];
+      return [{ result: { title: "Lesson", sourceUrl: source, markdown: "Image", images: [{ id: "1", title: "Diagram", url: "https://school.example/image.png" }] } }];
+    });
+    Object.assign(chrome, { scripting: { executeScript } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } })));
+    await expect(captureCanvasPageFromTab(9)).resolves.toMatchObject({ images: [{ mimeType: "image/png", dataBase64: "AQID" }] });
+    expect(executeScript).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the sanitized tab failure when the extension retry also fails", async () => {
+    const executeScript = vi.fn()
+      .mockResolvedValueOnce([{ result: { title: "Lesson", sourceUrl: source, markdown: "Image", images: [{ id: "1", title: "Diagram", url: "https://school.example/image.png" }] } }])
+      .mockResolvedValueOnce([{ result: { ok: false, failure: { kind: "http", status: 403 } } }]);
+    Object.assign(chrome, { scripting: { executeScript } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<form>Sign in</form>", { headers: { "content-type": "text/html" } })));
+    await expect(captureCanvasPageFromTab(9)).rejects.toThrow(/Tab attempt: HTTP 403\. Extension attempt: received text\/html\. Nothing has been saved\./);
+  });
+
+  it("rejects oversized image bytes", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(4 * 1024 * 1024 + 1), { headers: { "content-type": "image/png" } })));
     await expect(readCanvasImage("https://school.example/huge.png", source)).rejects.toThrow(/4 MB/);
+  });
+
+  it("identifies known unsupported types without exposing arbitrary response headers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("image", { headers: { "content-type": "image/avif" } })));
+    await expect(readCanvasImage("https://school.example/image", source)).rejects.toThrow("received unsupported image/avif");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("image", { headers: { "content-type": "application/octet-stream" } })));
+    await expect(readCanvasImage("https://school.example/image", source)).rejects.toThrow("received application/octet-stream");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("image", { headers: { "content-type": "application/private-signed-value" } })));
+    await expect(readCanvasImage("https://school.example/image", source)).rejects.toThrow(/^received a non-image response$/);
   });
 
   it("does not downgrade HTTPS or read arbitrary local-file schemes", async () => {
