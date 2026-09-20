@@ -53,15 +53,21 @@ describe('native Keepout video import', () => {
     try {
       const stale = join(parent, 'keepout-video-stale');
       const active = join(parent, 'keepout-video-active');
-      await mkdir(stale); await mkdir(active);
+      const legacy = join(parent, 'keepout-video-legacy');
+      const malformed = join(parent, 'keepout-video-malformed');
+      await mkdir(stale); await mkdir(active); await mkdir(legacy); await mkdir(malformed);
       const old = new Date(Date.now() - 36 * 60_000);
-      await writeFile(join(stale, '.keepout-video-owner.json'), JSON.stringify({ pid: -1 }));
+      await writeFile(join(stale, '.keepout-video-owner.json'), JSON.stringify({ pid: 2_147_483_647 }));
       await writeFile(join(active, '.keepout-video-owner.json'), JSON.stringify({ pid: process.pid }));
+      await writeFile(join(malformed, '.keepout-video-owner.json'), '{not-json');
       await utimes(join(stale, '.keepout-video-owner.json'), old, old);
       await utimes(join(active, '.keepout-video-owner.json'), old, old);
+      await utimes(join(malformed, '.keepout-video-owner.json'), old, old);
       await cleanupStaleKeepoutVideoDirectories({ directory: parent });
       await expect(access(stale)).rejects.toThrow();
       await expect(access(active)).resolves.toBeUndefined();
+      await expect(access(legacy)).resolves.toBeUndefined();
+      await expect(access(malformed)).resolves.toBeUndefined();
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

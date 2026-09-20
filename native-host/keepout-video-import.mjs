@@ -36,7 +36,36 @@ function api(connection, path, method, body, nonce) {
 async function responseJSON(response) { if (!response.ok) throw new Error(response.status === 423 ? 'Keepout is locked.' : 'Keepout rejected the video import.'); const value = await response.json(); if (!value || typeof value !== 'object') throw new Error('Invalid Keepout response.'); return value; }
 async function download(url, referer, directory) {
   const args = ['--ignore-config','--no-playlist','--no-overwrites','--no-progress','--no-cache-dir','--restrict-filenames','--socket-timeout','30','--referer',`${referer.origin}/`,'--paths',directory,'--output','video.%(ext)s','--print','after_move:filepath','--format','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best','--merge-output-format','mp4','--',url.href];
-  return new Promise((resolve,reject) => { const child=spawn(resolveYtDlpExecutable(),args,{stdio:['ignore','pipe','pipe']}); let out='',err=''; const timer=setTimeout(()=>{child.kill();reject(new Error('Video download exceeded 30 minutes.'));},30*60_000); child.stdout.on('data',d=>out=(out+d).slice(-4096)); child.stderr.on('data',d=>err=(err+d).slice(-4096)); child.on('error',()=>{clearTimeout(timer);reject(new Error('Install yt-dlp and FFmpeg, then retry.'));}); child.on('close',code=>{clearTimeout(timer); if(code) reject(new Error(scrub(err.split('\n').pop()))); else resolve(out.trim().split('\n').pop());}); });
+  return new Promise((resolve,reject) => {
+    const child = spawn(resolveYtDlpExecutable(), args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // yt-dlp can launch ffmpeg. A dedicated POSIX process group lets the
+      // timeout stop every downloader child before the plaintext root is rm'd.
+      detached: process.platform !== 'win32',
+    });
+    let out = '', err = '', timedOut = false;
+    const terminate = (signal) => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch { /* The close event is authoritative. */ }
+    };
+    const timer = setTimeout(() => { timedOut = true; terminate('SIGTERM'); }, 30 * 60_000);
+    const forceTimer = setTimeout(() => { if (timedOut) terminate('SIGKILL'); }, 30 * 60_000 + 5_000);
+    child.stdout.on('data', d => out = (out + d).slice(-4096));
+    child.stderr.on('data', d => err = (err + d).slice(-4096));
+    child.on('error', () => {
+      clearTimeout(timer); clearTimeout(forceTimer);
+      reject(new Error('Install yt-dlp and FFmpeg, then retry.'));
+    });
+    child.on('close', code => {
+      clearTimeout(timer); clearTimeout(forceTimer);
+      if (timedOut) reject(new Error('Video download exceeded 30 minutes.'));
+      else if (code) reject(new Error(scrub(err.split('\n').pop())));
+      else resolve(out.trim().split('\n').pop());
+    });
+  });
 }
 
 function isInside(parent, child) {
@@ -83,9 +112,20 @@ export async function cleanupStaleKeepoutVideoDirectories({ directory = tmpdir()
         directory = await realpath(candidate);
         if (!isInside(parent, directory)) continue;
         const marker = join(directory, OWNER_FILE);
-        const markerStat = await lstat(marker);
+        let markerStat;
+        try {
+          markerStat = await lstat(marker);
+        } catch (error) {
+          if (error?.code === 'ENOENT') continue;
+          throw error;
+        }
+        // Marker-less roots predate this ownership protocol, and malformed
+        // markers are not proof that this running helper owns the directory.
+        // Preserve both rather than risk deleting a concurrent legacy import.
         if (!markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.mtimeMs >= cutoff) continue;
-        const owner = JSON.parse(await readFile(marker, 'utf8'));
+        let owner;
+        try { owner = JSON.parse(await readFile(marker, 'utf8')); } catch { continue; }
+        if (!Number.isInteger(owner?.pid) || owner.pid <= 0) continue;
         if (isLivePID(owner?.pid)) continue;
         await rm(directory, { recursive: true, force: false, maxRetries: 1 });
       } catch (error) {
@@ -144,5 +184,13 @@ export async function importKeepoutVideo(request) {
     const handle = await open(file, 'r'); try { const buffer = new Uint8Array(CHUNK_BYTES); let index=0,total=0; while (true) { const {bytesRead}=await handle.read(buffer,0,buffer.length,null); if(!bytesRead) break; total+=bytesRead; if(total>MAX_BYTES) throw new Error('Video exceeds Keepout\'s 4 GiB limit.'); const response=await api(input.connection,`/v1/page-videos/${input.id}/chunks?index=${index++}`,'POST',buffer.subarray(0,bytesRead),upload.nonce); if(!response.ok) throw new Error('Keepout rejected a video chunk.'); } } finally { await handle.close(); }
     await responseJSON(await api(input.connection, `/v1/page-videos/${input.id}/complete`, 'POST', {}, upload.nonce)); return { id: input.id, complete: true };
   } catch (error) { if (upload) { try { await api(input.connection, `/v1/page-videos/${upload.id}`, 'DELETE', undefined, upload.nonce); } catch {} } throw new Error(scrub(error));
-  } finally { if (root) await rm(root,{recursive:true,force:true}).catch(()=>{}); }
+  } finally {
+    if (root) {
+      try {
+        await rm(root, { recursive: true, force: true, maxRetries: 1 });
+      } catch {
+        throw new Error('Could not remove secure temporary video storage.');
+      }
+    }
+  }
 }
