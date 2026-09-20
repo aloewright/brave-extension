@@ -22,12 +22,26 @@ describe("Canvas page capture", () => {
     expect(result.markdown).toContain("## Learning &amp; evidence");
     expect(result.markdown).toContain("**useful**");
     expect(result.markdown).toContain("- First\n- Second");
-    expect(result.markdown).toContain("[Next page](<https://school.example/courses/42/pages/next>)");
+    expect(result.markdown).toContain("[Next page](https://school.example/courses/42/pages/next)");
     expect(result.markdown).toContain(`![A diagram](keepout-capture-image://${result.images[0].id})`);
     expect(result.markdown.indexOf("keepout-capture-image")).toBeLessThan(result.markdown.indexOf("After the image"));
     expect(result.markdown).not.toContain("course navigation");
     expect(result.images[0].url).toBe("https://school.example/courses/42/files/9/preview");
     expect(result.images[0].canvasFileId).toBe("9");
+  });
+
+  it("keeps ordinary prose readable, preserves styled-word spacing, and omits only semantic decorative footer images", () => {
+    content(`<h2>1.2 Neurons (overview).</h2><p>Cells <strong><b>axon</b></strong> carry <em>signals</em> onward. <strong>term </strong>next and <em><strong>mixed</strong></em>.</p><p><a href="/courses/42/pages/read-(more)">Read (more).</a></p><footer><img src="/footer-mark.png"></footer><p><img src="/diagram.png"></p>`);
+    const result = extractCanvasPage();
+    expect(result.markdown).toContain("## 1.2 Neurons (overview).");
+    expect(result.markdown).toContain("Cells **axon** carry *signals* onward.");
+    expect(result.markdown).toContain("**term** next and ***mixed***.");
+    expect(result.markdown).not.toContain("\\.2");
+    expect(result.markdown).not.toContain("****axon****");
+    expect(result.markdown).toContain("[Read (more).](https://school.example/courses/42/pages/read-\\(more\\))");
+    expect(result.markdown).not.toContain("footer-mark");
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0].url).toBe("https://school.example/diagram.png");
   });
 
   it("retains the same-origin Canvas file reference when currentSrc points to storage", () => {
@@ -112,10 +126,11 @@ describe("Canvas page capture", () => {
   });
 
   it("omits active content and hidden controls; escapes text instead of turning it into executable HTML", () => {
-    content(`<p>&lt;script&gt; **literal** [not a link]</p><script>steal()</script><p hidden>Hidden</p><button>Delete course</button><a href="javascript:alert(1)">Safe label</a>`);
+    content(`<p>&lt;script&gt; **literal** ~~literal~~ [not a link]</p><script>steal()</script><p hidden>Hidden</p><button>Delete course</button><a href="javascript:alert(1)">Safe label</a>`);
     const result = extractCanvasPage();
     expect(result.markdown).toContain("&lt;script&gt;");
     expect(result.markdown).toContain("\\*\\*literal\\*\\*");
+    expect(result.markdown).toContain("\\~\\~literal\\~\\~");
     expect(result.markdown).not.toMatch(/steal|Hidden|Delete course|javascript/);
   });
 
@@ -139,7 +154,7 @@ describe("Canvas page capture", () => {
     content(`<pre><code>let x = 1;\n  x++;</code></pre><iframe src="https://video.example/embed/123" title="Lecture"></iframe>`);
     const result = extractCanvasPage();
     expect(result.markdown).toContain("```\nlet x = 1;\n  x++;\n```");
-    expect(result.markdown).toContain("[Lecture](<https://video.example/embed/123>)");
+    expect(result.markdown).toContain("[Lecture](https://video.example/embed/123)");
     expect(result.markdown).not.toContain("<iframe");
   });
 
