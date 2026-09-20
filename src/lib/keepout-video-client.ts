@@ -45,7 +45,9 @@ export async function beginKeepoutVideoUpload(connection: KeepoutConnection, inp
   const uploadNonce = result.uploadNonce;
   const nextIndex = complete ? 0 : result.index;
   if (!complete && (typeof uploadNonce !== "string" || !/^[0-9a-f-]{36}$/i.test(uploadNonce))) throw new Error("Keepout did not return a video-upload nonce.");
-  if (!Number.isSafeInteger(nextIndex) || nextIndex < 0) throw new Error("Keepout returned an invalid video-upload position.");
+  if (typeof nextIndex !== "number" || !Number.isSafeInteger(nextIndex) || nextIndex < 0) {
+    throw new Error("Keepout returned an invalid video-upload position.");
+  }
   return { id, chunkBytes: KEEPOUT_VIDEO_CHUNK_BYTES, nextIndex, complete, ...(typeof uploadNonce === "string" ? { uploadNonce } : {}) };
 }
 
