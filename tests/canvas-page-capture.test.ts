@@ -171,7 +171,7 @@ describe("Canvas page capture", () => {
     expect(result.markdown).toContain("[Guest lecture](https://player.vimeo.com/video/12345)");
     expect(result.videos.map(({ id: _id, ...video }) => video)).toEqual([
       { title: "Week one lecture", url: "https://school.example/courses/42/files/9/download", kind: "canvas-file", canvasFileId: "9" },
-      { title: "Guest lecture", url: "https://player.vimeo.com/video/12345?h=unlisted-token", kind: "vimeo-embed" },
+      { title: "Guest lecture", url: "https://player.vimeo.com/video/12345?h=unlisted-token", kind: "vimeo" },
       { title: "Download recap", url: "https://school.example/courses/42/files/10/download", kind: "canvas-file", canvasFileId: "10" },
     ]);
     expect(result.markdown).not.toContain("access_token=never-save");

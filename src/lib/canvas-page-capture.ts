@@ -35,7 +35,7 @@ export type CanvasPageVideo = {
   title: string;
   /** A direct, Canvas-file, or Vimeo embed source. Vimeo retains only `h`. */
   url: string;
-  kind: "direct" | "canvas-file" | "vimeo-embed";
+  kind: "direct" | "canvas-file" | "vimeo";
   /** Present only for an exact same-origin Canvas `/files/<id>` route. */
   canvasFileId?: string;
 };
@@ -138,7 +138,7 @@ export function extractCanvasPage(): CanvasPageExtraction {
       parsed.hash = "";
       url = parsed.href;
     } else if (parsed.protocol === "https:" && parsed.hostname === "player.vimeo.com" && /^\/video\/[1-9]\d*\/?$/.test(parsed.pathname)) {
-      kind = "vimeo-embed";
+      kind = "vimeo";
       // `h` is Vimeo's unlisted-video capability. Drop player/UI/tracker
       // options; the remaining value is still transient extension data.
       const h = parsed.searchParams.get("h");
@@ -158,15 +158,18 @@ export function extractCanvasPage(): CanvasPageExtraction {
       ...(fileID ? { canvasFileId: fileID } : {}),
     });
   };
-  const canonicalMediaURL = (raw: string): string | null => {
+  const persistedMediaURL = (raw: string): string | null => {
     const safe = safeURL(raw);
     if (!safe) return null;
     const url = new URL(safe);
-    // Media-player and Canvas file queries are often temporary capabilities.
-    // Keep a stable source link in the saved page; transient access stays only
-    // in the separate in-memory video descriptor.
-    url.search = "";
-    url.hash = "";
+    // Canvas file queries and Vimeo's `h` can be temporary capabilities. Keep
+    // those out of the persisted page; other embeds retain their established
+    // query semantics and remain ordinary Markdown links.
+    if (canvasFileIDFromURL(raw)
+      || (url.protocol === "https:" && url.hostname === "player.vimeo.com" && /^\/video\/[1-9]\d*\/?$/.test(url.pathname))) {
+      url.search = "";
+      url.hash = "";
+    }
     return url.href;
   };
   const children = (element: Element, depth = 0): string => Array.from(element.childNodes)
@@ -246,7 +249,7 @@ export function extractCanvasPage(): CanvasPageExtraction {
       addVideo(raw, frame.title || "", isVimeo);
     }
     if (tag === "iframe" || tag === "video" || tag === "audio") {
-      const url = canonicalMediaURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
+      const url = persistedMediaURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
       return url ? `\n\n[${literal(node.title || "Embedded media — open in Canvas")}](${markdownURL(url)})\n\n` : "";
     }
     if (tag === "table") {

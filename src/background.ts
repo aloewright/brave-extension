@@ -9,7 +9,8 @@ import {
   type KeepoutPageCapture,
 } from "./lib/keepout-client";
 import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
-import { captureCanvasPageFromTab, type CanvasPageCaptureDraft } from "./lib/canvas-page-capture";
+import { captureCanvasPageFromTab, type CanvasPageCaptureDraft, type CanvasPageVideo } from "./lib/canvas-page-capture";
+import { downloadCanvasVideo, canvasVideoDownloadStatus, type CanvasVideoDownloadResult } from "./lib/canvas-video-download";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
@@ -110,6 +111,8 @@ const MAX_PENDING_KEEPOUT_CAPTURES = 8;
 const pendingKeepoutCaptures = new Map<string, {
   tabId: number;
   capture: KeepoutCapture | KeepoutPageCapture;
+  videos: CanvasPageVideo[];
+  videoJobs: Map<string, Promise<CanvasVideoDownloadResult>>;
   timeout: ReturnType<typeof setTimeout>;
 }>();
 const pendingTtsPlayback = new Map<
@@ -883,7 +886,7 @@ function getCaptureIDFromExtensionPage(sender: chrome.runtime.MessageSender, can
   }
 }
 
-function stageKeepoutCapture(tabId: number, capture: KeepoutCapture | KeepoutPageCapture): void {
+function stageKeepoutCapture(tabId: number, capture: KeepoutCapture | KeepoutPageCapture, videos: CanvasPageVideo[] = []): void {
   const previous = pendingKeepoutCaptures.get(capture.id);
   if (previous) clearTimeout(previous.timeout);
   while (pendingKeepoutCaptures.size >= MAX_PENDING_KEEPOUT_CAPTURES) {
@@ -892,7 +895,14 @@ function stageKeepoutCapture(tabId: number, capture: KeepoutCapture | KeepoutPag
     discardKeepoutCapture(oldestCaptureID);
   }
   const timeout = setTimeout(() => pendingKeepoutCaptures.delete(capture.id), KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS);
-  pendingKeepoutCaptures.set(capture.id, { tabId, capture, timeout });
+  pendingKeepoutCaptures.set(capture.id, { tabId, capture, videos, videoJobs: new Map(), timeout });
+}
+
+function touchKeepoutCapture(captureID: string, ttl = KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS): void {
+  const pending = pendingKeepoutCaptures.get(captureID);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  pending.timeout = setTimeout(() => discardKeepoutCapture(captureID), ttl);
 }
 
 function isStagedKeepoutCapture(
@@ -928,8 +938,47 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
       sendResponse2({ ok: false, error: "This capture is no longer available." });
       return false;
     }
-    sendResponse2({ ok: true, capture: pending.capture });
+    touchKeepoutCapture(captureID);
+    sendResponse2({ ok: true, capture: { ...pending.capture,
+      ...(pending.videos.length ? { videos: pending.videos.map(({ id, title, kind }) => ({ id, title, kind })) } : {}),
+    } });
     return false;
+  }
+
+  if (m.type === "keepout/video-download" || m.type === "keepout/video-status") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    const video = pending?.videos.find((item) => item.id === message.videoID);
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id || !video) {
+      sendResponse2({ ok: false, error: "Reopen the Canvas import panel to download this video." });
+      return false;
+    }
+    touchKeepoutCapture(captureID);
+    void (async () => {
+      let job = pending.videoJobs.get(video.id);
+      if (m.type === "keepout/video-status") {
+        if (!job) throw new Error("This download has not started. Click Download video to retry.");
+        const result = await job;
+        const status = result.downloadId !== undefined ? await canvasVideoDownloadStatus(result.downloadId) : result;
+        sendResponse2(status);
+      } else {
+        if (!job) {
+          // Native Vimeo downloads may run for up to 30 minutes. Keep their
+          // in-memory draft alive only for that bounded active operation.
+          if (video.kind === "vimeo") touchKeepoutCapture(captureID, 31 * 60_000);
+          job = downloadCanvasVideo(pending.tabId, pending.capture.sourceUrl, video);
+          pending.videoJobs.set(video.id, job);
+        }
+        const result = await job;
+        touchKeepoutCapture(captureID);
+        sendResponse2(result);
+      }
+    })().catch((error) => {
+      pending.videoJobs.delete(video.id);
+      sendResponse2({ ok: false, error: error instanceof Error
+        ? error.message.replace(/https?:\/\/\S+/g, "[video address]") : "The video could not be downloaded. Please retry." });
+    });
+    return true;
   }
 
   if (m.type === "keepout/capture") {
@@ -975,7 +1024,11 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
     }
     saveKeepoutPageCapture(capture)
       .then((receipt) => {
-        discardKeepoutCapture(captureID);
+        // The page save and video downloads are independent actions. Keep
+        // transient video descriptors until Done/expiry, never in storage or
+        // the note payload, so videos can still be downloaded after saving.
+        if (pending.videos.length) touchKeepoutCapture(captureID);
+        else discardKeepoutCapture(captureID);
         sendResponse2({ ok: true, ...receipt });
       })
       .catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save Canvas page to Keepout." }));
@@ -3058,7 +3111,7 @@ async function openKeepoutCanvasPageCaptureFromTab(tab: chrome.tabs.Tab): Promis
   if (typeof tab.id !== "number") return false;
   const draft: CanvasPageCaptureDraft = await captureCanvasPageFromTab(tab.id);
   const capture = validateKeepoutPageCapture(draft);
-  stageKeepoutCapture(tab.id, capture);
+  stageKeepoutCapture(tab.id, capture, draft.videos || []);
   try {
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

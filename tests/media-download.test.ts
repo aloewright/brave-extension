@@ -31,6 +31,14 @@ describe('one-click media downloads', () => {
     expect(() => downloadArguments({ ...request, mode: 'exec' }, '/tmp')).toThrow();
   });
 
+  it('sends only the Canvas origin as an optional Vimeo referer, never course or query details', () => {
+    const args = downloadArguments({ mode: 'video', url: 'https://player.vimeo.com/video/123', referer: 'https://school.example.com/courses/private?token=secret' }, '/tmp');
+    expect(args[args.indexOf('--referer') + 1]).toBe('https://school.example.com/');
+    expect(args.join(' ')).not.toContain('secret');
+    expect(args.join(' ')).not.toContain('--cookies');
+    expect(() => downloadArguments({ mode: 'video', url: 'https://player.vimeo.com/video/123', referer: 'file:///tmp' }, '/tmp')).toThrow();
+  });
+
   it.each(['video', 'audio'] as const)('hides the %s button by default, including for missing or reset settings', (mode) => {
     expect(DEFAULT_SETTINGS.hideVideoDownloadButton).toBe(true);
     expect(DEFAULT_SETTINGS.hideAudioDownloadButton).toBe(true);
