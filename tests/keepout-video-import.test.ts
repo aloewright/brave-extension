@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { access, mkdtemp, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupStaleKeepoutVideoDirectories, validateKeepoutVideoRequest, verifiedDownloadedFile, videoTypeFromPrefix } from '../native-host/keepout-video-import.mjs';
@@ -37,7 +37,7 @@ describe('native Keepout video import', () => {
     try {
       const file = join(root, 'video.mp4');
       await writeFile(file, 'video');
-      await expect(verifiedDownloadedFile(root, file)).resolves.toBe(file);
+      await expect(verifiedDownloadedFile(root, file)).resolves.toBe(await realpath(file));
       const link = join(root, 'video-link.mp4');
       await symlink(join(outside, 'video.mp4'), link);
       await expect(verifiedDownloadedFile(root, link)).rejects.toThrow('safe file');
