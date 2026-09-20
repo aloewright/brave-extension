@@ -49,15 +49,39 @@ export function extractCanvasPage(): CanvasPageExtraction {
     || document.querySelector("#content h1")?.textContent || document.title).trim().slice(0, 500);
   const images: CanvasPageExtraction["images"] = [];
   const imageIDs = new Map<string, string>();
+  // Escape only characters that can create inline Markdown. Escaping ordinary
+  // prose punctuation made Canvas headings and sentences needlessly noisy.
   const literal = (text: string) => text.replace(/\u00a0/g, " ")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/[\\`*_{}\[\]()#+.!|~=-]/g, "\\$&");
+    .replace(/\\/g, "\\\\").replace(/[`*_\[\]~]/g, "\\$&")
+    // Structural punctuation is meaningful only at a block's first character.
+    .replace(/^([>#])(?=\s)/, "\\$1").replace(/^([-+])(?=\s)/, "\\$1")
+    .replace(/^(\d+)([.)])(?=\s)/, "$1\\$2");
   const safeURL = (value: string): string | null => {
     try {
       const url = new URL(value, pageURL);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
       return url.href.replace(/</g, "%3C").replace(/>/g, "%3E");
     } catch { return null; }
+  };
+  const markdownURL = (url: string) => url.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const wrapInline = (node: HTMLElement, text: string, marker: "**" | "*" | "~~", equivalentTags: string[]) => {
+    const leading = text.match(/^\s*/)?.[0] ?? "";
+    const trailing = text.match(/\s*$/)?.[0] ?? "";
+    const core = text.slice(leading.length, text.length - trailing.length);
+    // Collapse only duplicate semantic ancestors. String marker checks would
+    // mistake bold text inside italic for duplicate italic formatting.
+    if (!core || !!node.parentElement?.closest(equivalentTags.join(","))) return text;
+    return `${leading}${marker}${core}${marker}${trailing}`;
+  };
+  const isDecorativeFooterImage = (img: HTMLImageElement) => {
+    const label = (img.alt || img.title || "").trim();
+    if (img.getAttribute("aria-hidden") === "true" || /^(?:presentation|none)$/i.test(img.getAttribute("role") || "")) return true;
+    // An absent label alone is not enough: Canvas pages often contain real,
+    // unlabelled diagrams. Restrict filtering to recognizable footer/branding.
+    if (label) return false;
+    if (img.closest("footer, [role=contentinfo], #footer, .ic-app-footer")) return true;
+    return /(?:^|[-_\s])(footer|branding|brand)(?:[-_\s]|$)/i.test(`${img.id} ${img.className}`);
   };
   const canvasFileID = (img: HTMLImageElement): string | undefined => {
     // currentSrc may already point at a CDN; use the original image source.
@@ -88,7 +112,7 @@ export function extractCanvasPage(): CanvasPageExtraction {
       const img = node as HTMLImageElement;
       // Ignore explicit tracking pixels, but keep unloaded and lazy course images.
       if ((img.getAttribute("width") === "1" && img.getAttribute("height") === "1")
-        || (img.naturalWidth === 1 && img.naturalHeight === 1)) return "";
+        || (img.naturalWidth === 1 && img.naturalHeight === 1) || isDecorativeFooterImage(img)) return "";
       const raw = img.currentSrc || img.getAttribute("src") || img.getAttribute("data-src") || "";
       const url = raw.startsWith("data:image/") ? raw : safeURL(raw);
       if (!raw || !url) throw new Error("A Canvas image uses an unsupported source. Nothing has been saved.");
@@ -130,11 +154,11 @@ export function extractCanvasPage(): CanvasPageExtraction {
       // An image remains a standalone attachment, not an image nested in a link.
       if (node.querySelector("img")) return text;
       const url = safeURL(node.getAttribute("href") || "");
-      return url && text ? `[${text}](<${url}>)` : text;
+      return url && text ? `[${text}](${markdownURL(url)})` : text;
     }
     if (tag === "iframe" || tag === "video" || tag === "audio") {
       const url = safeURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
-      return url ? `\n\n[${literal(node.title || "Embedded media — open in Canvas")}](<${url}>)\n\n` : "";
+      return url ? `\n\n[${literal(node.title || "Embedded media — open in Canvas")}](${markdownURL(url)})\n\n` : "";
     }
     if (tag === "table") {
       // Preserve all cells, including complex/image cells, without injecting raw HTML.
@@ -143,9 +167,9 @@ export function extractCanvasPage(): CanvasPageExtraction {
       ).join("\n\n")}\n\n`;
     }
     const text = children(node, depth);
-    if (["strong", "b"].includes(tag)) return `**${text.trim()}**`;
-    if (["em", "i"].includes(tag)) return `*${text.trim()}*`;
-    if (["s", "del"].includes(tag)) return `~~${text.trim()}~~`;
+    if (["strong", "b"].includes(tag)) return wrapInline(node, text, "**", ["strong", "b"]);
+    if (["em", "i"].includes(tag)) return wrapInline(node, text, "*", ["em", "i"]);
+    if (["s", "del"].includes(tag)) return wrapInline(node, text, "~~", ["s", "del"]);
     if (["p", "div", "section", "article", "figure", "figcaption"].includes(tag)) return `\n\n${text.trim()}\n\n`;
     return text;
   };

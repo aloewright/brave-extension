@@ -5,7 +5,8 @@ import { join } from "node:path"
 const TOKEN = "e2e-keepout-session-token"
 const SELECTED_TEXT = "A selected passage saved only to Keepout."
 const CANVAS_TEXT = "Canvas body text that must stay inside the extension confirmation frame."
-const CANVAS_MARKDOWN_TEXT = CANVAS_TEXT.replace(/\./g, "\\.")
+const CANVAS_MARKDOWN_TEXT = CANVAS_TEXT
+const CANVAS_NESTED_MARKDOWN_TEXT = "Before **bold *emphasis*** after."
 const TWO_BY_TWO_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIHWP4z8DwH4QZYAwjAwA2AgH/1fsA0QAAAABJRU5ErkJggg=="
 
 type CaptureRequest = {
@@ -34,7 +35,7 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
     if (url.pathname === "/courses/42/pages/lesson") {
       response.setHeader("set-cookie", "canvas_session=authenticated; Path=/; SameSite=Lax")
       response.setHeader("content-type", "text/html; charset=utf-8")
-      response.end(`<!doctype html><title>Canvas lesson</title><main id="wiki_page_show"><h1 class="page-title">Week one lesson</h1><div class="show-content user_content"><h2>Week one</h2><p>${CANVAS_TEXT}</p><ul><li>First task</li><li>Second task</li></ul><img alt="Lesson diagram" src="/canvas-image"></div></main>`)
+      response.end(`<!doctype html><title>Canvas lesson</title><main id="wiki_page_show"><h1 class="page-title">Week one lesson</h1><div class="show-content user_content"><h2>Week one</h2><p>${CANVAS_TEXT}</p><p>Before<strong> bold <em>emphasis</em> </strong>after.</p><ul><li>First task</li><li>Second task</li></ul><img alt="Lesson diagram" src="/canvas-image"><footer role="contentinfo"><img class="footer-branding" alt="" src="/canvas-footer-brand"></footer></div></main>`)
       return
     }
     if (url.pathname === "/canvas-image") {
@@ -42,6 +43,11 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
         response.writeHead(403).end()
         return
       }
+      response.setHeader("content-type", "image/png")
+      response.end(Buffer.from(TWO_BY_TWO_PNG, "base64"))
+      return
+    }
+    if (url.pathname === "/canvas-footer-brand") {
       response.setHeader("content-type", "image/png")
       response.end(Buffer.from(TWO_BY_TWO_PNG, "base64"))
       return
@@ -420,6 +426,7 @@ test("imports a rendered Canvas page and its authenticated raster image only aft
 
     await expect(dialog.getByRole("heading", { name: "Save Canvas page to Keepout" })).toBeVisible()
     await expect(dialog.locator("pre")).toContainText(CANVAS_MARKDOWN_TEXT)
+    await expect(dialog.locator("pre")).toContainText(CANVAS_NESTED_MARKDOWN_TEXT)
     await expect(dialog.getByText("1 image will be imported with this page.")).toBeVisible()
     await dialog.getByLabel("Note title").fill("Canvas import title")
     await dialog.getByLabel("Margin note").fill("Review this lesson")
@@ -436,6 +443,8 @@ test("imports a rendered Canvas page and its authenticated raster image only aft
       markdown: expect.stringContaining(CANVAS_MARKDOWN_TEXT),
     })
     const body = submitted.body as { images?: Array<{ mimeType?: string; dataBase64?: string }>; markdown?: string }
+    expect(body.markdown).toContain(CANVAS_NESTED_MARKDOWN_TEXT)
+    expect(body.markdown).not.toContain("Canvas body text that must stay inside the extension confirmation frame\\.")
     expect(body.images).toHaveLength(1)
     expect(body.images?.[0]).toMatchObject({ mimeType: "image/png", dataBase64: TWO_BY_TWO_PNG })
     expect(body.markdown).toContain("keepout-capture-image://")
