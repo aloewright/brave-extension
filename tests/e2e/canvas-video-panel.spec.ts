@@ -108,9 +108,9 @@ test("Canvas video panel keeps downloads outside Keepout and tracks each video i
   await expect(panel.locator(".videos li").nth(0).getByRole("button", { name: "Saved in Keepout" })).toBeDisabled();
 
   await panel.locator(".videos li").nth(0).getByRole("button", { name: "Download video" }).click();
-  await expect(panel.locator(".videos li").nth(0).locator("output")).toHaveText("Starting download…");
+  await expect(panel.locator(".videos li").nth(0).locator("output").last()).toHaveText("Starting download…");
   await expect(panel.locator(".videos li").nth(0).getByRole("button", { name: "Download started" })).toBeDisabled();
-  await expect(panel.locator(".videos li").nth(0).locator("output")).toHaveText(/download started/i);
+  await expect(panel.locator(".videos li").nth(0).locator("output").last()).toHaveText(/download started/i);
   await expect.poll(() => panel.evaluate(() => (window as Window & typeof globalThis & { __canvasVideoPanelMessages: PanelMessage[] }).__canvasVideoPanelMessages.filter((message) => message.type === "keepout/video-download"))).toEqual([
     { type: "keepout/video-download", captureID, videoID: directVideoID },
   ]);
@@ -120,11 +120,11 @@ test("Canvas video panel keeps downloads outside Keepout and tracks each video i
   await panel.getByRole("button", { name: "Save to Keepout", exact: true }).click();
   await expect(panel.locator("form > output")).toHaveText(/Saved to Keepout · Canvas page/i);
 
-  await expect(panel.locator(".videos li").nth(0).locator("output")).toHaveText(/Lecture recording\.mp4 downloaded\./i, { timeout: 6_000 });
+  await expect(panel.locator(".videos li").nth(0).locator("output").last()).toHaveText(/Lecture recording\.mp4 downloaded\./i, { timeout: 6_000 });
   await expect(panel.locator(".videos li").nth(0).getByRole("button", { name: "Downloaded" })).toBeDisabled();
 
   await panel.locator(".videos li").nth(1).getByRole("button", { name: "Download video" }).click();
-  await expect(panel.locator(".videos li").nth(1).locator("output")).toHaveText("Canvas refused this video.");
+  await expect(panel.locator(".videos li").nth(1).locator("output").last()).toHaveText("Canvas refused this video.");
   await expect(panel.locator(".videos li").nth(1).getByRole("button", { name: "Retry download" })).toBeEnabled();
   await panel.locator(".videos li").nth(1).getByRole("button", { name: "Save in Keepout" }).click();
   await expect(panel.locator(".videos li").nth(1).locator("output").first()).toHaveText("Keepout could not save this video.");

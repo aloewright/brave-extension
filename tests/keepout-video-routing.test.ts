@@ -7,6 +7,6 @@ describe("encrypted video native-host routing", () => {
   it("uses the dedicated media host for Vimeo Keepout imports", () => {
     const background = readFileSync(join(process.cwd(), "src/background.ts"), "utf8");
     expect(MEDIA_DOWNLOAD_HOST).toBe("com.aidev.media_download");
-    expect(background).toContain('chrome.runtime.sendNativeMessage(MEDIA_DOWNLOAD_HOST, {');
+    expect(background).toContain('sendMediaHostMessage({');
   });
 });
