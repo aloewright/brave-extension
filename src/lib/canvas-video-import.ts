@@ -9,6 +9,22 @@ export type ResolvedCanvasVideoImport = {
   sameOrigin: boolean;
 };
 
+/** Chrome extension messages use JSON serialization, not structured clone.
+ * Decode only one validated wire chunk at a time in the service worker. */
+export function decodeCanvasVideoChunk(base64: unknown, chunkBytes: number): Uint8Array {
+  if (typeof base64 !== "string" || !Number.isSafeInteger(chunkBytes) || chunkBytes < 1
+    || base64.length < 4 || base64.length > Math.ceil(chunkBytes / 3) * 4 + 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) {
+    throw new Error("Invalid video chunk.");
+  }
+  let binary: string;
+  try { binary = atob(base64); } catch { throw new Error("Invalid video chunk."); }
+  if (!binary.length || binary.length > chunkBytes) throw new Error("Invalid video chunk.");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
 function safeWebURL(value: string, pageURL: string): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("This video has no importable web address."); }
@@ -77,11 +93,14 @@ export async function streamCanvasVideoInIsolated(
   let total = 0;
   try {
     const submit = async (data: Uint8Array) => {
-      const copy = new Uint8Array(data.byteLength);
-      copy.set(data);
+      let binary = "";
+      // Avoid applying a 1 MiB array to String.fromCharCode at once.
+      for (let offset = 0; offset < data.byteLength; offset += 0x8000) {
+        binary += String.fromCharCode(...data.subarray(offset, Math.min(offset + 0x8000, data.byteLength)));
+      }
       const result = await chrome.runtime.sendMessage({
         type: "keepout/video-import-chunk", captureId: transfer.captureId, videoId: transfer.videoId,
-        transferNonce: transfer.transferNonce, index: index++, bytes: copy.buffer,
+        transferNonce: transfer.transferNonce, index: index++, bytesBase64: btoa(binary),
       });
       if (!result?.ok) throw new Error(result?.error || "Keepout could not save this video chunk.");
     };

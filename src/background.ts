@@ -13,7 +13,7 @@ import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepou
 import { captureCanvasPageFromTab, type CanvasPageCaptureDraft, type CanvasPageVideo } from "./lib/canvas-page-capture";
 import { downloadCanvasVideo, canvasVideoDownloadStatus, type CanvasVideoDownloadResult } from "./lib/canvas-video-download";
 import { beginFreshKeepoutVideoUpload, cancelKeepoutVideoUpload, completeKeepoutVideoUpload, sendKeepoutVideoChunk, uploadKeepoutVideoStream, type KeepoutVideoUpload } from "./lib/keepout-video-client";
-import { resolveCanvasVideoImport, safeCanvasVideoImportError, streamCanvasVideoInIsolated } from "./lib/canvas-video-import";
+import { decodeCanvasVideoChunk, resolveCanvasVideoImport, safeCanvasVideoImportError, streamCanvasVideoInIsolated } from "./lib/canvas-video-import";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
@@ -1067,13 +1067,13 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
     const job = videoID ? pending?.videoImportJobs.get(videoID) : undefined;
     if (_sender2.id !== chrome.runtime.id || !_sender2.tab?.id || !captureID || !videoID || !pending
       || pending.tabId !== _sender2.tab.id || !job || job.state !== "saving"
-      || message.transferNonce !== job.transferNonce || message.index !== job.nextIndex
-      || !(message.bytes instanceof ArrayBuffer) || !job.upload) {
+      || message.transferNonce !== job.transferNonce || message.index !== job.nextIndex || !job.upload) {
       sendResponse2({ ok: false, error: "This video import is no longer active." });
       return false;
     }
-    const bytes = new Uint8Array(message.bytes);
-    if (!bytes.byteLength || bytes.byteLength > job.upload.chunkBytes) {
+    let bytes: Uint8Array;
+    try { bytes = decodeCanvasVideoChunk(message.bytesBase64, job.upload.chunkBytes); }
+    catch {
       sendResponse2({ ok: false, error: "Invalid video chunk." });
       return false;
     }
