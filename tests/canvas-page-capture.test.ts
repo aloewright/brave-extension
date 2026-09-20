@@ -192,6 +192,13 @@ describe("Canvas page capture", () => {
     expect(result.videos[0].url).toContain("signature=private");
   });
 
+  it("recognizes labeled Canvas video downloads and filename titles without treating PDFs as videos", () => {
+    content(`<a download href="/files/20/download">Download video</a>
+      <a href="/files/21/download" title="Lecture.mp4">Download</a>
+      <a download href="/files/22/download">Worksheet.pdf</a>`);
+    expect(extractCanvasPage().videos.map(video => video.canvasFileId)).toEqual(['20', '21']);
+  });
+
   it("deduplicates supported videos, caps the inventory, and ignores tracking media or arbitrary frames", () => {
     content(`
       <video src="/courses/42/files/9/download"></video><a href="/courses/42/files/9/download" download>Same video</a>

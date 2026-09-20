@@ -231,7 +231,10 @@ export function extractCanvasPage(): CanvasPageExtraction {
       const safe = safeURL(raw);
       const isVideo = Boolean(safe && (hasVideoMIME(node)
         || mediaExtensions.test(new URL(safe).pathname)
-        || (canvasFileIDFromURL(raw) && mediaExtensions.test((node.getAttribute("download") || node.textContent || node.title).trim()))));
+        || (canvasFileIDFromURL(raw) && (
+          [node.getAttribute("download"), node.textContent, node.title].some((label) => mediaExtensions.test((label || '').trim()))
+          || /\b(video|recording)\b/i.test(`${node.textContent || ''} ${node.title}`)
+        ))));
       addVideo(raw, node.textContent || node.title || "", isVideo);
       const url = isVideo ? persistedMediaURL(raw, true) : safe;
       return url && text ? `[${text}](${markdownURL(url)})` : text;
