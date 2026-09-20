@@ -107,5 +107,8 @@ export async function uploadKeepoutVideoStream(connection: KeepoutConnection, up
     }
     if (filled) { await sendKeepoutVideoChunk(connection, upload, index, pending.subarray(0, filled)); sent += filled; onProgress?.(sent); }
     await completeKeepoutVideoUpload(connection, upload);
-  } finally { reader.releaseLock(); }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }

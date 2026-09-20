@@ -1039,7 +1039,7 @@ async function importCanvasVideo(
       await completeKeepoutVideoUpload(connection, upload);
     } else {
       const response = await fetch(resolved.url, {
-        credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: AbortSignal.timeout(60_000),
+        credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: AbortSignal.timeout(30 * 60_000),
       });
       if (!response.ok || !response.body) throw new Error("Could not fetch this video for import.");
       await uploadKeepoutVideoStream(connection, upload, response.body, (bytes) => {

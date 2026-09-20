@@ -81,7 +81,7 @@ export async function streamCanvasVideoInIsolated(
     throw new Error("The Canvas tab changed. Reopen the import panel and try again.");
   }
   const response = await fetch(target.href, {
-    credentials: "include", cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(60_000),
+    credentials: "include", cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(30 * 60_000),
   });
   if (!response.ok || !response.body) throw new Error("Canvas could not provide this video. Check your access and retry.");
   const type = (response.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
@@ -125,6 +125,7 @@ export async function streamCanvasVideoInIsolated(
     if (filled) await submit(carry.subarray(0, filled));
     return { bytes: total };
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
