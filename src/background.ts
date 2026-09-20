@@ -1,5 +1,5 @@
 import { ulid } from "./lib/ulid";
-import { startMediaDownload } from "./lib/media-download";
+import { MEDIA_DOWNLOAD_HOST, startMediaDownload } from "./lib/media-download";
 import {
   saveKeepoutCapture,
   saveKeepoutPageCapture,
@@ -1012,7 +1012,7 @@ async function importCanvasVideo(
     const connection = await getKeepoutConnection();
     if (!connection.token) throw new Error("Connect Keepout in the extension's Settings first. Its token lasts for this browser session.");
     if (video.kind === "vimeo") {
-      const native = await chrome.runtime.sendNativeMessage(HOST_NAME, {
+      const native = await chrome.runtime.sendNativeMessage(MEDIA_DOWNLOAD_HOST, {
         mode: "keepout-video", url: video.url, referer: pending.capture.sourceUrl,
         videoTitle: video.title, captureID, id: video.id, connection,
       });

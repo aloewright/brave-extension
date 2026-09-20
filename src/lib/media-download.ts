@@ -1,4 +1,7 @@
 export type MediaDownloadMode = 'video' | 'audio';
+/** Dedicated native host for media files; it deliberately does not share the
+ * general sidebar host's broader terminal/MCP surface. */
+export const MEDIA_DOWNLOAD_HOST = 'com.aidev.media_download';
 const activeDownloads = new Map<string, Promise<{ ok: boolean; filename?: string; error?: string }>>();
 
 export function mediaDownloadUrl(pageUrl: string, sourceUrl?: string): string {
@@ -19,7 +22,7 @@ export function startMediaDownload(mode: MediaDownloadMode, pageUrl: string, sou
   if (existing) return existing;
   if (activeDownloads.size >= 3) throw new Error('Three downloads are running. Wait for one to finish.');
   const job = new Promise<{ ok: boolean; filename?: string; error?: string }>((resolve) => {
-    const port = chrome.runtime.connectNative('com.aidev.media_download');
+    const port = chrome.runtime.connectNative(MEDIA_DOWNLOAD_HOST);
     port.onMessage.addListener(message => { resolve(message); port.disconnect(); });
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError;
