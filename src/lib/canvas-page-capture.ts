@@ -158,15 +158,17 @@ export function extractCanvasPage(): CanvasPageExtraction {
       ...(fileID ? { canvasFileId: fileID } : {}),
     });
   };
-  const persistedMediaURL = (raw: string): string | null => {
+  const persistedMediaURL = (raw: string, isVideo = false): string | null => {
     const safe = safeURL(raw);
     if (!safe) return null;
     const url = new URL(safe);
-    // Canvas file queries and Vimeo's `h` can be temporary capabilities. Keep
-    // those out of the persisted page; other embeds retain their established
-    // query semantics and remain ordinary Markdown links.
-    if (canvasFileIDFromURL(raw)
-      || (url.protocol === "https:" && url.hostname === "player.vimeo.com" && /^\/video\/[1-9]\d*\/?$/.test(url.pathname))) {
+    // Query-bearing direct video links may be signed capabilities. Persist
+    // the source page instead, so the link stays usable after they expire.
+    // Canvas's own file routes remain reachable through its signed-in UI.
+    if (isVideo && !canvasFileIDFromURL(raw) && (url.search || url.hash)) {
+      return pageURL.origin + pageURL.pathname;
+    }
+    if (isVideo || canvasFileIDFromURL(raw)) {
       url.search = "";
       url.hash = "";
     }
@@ -225,7 +227,13 @@ export function extractCanvasPage(): CanvasPageExtraction {
       const text = children(node, depth).trim();
       // An image remains a standalone attachment, not an image nested in a link.
       if (node.querySelector("img")) return text;
-      const url = safeURL(node.getAttribute("href") || "");
+      const raw = node.getAttribute("href") || "";
+      const safe = safeURL(raw);
+      const isVideo = Boolean(safe && (hasVideoMIME(node)
+        || mediaExtensions.test(new URL(safe).pathname)
+        || (canvasFileIDFromURL(raw) && mediaExtensions.test((node.getAttribute("download") || node.textContent || node.title).trim()))));
+      addVideo(raw, node.textContent || node.title || "", isVideo);
+      const url = isVideo ? persistedMediaURL(raw, true) : safe;
       return url && text ? `[${text}](${markdownURL(url)})` : text;
     }
     if (tag === "video") {
@@ -249,7 +257,9 @@ export function extractCanvasPage(): CanvasPageExtraction {
       addVideo(raw, frame.title || "", isVimeo);
     }
     if (tag === "iframe" || tag === "video" || tag === "audio") {
-      const url = persistedMediaURL(node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "");
+      const raw = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
+      const isVideo = tag === "video" || videos.some((video) => video.kind === "vimeo" && video.url.split('?')[0] === safeURL(raw)?.split('?')[0]);
+      const url = persistedMediaURL(raw, isVideo);
       return url ? `\n\n[${literal(node.title || "Embedded media — open in Canvas")}](${markdownURL(url)})\n\n` : "";
     }
     if (tag === "table") {
@@ -265,18 +275,6 @@ export function extractCanvasPage(): CanvasPageExtraction {
     if (["p", "div", "section", "article", "figure", "figcaption"].includes(tag)) return `\n\n${text.trim()}\n\n`;
     return text;
   };
-  // Canvas file-download anchors are often separate from the player. Scan
-  // after rendering so the Markdown output stays exactly as it was before
-  // video inventory support.
-  for (const anchor of content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
-    const raw = anchor.getAttribute("href");
-    const url = safeURL(raw || "");
-    if (!url) continue;
-    const parsed = new URL(url);
-    const fileID = canvasFileIDFromURL(raw);
-    const eligible = Boolean(fileID) && (anchor.hasAttribute("download") || hasVideoMIME(anchor) || mediaExtensions.test(parsed.pathname));
-    addVideo(raw, anchor.textContent || anchor.title || "", eligible);
-  }
   const markdown = children(content).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!markdown) throw new Error("This Canvas page is empty or has not finished loading.");
   if (new TextEncoder().encode(markdown).length > 256 * 1024) throw new Error("This Canvas page is too large to import (256 KB text limit).");

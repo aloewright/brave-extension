@@ -65,7 +65,7 @@ root.innerHTML = `
     <p class="image-count" hidden></p>
     <section class="videos" hidden>
       <h2>Videos</h2>
-      <p>Downloads folder · outside the encrypted vault · started downloads continue after you close this panel</p>
+      <p>Downloads folder · outside the encrypted vault · browser download history may keep the video URL. Started downloads continue after you close this panel.</p>
       <ul></ul>
     </section>
     <form>

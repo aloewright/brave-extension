@@ -168,14 +168,28 @@ describe("Canvas page capture", () => {
 
     const result = extractCanvasPage();
 
-    expect(result.markdown).toContain("[Guest lecture](https://player.vimeo.com/video/12345)");
+    expect(result.markdown).toContain(`[Guest lecture](${source})`);
     expect(result.videos.map(({ id: _id, ...video }) => video)).toEqual([
       { title: "Week one lecture", url: "https://school.example/courses/42/files/9/download", kind: "canvas-file", canvasFileId: "9" },
-      { title: "Guest lecture", url: "https://player.vimeo.com/video/12345?h=unlisted-token", kind: "vimeo" },
       { title: "Download recap", url: "https://school.example/courses/42/files/10/download", kind: "canvas-file", canvasFileId: "10" },
+      { title: "Guest lecture", url: "https://player.vimeo.com/video/12345?h=unlisted-token", kind: "vimeo" },
     ]);
     expect(result.markdown).not.toContain("access_token=never-save");
     expect(result.videos.every((video) => /^[0-9a-f-]{36}$/i.test(video.id))).toBe(true);
+  });
+
+  it("keeps signed video URLs out of the saved Markdown and ignores non-video file downloads", () => {
+    content(`<video src="https://cdn.example/lecture.mp4?signature=private" title="Lecture"></video>
+      <a href="/courses/42/files/10/download?verifier=private">Recap.mp4</a>
+      <a download href="/courses/42/files/11/download">Worksheet.pdf</a>
+      <a href="https://cdn.example/extra.webm?signature=private">Extra</a>`);
+    const result = extractCanvasPage();
+    expect(result.videos).toHaveLength(3);
+    expect(result.markdown).not.toContain("signature=");
+    expect(result.markdown).not.toContain("verifier=");
+    expect(result.markdown).toContain(`[Lecture](${source})`);
+    expect(result.markdown).toContain("[Recap.mp4](https://school.example/courses/42/files/10/download)");
+    expect(result.videos[0].url).toContain("signature=private");
   });
 
   it("deduplicates supported videos, caps the inventory, and ignores tracking media or arbitrary frames", () => {

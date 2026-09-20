@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(new URL("../src/capture.ts", import.meta.url), "utf8");
+const source = readFileSync("src/capture.ts", "utf8");
 
 describe("Canvas video download panel", () => {
   it("keeps video URLs out of the panel contract and sends only the selected IDs", () => {
