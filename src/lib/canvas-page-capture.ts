@@ -22,6 +22,17 @@ export type CanvasPageExtraction = {
   images: { id: string; title: string; url: string }[];
 };
 
+type CanvasImage = { mimeType: string; dataBase64: string; byteCount: number };
+type CanvasImageFailure =
+  | { kind: "address" }
+  | { kind: "timeout" }
+  | { kind: "network" }
+  | { kind: "http"; status: number }
+  | { kind: "mime"; category: "html" | "svg" | "avif" | "bmp" | "tiff" | "binary" | "image" | "other" }
+  | { kind: "limit" }
+  | { kind: "body" };
+type CanvasImageAttempt = { ok: true; image: CanvasImage } | { ok: false; failure: CanvasImageFailure };
+
 /** Self-contained because executeScript serializes this function into an isolated world. */
 export function extractCanvasPage(): CanvasPageExtraction {
   const pageURL = new URL(location.href);
@@ -132,27 +143,46 @@ const mimeExtensions: Record<string, string> = {
   "image/heic": "heic", "image/heif": "heif",
 };
 
-/** Also serialized into the Canvas tab so Brave cookie blocking does not break same-origin images. */
-export async function readCanvasImage(url: string, sourceUrl: string): Promise<{ mimeType: string; dataBase64: string; byteCount: number }> {
+/**
+ * Also serialized into the Canvas tab so Brave cookie blocking does not break
+ * same-origin images. It returns a data-only failure so executeScript never
+ * needs to serialize a browser exception (which can discard useful context).
+ */
+export async function readCanvasImageAttempt(url: string, sourceUrl: string): Promise<CanvasImageAttempt> {
   const IMAGE_LIMIT = 4 * 1024 * 1024;
   const allowed = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"];
-  const target = new URL(url);
-  const source = new URL(sourceUrl);
+  let target: URL;
+  let source: URL;
+  try {
+    target = new URL(url);
+    source = new URL(sourceUrl);
+  } catch { return { ok: false, failure: { kind: "address" } }; }
   const embedded = target.protocol === "data:";
   if ((!embedded && !["https:", "http:"].includes(target.protocol)) || target.username || target.password
-    || (source.protocol === "https:" && target.protocol === "http:")) throw new Error("An image address is not safe to import.");
-  if (embedded && url.length > Math.ceil(IMAGE_LIMIT * 4 / 3) + 128) throw new Error("An image is larger than the 4 MB import limit.");
-  const response = await fetch(url, {
-    // Session cookies are only needed for the user's Canvas origin. Never copy them or use an API token.
-    credentials: target.origin === source.origin ? "include" : "omit",
-    cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000),
-    referrerPolicy: "no-referrer",
-  });
+    || (source.protocol === "https:" && target.protocol === "http:")) return { ok: false, failure: { kind: "address" } };
+  if (embedded && url.length > Math.ceil(IMAGE_LIMIT * 4 / 3) + 128) return { ok: false, failure: { kind: "limit" } };
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      // Session cookies are only needed for the user's Canvas origin. Never copy them or use an API token.
+      credentials: target.origin === source.origin ? "include" : "omit",
+      cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000),
+      referrerPolicy: "no-referrer",
+    });
+  } catch (error) {
+    return { ok: false, failure: { kind: error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "network" } };
+  }
   const mimeType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-  if (!response.ok || !allowed.includes(mimeType)) throw new Error("An image could not be read. Make sure its Canvas page is signed in and the image is visible.");
+  if (!response.ok) return { ok: false, failure: { kind: "http", status: response.status } };
+  if (!allowed.includes(mimeType)) {
+    // Classify only known types; never echo an arbitrary server header.
+    const knownTypes = { "text/html": "html", "image/svg+xml": "svg", "image/avif": "avif", "image/bmp": "bmp", "image/tiff": "tiff", "application/octet-stream": "binary" } as const;
+    const category = knownTypes[mimeType as keyof typeof knownTypes] ?? (mimeType.startsWith("image/") ? "image" : "other");
+    return { ok: false, failure: { kind: "mime", category } };
+  }
   const advertised = Number(response.headers.get("content-length") || 0);
-  if (advertised > IMAGE_LIMIT) throw new Error("An image is larger than the 4 MB import limit.");
-  if (!response.body) throw new Error("An image returned no data.");
+  if (advertised > IMAGE_LIMIT) return { ok: false, failure: { kind: "limit" } };
+  if (!response.body) return { ok: false, failure: { kind: "body" } };
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -161,20 +191,47 @@ export async function readCanvasImage(url: string, sourceUrl: string): Promise<{
       const next = await reader.read();
       if (next.done) break;
       length += next.value.length;
-      if (length > IMAGE_LIMIT) throw new Error("An image is larger than the 4 MB import limit.");
+      if (length > IMAGE_LIMIT) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, failure: { kind: "limit" } };
+      }
       chunks.push(next.value);
     }
   } catch (error) {
     await reader.cancel().catch(() => {});
-    throw error;
+    return { ok: false, failure: { kind: error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "network" } };
   } finally { reader.releaseLock(); }
-  if (!length) throw new Error("An image returned no data.");
+  if (!length) return { ok: false, failure: { kind: "body" } };
   const data = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.length; }
   let binary = "";
   for (let offset = 0; offset < data.length; offset += 8192) binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
-  return { mimeType, dataBase64: btoa(binary), byteCount: data.length };
+  return { ok: true, image: { mimeType, dataBase64: btoa(binary), byteCount: data.length } };
+}
+
+function describeCanvasImageFailure(failure: CanvasImageFailure): string {
+  switch (failure.kind) {
+    case "address": return "image address was not safe to import";
+    case "timeout": return "request timed out";
+    case "network": return "network request failed";
+    case "http": return `HTTP ${failure.status}`;
+    case "mime": {
+      const types = { html: "text/html", svg: "image/svg+xml", avif: "image/avif", bmp: "image/bmp", tiff: "image/tiff", binary: "application/octet-stream" };
+      if (failure.category === "image") return "received an unsupported image type";
+      if (failure.category === "other") return "received a non-image response";
+      return `received ${failure.category === "html" || failure.category === "binary" ? "" : "unsupported "}${types[failure.category]}`;
+    }
+    case "limit": return "image exceeds the 4 MB import limit";
+    case "body": return "image returned no data";
+  }
+}
+
+/** Compatibility helper for callers and unit tests that need a throwing API. */
+export async function readCanvasImage(url: string, sourceUrl: string): Promise<CanvasImage> {
+  const result = await readCanvasImageAttempt(url, sourceUrl);
+  if (result.ok === false) throw new Error(describeCanvasImageFailure(result.failure));
+  return result.image;
 }
 
 export async function captureCanvasPageFromTab(tabId: number): Promise<CanvasPageCaptureDraft> {
@@ -185,17 +242,28 @@ export async function captureCanvasPageFromTab(tabId: number): Promise<CanvasPag
   let total = 0;
   for (const image of extracted.images) {
     try {
-      let loaded: Awaited<ReturnType<typeof readCanvasImage>> | undefined;
+      let loaded: CanvasImage | undefined;
+      let tabFailure: CanvasImageFailure | undefined;
       if (new URL(image.url).origin === new URL(extracted.sourceUrl).origin) {
         // Same-origin fetch stays in the authenticated tab. The page's JS cannot see its isolated-world result.
         try {
           const [imageResult] = await chrome.scripting.executeScript({
-            target: { tabId }, world: "ISOLATED", func: readCanvasImage, args: [image.url, extracted.sourceUrl],
+            target: { tabId }, world: "ISOLATED", func: readCanvasImageAttempt, args: [image.url, extracted.sourceUrl],
           });
-          loaded = imageResult?.result;
-        } catch { /* A CDN redirect may require the extension's existing host permissions instead. */ }
+          const attempt = imageResult?.result as CanvasImageAttempt | undefined;
+          if (attempt?.ok === true) loaded = attempt.image;
+          else tabFailure = attempt?.ok === false ? attempt.failure : { kind: "network" };
+        } catch { tabFailure = { kind: "network" }; /* A CDN redirect may require the extension's existing host permissions instead. */ }
       }
-      loaded ??= await readCanvasImage(image.url, extracted.sourceUrl);
+      const workerAttempt = loaded ? undefined : await readCanvasImageAttempt(image.url, extracted.sourceUrl);
+      if (!loaded && workerAttempt?.ok) loaded = workerAttempt.image;
+      if (!loaded) {
+        const details = [
+          ...(tabFailure ? [`Tab attempt: ${describeCanvasImageFailure(tabFailure)}.`] : []),
+          ...(workerAttempt?.ok === false ? [`Extension attempt: ${describeCanvasImageFailure(workerAttempt.failure)}.`] : []),
+        ];
+        throw new Error(details.join(" ") || "Image retrieval failed.");
+      }
       const { mimeType, dataBase64, byteCount } = loaded;
       total += byteCount;
       if (total > TOTAL_LIMIT) throw new Error("This page has more than 8 MB of images.");
