@@ -4,6 +4,9 @@ import { join } from "node:path"
 
 const TOKEN = "e2e-keepout-session-token"
 const SELECTED_TEXT = "A selected passage saved only to Keepout."
+const CANVAS_TEXT = "Canvas body text that must stay inside the extension confirmation frame."
+const CANVAS_MARKDOWN_TEXT = CANVAS_TEXT.replace(/\./g, "\\.")
+const TWO_BY_TWO_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIHWP4z8DwH4QZYAwjAwA2AgH/1fsA0QAAAABJRU5ErkJggg=="
 
 type CaptureRequest = {
   authorization?: string
@@ -18,6 +21,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 
 async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) {
   const captures: CaptureRequest[] = []
+  const pageCaptures: CaptureRequest[] = []
   let statusRequests = 0
   let firstCapture = true
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -27,6 +31,21 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
       response.end(`<!doctype html><title>Keepout capture sample</title><main><p id="selected">${SELECTED_TEXT}</p></main>`)
       return
     }
+    if (url.pathname === "/courses/42/pages/lesson") {
+      response.setHeader("set-cookie", "canvas_session=authenticated; Path=/; SameSite=Lax")
+      response.setHeader("content-type", "text/html; charset=utf-8")
+      response.end(`<!doctype html><title>Canvas lesson</title><main id="wiki_page_show"><h1 class="page-title">Week one lesson</h1><div class="show-content user_content"><h2>Week one</h2><p>${CANVAS_TEXT}</p><ul><li>First task</li><li>Second task</li></ul><img alt="Lesson diagram" src="/canvas-image"></div></main>`)
+      return
+    }
+    if (url.pathname === "/canvas-image") {
+      if (!request.headers.cookie?.includes("canvas_session=authenticated")) {
+        response.writeHead(403).end()
+        return
+      }
+      response.setHeader("content-type", "image/png")
+      response.end(Buffer.from(TWO_BY_TWO_PNG, "base64"))
+      return
+    }
     if (url.pathname === "/v1/captures/status" && request.method === "GET") {
       statusRequests += 1
       if (request.headers.authorization !== `Bearer ${TOKEN}`) {
@@ -34,7 +53,17 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
         return
       }
       response.setHeader("content-type", "application/json")
-      response.end(JSON.stringify({ version: 1, available: true }))
+      response.end(JSON.stringify({ version: 1, pageCaptureVersion: 1, available: true }))
+      return
+    }
+    if (url.pathname === "/v1/page-captures" && request.method === "POST") {
+      const body = await readJson(request)
+      pageCaptures.push({ authorization: request.headers.authorization, body })
+      response.writeHead(201, { "content-type": "application/json" })
+      response.end(JSON.stringify({
+        id: (body as { id?: string }).id,
+        createdAt: "2026-09-19T00:00:00.000Z",
+      }))
       return
     }
     if (url.pathname === "/v1/captures" && request.method === "POST") {
@@ -61,6 +90,7 @@ async function startKeepoutServer(options: { lockFirstCapture?: boolean } = {}) 
   return {
     port: address.port,
     captures,
+    pageCaptures,
     get statusRequests() {
       return statusRequests
     },
@@ -153,6 +183,45 @@ async function openCapturePanel(
   await expect(dialog).toBeVisible()
   await expect(dialog.locator("blockquote")).toHaveText(SELECTED_TEXT)
   return dialog
+}
+
+async function openCanvasCapturePanel(
+  settingsPage: import("@playwright/test").Page,
+  canvasPage: import("@playwright/test").Page,
+) {
+  const tabId = await settingsPage.evaluate(async (url) => {
+    const tabs = await chrome.tabs.query({})
+    const tab = tabs.find((candidate) => candidate.url === url)
+    if (typeof tab?.id !== "number") throw new Error("Could not find the Canvas page tab")
+    return tab.id
+  }, canvasPage.url())
+  await settingsPage.evaluate((selectedTabId) => new Promise<void>((resolve, reject) => {
+    chrome.runtime.sendMessage({ type: "keepout/open-canvas-page", tabId: selectedTabId }, (response) => {
+      const error = chrome.runtime.lastError
+      if (error) reject(new Error(error.message))
+      else {
+        const reply = response as { ok?: boolean; error?: string } | undefined
+        if (!reply?.ok) reject(new Error(reply?.error || "Canvas panel did not open"))
+        else resolve()
+      }
+    })
+  }), tabId)
+  const frame = canvasPage.locator("#keepout-capture-root > iframe#keepout-capture-frame")
+  await expect(frame).toHaveAttribute("src", /^chrome-extension:\/\//)
+  const hostView = await canvasPage.evaluate(() => {
+    let frameText = ""
+    try {
+      frameText = document.querySelector<HTMLIFrameElement>("#keepout-capture-frame")?.contentDocument?.body?.textContent ?? ""
+    } catch {
+      // Expected: hostile Canvas content cannot read the extension frame.
+    }
+    return { hostText: document.querySelector("#keepout-capture-root")?.textContent ?? "", frameText }
+  })
+  expect(hostView.hostText).not.toContain(CANVAS_TEXT)
+  expect(hostView.frameText).toBe("")
+  return canvasPage
+    .frameLocator("#keepout-capture-root > iframe#keepout-capture-frame")
+    .getByRole("dialog", { name: "Save to Keepout" })
 }
 
 test("Keepout settings stay session-local and save the rendered selected-text capture", async ({
@@ -253,6 +322,45 @@ test("a locked Keepout leaves the panel inputs intact and retries the same captu
     expect(first.id).toMatch(/^[0-9a-f-]{36}$/i)
     expect(retried.id).toBe(first.id)
     await expect(dialog.getByRole("status")).toHaveText(/Saved to Keepout/i)
+  } finally {
+    await keepout.close()
+  }
+})
+
+test("imports a rendered Canvas page and its authenticated raster image only after extension-origin confirmation", async ({
+  context,
+  openSidepanel,
+}) => {
+  const keepout = await startKeepoutServer()
+  try {
+    const settingsPage = await openSidepanel()
+    await configureKeepout(settingsPage, keepout.port)
+    const canvasPage = await context.newPage()
+    await canvasPage.goto(`http://127.0.0.1:${keepout.port}/courses/42/pages/lesson`)
+    const dialog = await openCanvasCapturePanel(settingsPage, canvasPage)
+
+    await expect(dialog.getByRole("heading", { name: "Save Canvas page to Keepout" })).toBeVisible()
+    await expect(dialog.locator("pre")).toContainText(CANVAS_MARKDOWN_TEXT)
+    await expect(dialog.getByText("1 image will be imported with this page.")).toBeVisible()
+    await dialog.getByLabel("Note title").fill("Canvas import title")
+    await dialog.getByLabel("Margin note").fill("Review this lesson")
+    await dialog.getByRole("button", { name: "Save to Keepout", exact: true }).click()
+
+    await expect.poll(() => keepout.pageCaptures).toHaveLength(1)
+    const submitted = keepout.pageCaptures[0]
+    expect(submitted.authorization).toBe(`Bearer ${TOKEN}`)
+    expect(submitted.body).toMatchObject({
+      version: 1,
+      title: "Canvas import title",
+      sourceUrl: `http://127.0.0.1:${keepout.port}/courses/42/pages/lesson`,
+      marginNote: "Review this lesson",
+      markdown: expect.stringContaining(CANVAS_MARKDOWN_TEXT),
+    })
+    const body = submitted.body as { images?: Array<{ mimeType?: string; dataBase64?: string }>; markdown?: string }
+    expect(body.images).toHaveLength(1)
+    expect(body.images?.[0]).toMatchObject({ mimeType: "image/png", dataBase64: TWO_BY_TWO_PNG })
+    expect(body.markdown).toContain("keepout-capture-image://")
+    await expect(dialog.getByRole("status")).toHaveText(/Saved to Keepout · Canvas page/i)
   } finally {
     await keepout.close()
   }

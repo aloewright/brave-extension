@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   getKeepoutConnection,
   saveKeepoutCapture,
+  saveKeepoutPageCapture,
   saveKeepoutConnection,
   testKeepoutConnection,
   validateKeepoutCapture,
+  validateKeepoutPageCapture,
 } from "../src/lib/keepout-client"
 
 const PORT_KEY = "keepout.connection.port"
@@ -17,6 +19,20 @@ const capture = {
   sourceUrl: "https://example.test/article",
   selection: "Selected text",
   marginNote: "A margin note",
+}
+const pageCapture = {
+  version: 1 as const,
+  id: "550e8400-e29b-41d4-a716-446655440001",
+  title: "Canvas lesson",
+  sourceUrl: "https://canvas.example.test/courses/12/pages/week-one",
+  markdown: "# Week one\n\n![Diagram](keepout-capture-image://550e8400-e29b-41d4-a716-446655440002)",
+  images: [{
+    id: "550e8400-e29b-41d4-a716-446655440002",
+    title: "Diagram",
+    mimeType: "image/png",
+    dataBase64: "aW1hZ2U=",
+  }],
+  marginNote: "Review before class",
 }
 
 type Store = Record<string, unknown>
@@ -104,6 +120,21 @@ describe("keepout-client", () => {
     expect(clean).not.toHaveProperty("injectedByPage")
   })
 
+  it("validates Canvas page payloads, strips unknown fields, and retains every image", () => {
+    const clean = validateKeepoutPageCapture({ ...pageCapture, injectedByPage: "never send this" })
+    expect(clean).toEqual(pageCapture)
+    expect(clean).not.toHaveProperty("injectedByPage")
+  })
+
+  it.each([
+    [{ ...pageCapture, sourceUrl: "file:///private/canvas" }, "non-web URL"],
+    [{ ...pageCapture, markdown: " " }, "empty markdown"],
+    [{ ...pageCapture, images: [{ ...pageCapture.images[0], dataBase64: "not base64!" }] }, "bad image bytes"],
+    [{ ...pageCapture, images: [{ ...pageCapture.images[0], mimeType: "text/html" }] }, "non-image MIME type"],
+  ])("rejects invalid Canvas page %s before any network request", (invalid) => {
+    expect(() => validateKeepoutPageCapture(invalid)).toThrow()
+  })
+
   it.each([401, 423, 404, 500])("never reports success for HTTP %i", async (status) => {
     await connect()
     vi.stubGlobal("fetch", vi.fn(async () => new Response("failure", { status })))
@@ -136,5 +167,23 @@ describe("keepout-client", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(receipt), { status: 201 })))
 
     await expect(saveKeepoutCapture(capture)).resolves.toEqual(receipt)
+  })
+
+  it("posts a validated Canvas page only to the dedicated loopback endpoint", async () => {
+    await connect(9345)
+    const receipt = { id: pageCapture.id, createdAt: "2026-09-19T00:00:00.000Z" }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(receipt), { status: 201 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(saveKeepoutPageCapture(pageCapture)).resolves.toEqual(receipt)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9345/v1/page-captures",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "omit",
+        headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }),
+      }),
+    )
   })
 })
