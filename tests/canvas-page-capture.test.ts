@@ -1,9 +1,12 @@
-// @vitest-environment-options {"happyDOM":{"url":"https://school.example/courses/42/pages/lesson-one","settings":{"disableIframePageLoading":true}}}
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 import { extractCanvasPage, readCanvasImage, captureCanvasPageFromTab } from "../src/lib/canvas-page-capture";
 
 const source = "https://school.example/courses/42/pages/lesson-one";
 beforeEach(() => {
+  const testWindow = window as unknown as HappyWindow;
+  testWindow.happyDOM.settings.disableIframePageLoading = true;
+  testWindow.happyDOM.setURL(source);
   vi.stubGlobal("location", new URL(`${source}?module_item_id=123&access_token=never-save#part`));
   document.body.innerHTML = `<nav>Do not import course navigation</nav><main id="wiki_page_show"><h1 class="page-title">Lesson one</h1><div class="show-content user_content"></div></main>`;
 });
