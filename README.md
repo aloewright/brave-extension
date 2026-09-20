@@ -10,6 +10,14 @@ In Keepout, enable **Local API**, leave its exposure set to **this Mac / loopbac
 
 This replaces the retired Joplin clipper and Joplin AI tools. Existing Joplin notes and previously stored clip history are not deleted or migrated. Older Keepout builds without `/v1/captures` must be updated first.
 
+### Canvas course pages
+
+Open a page in Canvas (the learning platform), then right-click **Save Canvas page to Keepout…**. Review its title/text and image count, add an optional margin note, and save. The note appears in Keepout's **Canvas Pages** folder with Markdown text, inline encrypted image attachments, and a source link. The confirmation panel is extension-origin, not part of Canvas's page DOM.
+
+This uses the Canvas session already open in the browser; no Canvas API key or AI provider is involved. Same-origin images are read in the signed-in tab. Image bytes go only to Keepout's authenticated loopback API, never a cloud conversion service. Update Keepout to a build advertising `pageCaptureVersion: 1` at `/v1/captures/status`; the Local API must be enabled for **This Mac only** and the vault unlocked.
+
+Limits: one rendered page, 256 KB of Markdown, 32 raster images, 4 MB per image and 8 MB total. PNG, JPEG, GIF, WebP, HEIC and HEIF are accepted; videos remain links and tables are flattened into readable rows. A missing, blocked, or unsupported image stops the import with an error instead of silently saving an incomplete page. Retry reuses the same capture ID and does not duplicate a successful save. Course-wide crawling, file downloads other than images, and interactive Canvas activities are not imported.
+
 [![Tests](https://github.com/aloewright/brave-extension/actions/workflows/test.yml/badge.svg)](https://github.com/aloewright/brave-extension/actions/workflows/test.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)

@@ -1,7 +1,15 @@
 import { ulid } from "./lib/ulid";
 import { startMediaDownload } from "./lib/media-download";
-import { saveKeepoutCapture, validateKeepoutCapture, type KeepoutCapture } from "./lib/keepout-client";
+import {
+  saveKeepoutCapture,
+  saveKeepoutPageCapture,
+  validateKeepoutCapture,
+  validateKeepoutPageCapture,
+  type KeepoutCapture,
+  type KeepoutPageCapture,
+} from "./lib/keepout-client";
 import { removeKeepoutCapturePanel, showKeepoutCapturePanel } from "./lib/keepout-capture-panel";
+import { captureCanvasPageFromTab, type CanvasPageCaptureDraft } from "./lib/canvas-page-capture";
 import { cropScreenshotDataUrl } from "./lib/screenshot";
 import { syncStoredHighlights } from "./background/highlight-sync";
 import { syncLink, changedLinks } from "./background/link-sync";
@@ -101,7 +109,7 @@ const KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS = 2 * 60_000;
 const MAX_PENDING_KEEPOUT_CAPTURES = 8;
 const pendingKeepoutCaptures = new Map<string, {
   tabId: number;
-  capture: KeepoutCapture;
+  capture: KeepoutCapture | KeepoutPageCapture;
   timeout: ReturnType<typeof setTimeout>;
 }>();
 const pendingTtsPlayback = new Map<
@@ -875,7 +883,7 @@ function getCaptureIDFromExtensionPage(sender: chrome.runtime.MessageSender, can
   }
 }
 
-function stageKeepoutCapture(tabId: number, capture: KeepoutCapture): void {
+function stageKeepoutCapture(tabId: number, capture: KeepoutCapture | KeepoutPageCapture): void {
   const previous = pendingKeepoutCaptures.get(capture.id);
   if (previous) clearTimeout(previous.timeout);
   while (pendingKeepoutCaptures.size >= MAX_PENDING_KEEPOUT_CAPTURES) {
@@ -885,6 +893,21 @@ function stageKeepoutCapture(tabId: number, capture: KeepoutCapture): void {
   }
   const timeout = setTimeout(() => pendingKeepoutCaptures.delete(capture.id), KEEPOUT_CAPTURE_DRAFT_TIMEOUT_MS);
   pendingKeepoutCaptures.set(capture.id, { tabId, capture, timeout });
+}
+
+function isStagedKeepoutCapture(
+  staged: KeepoutCapture | KeepoutPageCapture,
+  candidate: KeepoutCapture | KeepoutPageCapture,
+): boolean {
+  if (staged.id !== candidate.id || staged.version !== candidate.version ||
+      staged.sourceUrl !== candidate.sourceUrl) return false;
+  if ("selection" in staged && "selection" in candidate) {
+    return staged.selection === candidate.selection;
+  }
+  if ("markdown" in staged && "markdown" in candidate) {
+    return staged.markdown === candidate.markdown && JSON.stringify(staged.images) === JSON.stringify(candidate.images);
+  }
+  return false;
 }
 
 function discardKeepoutCapture(captureID: string): void {
@@ -905,29 +928,57 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
       sendResponse2({ ok: false, error: "This capture is no longer available." });
       return false;
     }
-    discardKeepoutCapture(captureID);
     sendResponse2({ ok: true, capture: pending.capture });
     return false;
   }
 
   if (m.type === "keepout/capture") {
-    if (!getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id) {
       sendResponse2({ ok: false, error: "Capture must be confirmed from the Keepout panel." });
       return false;
     }
     let capture: KeepoutCapture;
     try {
       capture = validateKeepoutCapture(message.capture);
-      if (capture.id !== getCaptureIDFromExtensionPage(_sender2, message.captureID)) {
-        throw new Error("Capture identifier does not match this panel.");
-      }
+      if (capture.id !== captureID || !isStagedKeepoutCapture(pending.capture, capture)) throw new Error("Capture no longer matches the staged draft.");
     } catch (err) {
       sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Invalid capture." });
       return false;
     }
     saveKeepoutCapture(capture)
-      .then((receipt) => sendResponse2({ ok: true, ...receipt }))
+      .then((receipt) => {
+        discardKeepoutCapture(captureID);
+        sendResponse2({ ok: true, ...receipt });
+      })
       .catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save to Keepout." }));
+    return true;
+  }
+
+  if (m.type === "keepout/page-capture") {
+    const captureID = getCaptureIDFromExtensionPage(_sender2, message.captureID);
+    const pending = captureID ? pendingKeepoutCaptures.get(captureID) : undefined;
+    if (!captureID || !pending || pending.tabId !== _sender2.tab?.id || !("markdown" in pending.capture)) {
+      sendResponse2({ ok: false, error: "Canvas pages must be confirmed from the Keepout panel." });
+      return false;
+    }
+    let capture: KeepoutPageCapture;
+    try {
+      capture = validateKeepoutPageCapture(message.capture);
+      if (capture.id !== captureID || !isStagedKeepoutCapture(pending.capture, capture)) {
+        throw new Error("Canvas page no longer matches the staged import.");
+      }
+    } catch (err) {
+      sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Invalid Canvas page." });
+      return false;
+    }
+    saveKeepoutPageCapture(capture)
+      .then((receipt) => {
+        discardKeepoutCapture(captureID);
+        sendResponse2({ ok: true, ...receipt });
+      })
+      .catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Could not save Canvas page to Keepout." }));
     return true;
   }
 
@@ -952,6 +1003,18 @@ chrome.runtime.onMessage.addListener((message, _sender2, sendResponse2) => {
       const opened = await openKeepoutCaptureFromTab(tab);
       sendResponse2({ ok: opened, ...(!opened ? { error: "Select some text on the web page first." } : {}) });
     })().catch(() => sendResponse2({ ok: false, error: "Cannot clip this page. Try a regular web page." }));
+    return true;
+  }
+
+  if (m.type === "keepout/open-canvas-page") {
+    // Canvas page content is privileged extension data until it is displayed
+    // inside the extension-origin confirmation frame.
+    if (_sender2.id !== chrome.runtime.id || !_sender2.url?.startsWith(chrome.runtime.getURL(""))) return false;
+    (async () => {
+      const tab = await chrome.tabs.get(message.tabId);
+      const opened = await openKeepoutCanvasPageCaptureFromTab(tab);
+      sendResponse2({ ok: opened, ...(!opened ? { error: "This tab has no importable Canvas page." } : {}) });
+    })().catch((err) => sendResponse2({ ok: false, error: err instanceof Error ? err.message : "Canvas page import failed." }));
     return true;
   }
 
@@ -2669,6 +2732,12 @@ chrome.runtime.onInstalled.addListener(async () => {
       documentUrlPatterns: ["http://*/*", "https://*/*"],
     });
     chrome.contextMenus.create({
+      id: "save-canvas-page",
+      title: "Save Canvas page to Keepout…",
+      contexts: ["page", "frame"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"],
+    });
+    chrome.contextMenus.create({
       id: SCREENSHOT_CONTEXT_MENU_ID,
       title: "Download screenshot",
       contexts: ["page"],
@@ -2724,6 +2793,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       await openKeepoutCaptureFromTab(tab, info.selectionText, info.frameUrl || info.pageUrl);
     } catch (err) {
       await showKeepoutCaptureError(tab.id);
+    }
+  }
+
+  if (info.menuItemId === "save-canvas-page") {
+    try {
+      await openKeepoutCanvasPageCaptureFromTab(tab);
+    } catch (err) {
+      await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
+      await chrome.action.setTitle({
+        tabId: tab.id,
+        title: err instanceof Error ? err.message : "Canvas page import failed. No page was saved.",
+      });
     }
   }
 
@@ -2964,6 +3045,26 @@ async function openKeepoutCaptureFromTab(tab: chrome.tabs.Tab, selectionText?: s
   try {
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id }, world: "ISOLATED", func: showKeepoutCapturePanel, args: [capture.id],
+    });
+    if (!result[0]?.result) discardKeepoutCapture(capture.id);
+  } catch (error) {
+    discardKeepoutCapture(capture.id);
+    throw error;
+  }
+  return true;
+}
+
+async function openKeepoutCanvasPageCaptureFromTab(tab: chrome.tabs.Tab): Promise<boolean> {
+  if (typeof tab.id !== "number") return false;
+  const draft: CanvasPageCaptureDraft = await captureCanvasPageFromTab(tab.id);
+  const capture = validateKeepoutPageCapture(draft);
+  stageKeepoutCapture(tab.id, capture);
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "ISOLATED",
+      func: showKeepoutCapturePanel,
+      args: [capture.id],
     });
     if (!result[0]?.result) discardKeepoutCapture(capture.id);
   } catch (error) {
