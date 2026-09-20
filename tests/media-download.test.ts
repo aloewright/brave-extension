@@ -1,10 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { shouldShowMediaDownloadButton } from '../src/lib/media-download-controls';
-import { mediaDownloadUrl } from '../src/lib/media-download';
+import { MEDIA_DOWNLOAD_HOST, mediaDownloadUrl, sendMediaHostMessage } from '../src/lib/media-download';
 import { DEFAULT_SETTINGS } from '../src/types';
 import { downloadArguments } from '../native-host/media-download.mjs';
 
 describe('one-click media downloads', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps a Vimeo import on the dedicated native Port until the helper replies', async () => {
+    let onMessage: ((message: { ok: boolean; complete?: boolean; id?: string }) => void) | undefined;
+    const disconnect = vi.fn();
+    const postMessage = vi.fn(() => onMessage?.({ ok: true, complete: true, id: 'video-id' }));
+    vi.stubGlobal('chrome', { runtime: {
+      connectNative: vi.fn(() => ({
+        onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; } },
+        onDisconnect: { addListener: vi.fn() }, postMessage, disconnect,
+      })),
+    } });
+
+    await expect(sendMediaHostMessage({ mode: 'keepout-video' })).resolves.toMatchObject({ ok: true, complete: true });
+    expect(chrome.runtime.connectNative).toHaveBeenCalledWith(MEDIA_DOWNLOAD_HOST);
+    expect(postMessage).toHaveBeenCalledWith({ mode: 'keepout-video' });
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
   it('uses the direct file when a player has one', () => {
     expect(mediaDownloadUrl('https://example.com/watch', '/movie.mp4')).toBe('https://example.com/movie.mp4');
   });

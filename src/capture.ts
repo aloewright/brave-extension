@@ -54,7 +54,7 @@ root.innerHTML = `
     blockquote,pre { margin:12px 0; padding:10px 12px; border-left:3px solid #888; max-height:120px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:light-dark(#eee,#303030); border-radius:4px; font:12px/1.45 ui-monospace,monospace; }
     label { display:block; font-size:12px; font-weight:600; margin-top:14px; }
     input,textarea { font:inherit; display:block; width:100%; padding:10px 12px; margin-top:6px; color:inherit; background:light-dark(#fff,#1b1b1b); border:1px solid light-dark(#bbb,#666); border-radius:9px; box-sizing:border-box; }
-    textarea { resize:vertical; min-height:88px; } button { font:inherit; padding:9px 13px; border:1px solid light-dark(#bbb,#666); border-radius:9px; cursor:pointer; background:transparent; color:inherit; } button[type=submit] { background:light-dark(#303030,#ededeb); color:light-dark(#fff,#222); border-color:transparent; } button:disabled { opacity:.5; cursor:wait; } :focus-visible { outline:2px solid light-dark(#333,#fff); outline-offset:3px; } footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; } output { display:block; font-size:13px; margin-top:12px; overflow-wrap:anywhere; } output.error { color:light-dark(#a12222,#ffb1b1); } a { color:inherit; display:block; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .videos { margin-top:14px; } .videos h2 { font-size:13px; margin:0; } .videos p { margin:2px 0 7px; } .videos ul { display:grid; gap:6px; padding:0; margin:0; list-style:none; } .videos li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; } .videos .video-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .videos output { grid-column:1 / -1; margin:0; }
+    textarea { resize:vertical; min-height:88px; } button { font:inherit; padding:9px 13px; border:1px solid light-dark(#bbb,#666); border-radius:9px; cursor:pointer; background:transparent; color:inherit; } button[type=submit],.video-import { background:light-dark(#303030,#ededeb); color:light-dark(#fff,#222); border-color:transparent; } button:disabled { opacity:.5; cursor:wait; } :focus-visible { outline:2px solid light-dark(#333,#fff); outline-offset:3px; } footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; } output { display:block; font-size:13px; margin-top:12px; overflow-wrap:anywhere; } output.error { color:light-dark(#a12222,#ffb1b1); } a { color:inherit; display:block; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .videos { margin-top:14px; } .videos h2 { font-size:13px; margin:0; } .videos p { margin:2px 0 7px; } .videos ul { display:grid; gap:6px; padding:0; margin:0; list-style:none; } .videos li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; } .videos .video-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .videos .video-actions { display:flex; gap:6px; } .videos output { grid-column:1 / -1; margin:0; }
   </style>
   <section role="dialog" aria-label="Save to Keepout">
     <h1></h1>
@@ -65,7 +65,7 @@ root.innerHTML = `
     <p class="image-count" hidden></p>
     <section class="videos" hidden>
       <h2>Videos</h2>
-      <p>Downloads folder · outside the encrypted vault · browser download history may keep the video URL. Started downloads continue after you close this panel.</p>
+      <p>Save in Keepout encrypts and embeds the video in this note. Downloads remain unencrypted in your Downloads folder, outside the vault; browser history may keep the video URL.</p>
       <ul></ul>
     </section>
     <form>
@@ -97,10 +97,25 @@ let saving = false;
 let saved = false;
 let submitted: Capture | undefined;
 const videoDownloadTimers = new Set<ReturnType<typeof setTimeout>>();
+const videoImportTimers = new Set<ReturnType<typeof setTimeout>>();
 
 function clearVideoDownloadTimers() {
   for (const timer of videoDownloadTimers) clearTimeout(timer);
   videoDownloadTimers.clear();
+}
+
+function clearVideoImportTimers() {
+  for (const timer of videoImportTimers) clearTimeout(timer);
+  videoImportTimers.clear();
+}
+
+function videoImportMessage(result: unknown): { text: string; error: boolean; state?: "saving" | "complete" } {
+  const response = result as { ok?: unknown; error?: unknown; state?: unknown; bytes?: unknown } | undefined;
+  if (!response?.ok) return { text: typeof response?.error === "string" && response.error ? response.error : "Could not save this video in Keepout.", error: true };
+  const bytes = typeof response.bytes === "number" && response.bytes >= 0 ? ` · ${response.bytes.toLocaleString()} bytes encrypted` : "";
+  if (response.state === "complete") return { text: `Saved in Keepout${bytes}`, error: false, state: "complete" };
+  if (response.state === "saving") return { text: `Saving encrypted video${bytes}`, error: false, state: "saving" };
+  return { text: "Could not confirm the encrypted video save.", error: true };
 }
 
 function renderVideos(capture: PageCapture) {
@@ -116,17 +131,86 @@ function renderVideos(capture: PageCapture) {
     const videoTitle = document.createElement("span");
     videoTitle.className = "video-title";
     videoTitle.textContent = video.title;
+    const actions = document.createElement("span");
+    actions.className = "video-actions";
+    const importButton = document.createElement("button");
+    importButton.type = "button";
+    importButton.className = "video-import";
+    importButton.textContent = "Save in Keepout";
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "Download video";
     const downloadStatus = document.createElement("output");
     downloadStatus.setAttribute("aria-live", "polite");
+    const importStatus = document.createElement("output");
+    importStatus.setAttribute("aria-live", "polite");
     const showDownloadError = (message: string) => {
       downloadStatus.className = "error";
       downloadStatus.textContent = message;
       button.disabled = false;
       button.textContent = "Retry download";
     };
+    const showImportError = (message: string) => {
+      importStatus.className = "error";
+      importStatus.textContent = message;
+      importButton.disabled = false;
+      importButton.textContent = "Retry encrypted save";
+    };
+    const pollImportCompletion = () => {
+      const timer = setTimeout(async () => {
+        videoImportTimers.delete(timer);
+        try {
+          const result = await chrome.runtime.sendMessage({
+            type: "keepout/video-import-status",
+            captureId: captureID,
+            videoId: video.id,
+          });
+          const message = videoImportMessage(result);
+          if (message.error) {
+            showImportError(message.text);
+          } else {
+            importStatus.className = "";
+            importStatus.textContent = message.text;
+            if (message.state === "saving") pollImportCompletion();
+            else importButton.textContent = "Saved in Keepout";
+          }
+        } catch (error) {
+          showImportError(error instanceof Error ? error.message : "Could not check the encrypted save.");
+        }
+      }, 1_500);
+      videoImportTimers.add(timer);
+    };
+    importButton.addEventListener("click", async () => {
+      if (!title.value.trim()) {
+        status.className = "error";
+        status.textContent = "Give this note a title before saving its video.";
+        title.focus({ preventScroll: true });
+        return;
+      }
+      importButton.disabled = true;
+      importButton.textContent = "Saving encrypted video…";
+      importStatus.className = "";
+      importStatus.textContent = "Saving page and encrypted video…";
+      try {
+        const result = await chrome.runtime.sendMessage({
+          type: "keepout/video-import",
+          captureId: captureID,
+          videoId: video.id,
+          title: title.value.trim(),
+          marginNote: margin.value,
+        });
+        const message = videoImportMessage(result);
+        if (message.error) {
+          showImportError(message.text);
+        } else {
+          importStatus.textContent = message.text;
+          if (message.state === "saving") pollImportCompletion();
+          else importButton.textContent = "Saved in Keepout";
+        }
+      } catch (error) {
+        showImportError(error instanceof Error ? error.message : "Could not save this video in Keepout.");
+      }
+    });
     const pollForCompletion = () => {
       const timer = setTimeout(async () => {
         videoDownloadTimers.delete(timer);
@@ -178,7 +262,8 @@ function renderVideos(capture: PageCapture) {
         showDownloadError(error instanceof Error ? error.message : "Could not start the download.");
       }
     });
-    item.append(videoTitle, button, downloadStatus);
+    actions.append(importButton, button);
+    item.append(videoTitle, actions, importStatus, downloadStatus);
     videoList.append(item);
   }
 }
@@ -193,11 +278,13 @@ function setControlsDisabled(disabled: boolean) {
 function close() {
   if (saving || !captureID) return;
   clearVideoDownloadTimers();
+  clearVideoImportTimers();
   void chrome.runtime.sendMessage({ type: "keepout/close", captureID });
 }
 
 cancel.addEventListener("click", close);
 window.addEventListener("unload", clearVideoDownloadTimers);
+window.addEventListener("unload", clearVideoImportTimers);
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     event.preventDefault();

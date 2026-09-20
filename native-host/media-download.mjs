@@ -1,7 +1,28 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
+import { accessSync, constants } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join, basename, isAbsolute } from 'node:path';
+
+/** Native messaging hosts do not inherit an interactive shell's PATH. Keep
+ * executable resolution shared by ordinary media downloads and encrypted
+ * video imports, rather than relying on `spawn('yt-dlp')`. */
+export function resolveYtDlpExecutable() {
+  const configured = process.env.YT_DLP_PATH;
+  const candidates = [
+    configured,
+    '/opt/homebrew/bin/yt-dlp',
+    '/usr/local/bin/yt-dlp',
+    join(homedir(), '.local', 'bin', 'yt-dlp'),
+  ].filter((value) => typeof value === 'string' && isAbsolute(value));
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch { /* Try the next known native-host location. */ }
+  }
+  throw new Error('Install yt-dlp and FFmpeg, then try again.');
+}
 
 export function downloadArguments(request, directory) {
   if (!['video', 'audio'].includes(request?.mode)) throw new Error('Choose video or audio.');
@@ -13,7 +34,7 @@ export function downloadArguments(request, directory) {
   if (request.referer !== undefined) {
     const value = new URL(request.referer);
     if (!['https:', 'http:'].includes(value.protocol) || value.username || value.password
-      || (url.protocol === 'https:' && value.protocol !== 'https:')) {
+      || (value.protocol === 'https:' && url.protocol !== 'https:')) {
       throw new Error('This video has an invalid referring page.');
     }
     // Vimeo's domain-restricted embeds need the Canvas origin, not the
@@ -35,7 +56,7 @@ export async function downloadMedia(request, directory = join(homedir(), 'Downlo
   const args = downloadArguments(request, directory);
   await mkdir(directory, { recursive: true });
   return new Promise((resolve, reject) => {
-    const child = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(resolveYtDlpExecutable(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('Download exceeded 30 minutes.')); }, 30 * 60 * 1000);

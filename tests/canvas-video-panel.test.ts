@@ -18,6 +18,20 @@ describe("Canvas video download panel", () => {
     expect(source).toContain('type: "keepout/video-status"');
     expect(source).toContain("}, 1_500);");
     expect(source).toContain("clearVideoDownloadTimers();");
-    expect(source).toContain("outside the encrypted vault");
+    expect(source).toContain("Downloads remain unencrypted");
+    expect(source).toContain("Save in Keepout encrypts and embeds the video in this note");
+  });
+
+  it("saves each selected video through the encrypted import protocol and polls its state", () => {
+    expect(source).toContain('type: "keepout/video-import"');
+    expect(source).toContain('type: "keepout/video-import-status"');
+    expect(source).toContain("captureId: captureID,");
+    expect(source).toContain("videoId: video.id,");
+    expect(source).toContain("title: title.value.trim(),");
+    expect(source).toContain("marginNote: margin.value,");
+    expect(source).toContain("Saving page and encrypted video…");
+    expect(source).toContain("Saved in Keepout");
+    expect(source).toContain("}, 1_500);");
+    expect(source).toContain("clearVideoImportTimers();");
   });
 });
