@@ -44,8 +44,8 @@ describe("Canvas page capture", () => {
   });
 
   it("never substitutes a different file ID supplied by page metadata", () => {
-    content(`<img src="/courses/42/files/9/preview" data-api-endpoint="/api/v1/files/999" data-api-returntype="File"><img src="https://cdn.example/image.png" data-api-endpoint="/api/v1/files/999" data-api-returntype="File">`);
-    expect(extractCanvasPage().images.map((image) => image.canvasFileId)).toEqual(["9", undefined]);
+    content(`<img src="/courses/42/files/9/preview" data-api-endpoint="/api/v1/files/999" data-api-returntype="File"><img src="https://cdn.example/image.png" data-api-endpoint="/api/v1/files/999" data-api-returntype="File"><img src="/diagram.png" data-src="/files/999/preview">`);
+    expect(extractCanvasPage().images.map((image) => image.canvasFileId)).toEqual(["9", undefined, undefined]);
   });
 
   it("resolves signed storage URLs inside the session without an API token", async () => {

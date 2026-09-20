@@ -63,7 +63,8 @@ export function extractCanvasPage(): CanvasPageExtraction {
     // currentSrc may already point at a CDN; use the original image source.
     // Do not trust data-api-endpoint alone: page metadata could name a different
     // user-readable file than the image the user actually chose to import.
-    const candidates = [img.getAttribute("src"), img.getAttribute("data-src"), img.currentSrc];
+    const originalSource = img.getAttribute("src");
+    const candidates = [originalSource, img.currentSrc, ...(!originalSource && !img.currentSrc ? [img.getAttribute("data-src")] : [])];
     for (const value of candidates) {
       if (!value) continue;
       try {
