@@ -15,7 +15,7 @@ mkdirSync(dir, { recursive: true });
 // Installed helpers must not depend on access to a protected Documents checkout.
 const helperDir = join(homedir(), 'Library/Application Support/Brave Dev Extension/Media Download');
 mkdirSync(helperDir, { recursive: true });
-for (const name of ['media-download-host.mjs', 'media-download.mjs']) {
+for (const name of ['media-download-host.mjs', 'media-download.mjs', 'keepout-video-import.mjs']) {
   copyFileSync(join(root, 'native-host', name), join(helperDir, name));
 }
 const wrapper = join(dir, 'media-download.sh');

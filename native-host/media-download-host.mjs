@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { downloadMedia } from './media-download.mjs';
-import { importKeepoutVideo } from './keepout-video-import.mjs';
+import { cleanupStaleKeepoutVideoDirectories, importKeepoutVideo } from './keepout-video-import.mjs';
+
+const temporaryVideoStorageReady = cleanupStaleKeepoutVideoDirectories().then(
+  () => true,
+  () => false,
+);
 
 function send(message) {
   const body = Buffer.from(JSON.stringify(message));
@@ -24,7 +29,12 @@ process.stdin.on('data', chunk => {
     try { request = JSON.parse(body.toString()); }
     catch { send({ ok: false, error: 'Invalid download request.' }); continue; }
     busy = true;
-    (request.mode === 'keepout-video' ? importKeepoutVideo(request) : downloadMedia(request)).then(
+    (request.mode === 'keepout-video'
+      ? temporaryVideoStorageReady.then((ready) => {
+        if (!ready) throw new Error('Could not prepare secure temporary video storage.');
+        return importKeepoutVideo(request);
+      })
+      : downloadMedia(request)).then(
       result => send({ ok: true, ...result }),
       error => send({ ok: false, error: error.message }),
     ).finally(() => { busy = false; });

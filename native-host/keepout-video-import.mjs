@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, open, rm } from 'node:fs/promises';
+import { mkdtemp, open, rm, realpath, lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, resolve, isAbsolute } from 'node:path';
+import { resolveYtDlpExecutable } from './media-download.mjs';
 
 const CHUNK_BYTES = 1_048_576;
 const MAX_BYTES = 4 * 1024 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TEMP_PREFIX = 'keepout-video-';
+const OWNER_FILE = '.keepout-video-owner.json';
+const STALE_AFTER_MS = 35 * 60_000;
 
 function safeURL(value, label) {
   let url; try { url = new URL(value); } catch { throw new Error(`Invalid ${label}.`); }
@@ -17,7 +21,7 @@ export function validateKeepoutVideoRequest(request) {
   if (request?.mode !== 'keepout-video') throw new Error('Invalid encrypted video request.');
   const url = safeURL(request.url, 'video address');
   const referer = safeURL(request.referer, 'referring page');
-  if (url.protocol === 'https:' && referer.protocol !== 'https:') throw new Error('Invalid referring page.');
+  if (referer.protocol === 'https:' && url.protocol !== 'https:') throw new Error('Invalid referring page.');
   if (!UUID.test(request.id || '') || !UUID.test(request.captureID || '')) throw new Error('Invalid Keepout video identifier.');
   const connection = request.connection;
   if (!connection || !Number.isInteger(connection.port) || connection.port < 1024 || connection.port > 65535 || typeof connection.token !== 'string' || !connection.token || /[\x00-\x20\x7f]/.test(connection.token)) throw new Error('Invalid Keepout connection.');
@@ -32,7 +36,70 @@ function api(connection, path, method, body, nonce) {
 async function responseJSON(response) { if (!response.ok) throw new Error(response.status === 423 ? 'Keepout is locked.' : 'Keepout rejected the video import.'); const value = await response.json(); if (!value || typeof value !== 'object') throw new Error('Invalid Keepout response.'); return value; }
 async function download(url, referer, directory) {
   const args = ['--ignore-config','--no-playlist','--no-overwrites','--no-progress','--no-cache-dir','--restrict-filenames','--socket-timeout','30','--referer',`${referer.origin}/`,'--paths',directory,'--output','video.%(ext)s','--print','after_move:filepath','--format','bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best','--merge-output-format','mp4','--',url.href];
-  return new Promise((resolve,reject) => { const child=spawn('yt-dlp',args,{stdio:['ignore','pipe','pipe']}); let out='',err=''; const timer=setTimeout(()=>{child.kill();reject(new Error('Video download exceeded 30 minutes.'));},30*60_000); child.stdout.on('data',d=>out=(out+d).slice(-4096)); child.stderr.on('data',d=>err=(err+d).slice(-4096)); child.on('error',()=>{clearTimeout(timer);reject(new Error('Install yt-dlp and FFmpeg, then retry.'));}); child.on('close',code=>{clearTimeout(timer); if(code) reject(new Error(scrub(err.split('\n').pop()))); else resolve(out.trim().split('\n').pop());}); });
+  return new Promise((resolve,reject) => { const child=spawn(resolveYtDlpExecutable(),args,{stdio:['ignore','pipe','pipe']}); let out='',err=''; const timer=setTimeout(()=>{child.kill();reject(new Error('Video download exceeded 30 minutes.'));},30*60_000); child.stdout.on('data',d=>out=(out+d).slice(-4096)); child.stderr.on('data',d=>err=(err+d).slice(-4096)); child.on('error',()=>{clearTimeout(timer);reject(new Error('Install yt-dlp and FFmpeg, then retry.'));}); child.on('close',code=>{clearTimeout(timer); if(code) reject(new Error(scrub(err.split('\n').pop()))); else resolve(out.trim().split('\n').pop());}); });
+}
+
+function isInside(parent, child) {
+  const path = relative(parent, child);
+  return path && !path.startsWith('..') && !isAbsolute(path);
+}
+
+/// Accept only the regular file yt-dlp printed after its move. This rejects
+/// a hostile stdout path, symlinks, and every path that escapes our 0700 root.
+export async function verifiedDownloadedFile(root, output) {
+  try {
+    if (typeof output !== 'string' || !isAbsolute(output)) throw new Error();
+    const rootReal = await realpath(root);
+    const printed = resolve(output);
+    const printedStat = await lstat(printed);
+    if (!printedStat.isFile() || printedStat.isSymbolicLink()) throw new Error();
+    const fileReal = await realpath(printed);
+    const realStat = await lstat(fileReal);
+    if (!realStat.isFile() || realStat.isSymbolicLink() || !isInside(rootReal, fileReal)) throw new Error();
+    return fileReal;
+  } catch {
+    throw new Error('Video downloader did not produce a safe file.');
+  }
+}
+
+function isLivePID(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** Removes only old, marker-owned Keepout plaintext directories. Active
+ * imports are protected by their live owner PID; unknown legacy directories
+ * are deliberately left alone rather than risking a concurrent import. */
+export async function cleanupStaleKeepoutVideoDirectories({ directory = tmpdir(), now = Date.now() } = {}) {
+  try {
+    const parent = await realpath(directory);
+    const entries = await readdir(parent, { withFileTypes: true });
+    const cutoff = now - STALE_AFTER_MS;
+    for (const entry of entries) {
+      if (!entry.name.startsWith(TEMP_PREFIX) || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const candidate = join(parent, entry.name);
+      let directory;
+      try {
+        directory = await realpath(candidate);
+        if (!isInside(parent, directory)) continue;
+        const marker = join(directory, OWNER_FILE);
+        const markerStat = await lstat(marker);
+        if (!markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.mtimeMs >= cutoff) continue;
+        const owner = JSON.parse(await readFile(marker, 'utf8'));
+        if (isLivePID(owner?.pid)) continue;
+        await rm(directory, { recursive: true, force: false, maxRetries: 1 });
+      } catch (error) {
+        // A second native helper may have removed the same already-stale
+        // directory between our lstat and rm. That is safe and not a setup
+        // failure for the active import.
+        if (error?.code === 'ENOENT') continue;
+        throw new Error('Could not prepare secure temporary video storage.');
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Could not prepare secure temporary video storage.') throw error;
+    throw new Error('Could not prepare secure temporary video storage.');
+  }
 }
 
 export function videoTypeFromPrefix(prefix) {
@@ -56,10 +123,11 @@ async function verifiedVideoType(file) {
 export async function importKeepoutVideo(request) {
   const input = validateKeepoutVideoRequest(request); let root; let upload;
   try {
-    root = await mkdtemp(join(tmpdir(), 'keepout-video-'), { encoding: 'utf8' });
+    await cleanupStaleKeepoutVideoDirectories();
+    root = await mkdtemp(join(tmpdir(), TEMP_PREFIX), { encoding: 'utf8' });
     await (await import('node:fs/promises')).chmod(root, 0o700);
-    const output = await download(input.url, input.referer, root); const file = String(output || '');
-    if (!output || !file.startsWith(root + '/')) throw new Error('Video downloader did not produce a safe file.');
+    await writeFile(join(root, OWNER_FILE), JSON.stringify({ pid: process.pid, createdAt: Date.now() }), { mode: 0o600 });
+    const output = await download(input.url, input.referer, root); const file = await verifiedDownloadedFile(root, output);
     const contentType = await verifiedVideoType(file);
     let started = await responseJSON(await api(input.connection, '/v1/page-videos','POST',{id:input.id,captureID:input.captureID,title:input.title,contentType}));
     if (started.id !== input.id || started.chunkBytes !== CHUNK_BYTES) throw new Error('Incompatible Keepout video session.');
